@@ -165,6 +165,14 @@
   <p style="margin-top:0.5rem">FastAPI backend running on host:8000. EXIF extraction and face recognition fully tested end-to-end.</p>
 </div>
 
+<div class="card success" style="margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:0.75rem">
+    <span class="badge green">Phase 3 — Complete</span>
+    <strong>Nexus UI + Docker Integration</strong>
+  </div>
+  <p style="margin-top:0.5rem">SvelteKit frontend running in Docker at localhost:3000 via nginx reverse proxy. Chat, graph visualization, image ingestion, MCP tool integration, and settings — all wired to LightRAG + API backend.</p>
+</div>
+
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
 <h2>Roadmap</h2>
 
@@ -193,27 +201,18 @@
   <p class="muted" style="margin-top:0.5rem"><strong>API Endpoints:</strong> <code>POST /images/process</code> (SSE stream), <code>POST /images/process-json</code> (JSON), <code>GET /images/health</code></p>
 </div>
 
-<div class="card" style="margin-bottom:0.5rem">
+<div class="card success" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge purple">Phase 3 — Planned</span>
-    <strong style="font-size:1.1rem">Custom UI with Real-Time Graph Visualization</strong>
+    <span class="badge green">Phase 3 ✓</span>
+    <strong style="font-size:1.1rem">Nexus UI + Docker Integration</strong>
   </div>
-  <p>Port the Nexus frontend (SvelteKit) and connect it to the API backend. Users can chat with the knowledge graph, attach images, and watch data extraction happen in real-time via SSE — EXIF fields appear, faces are identified, then the graph updates live as entities are inserted.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Vision:</strong> Attach a photo → watch EXIF + faces stream in → see "Saint Petersburg, Florida, US" and "Identified persons: Paul" appear → graph node appears → query "photos of Paul in Florida" returns it.</p>
+  <p>Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization (3d-force-graph + Three.js), image ingestion with real-time SSE, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> — chat + graph exploration + image ingestion + MCP tool calls.</p>
 </div>
 
 <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
     <span class="badge yellow">Phase 4 — Planned</span>
-    <strong style="font-size:1.1rem">Custom Chat + KG UI</strong>
-  </div>
-  <p>Port or build from scratch a custom UI that combines chat and knowledge graph visualization. Think split-pane or tabbed layout: conversational interface on one side, interactive graph explorer on the other. Entities and relationships clickable and explorable.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> with chat + KG exploration.</p>
-</div>
-
-<div class="card" style="margin-bottom:0.5rem">
-  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge red">Phase 5 — Planned</span>
     <strong style="font-size:1.1rem">Enhanced Image Intelligence</strong>
   </div>
   <p>Deeper face clustering (batch face_index.py), face crop review UI, object detection, OCR, and scene classification — all as structured KG entities.</p>
@@ -225,9 +224,13 @@
 
 <div class="card accent">
 <pre>
-<span class="muted">Browser (Nexus UI)</span>
-  <span class="arrow">→</span> <span class="badge blue">SvelteKit :5180</span>
-  <span class="muted">chat, graph, image uploads</span>
+<span class="muted">Browser</span>
+  <span class="arrow">→</span> <span class="badge blue">Nexus :3000</span> <span class="muted">SvelteKit behind nginx</span>
+  <span class="muted">  ├─ /api/kg/    → API Backend</span>
+  <span class="muted">  ├─ /api/lightrag/ → LightRAG</span>
+  <span class="muted">  ├─ /v1/, /health, /slots → llama-server</span>
+  <span class="muted">  ├─ /mcp          → API Backend (MCP)</span>
+  <span class="muted">  └─ /api/sync/    → API Backend (WebSocket)</span>
         <span class="arrow">↓</span>
   <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE</span>
   <span class="muted">  ├─ EXIF extraction</span>
@@ -265,9 +268,16 @@
     <td>~400 MB image</td>
   </tr>
   <tr>
+    <td><span class="badge blue">Nexus UI</span></td>
+    <td>Docker</td>
+    <td><code>3000</code></td>
+    <td>SvelteKit + nginx</td>
+    <td>~200 MB image</td>
+  </tr>
+  <tr>
     <td><span class="badge blue">API Backend</span></td>
-    <td>Host</td>
-    <td><code>8000</code></td>
+    <td>Docker</td>
+    <td><code>8000</code> (internal)</td>
     <td>FastAPI + processors</td>
     <td>~50 MB deps</td>
   </tr>
@@ -368,7 +378,19 @@ knowledge-graph/
 │   └── process_image.py        <span class="muted"># CLI: EXIF → faces → LightRAG upload + metadata</span>
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
 ├── inputs/                  <span class="muted"># images to process</span>
-├── ui/                     <span class="muted"># custom frontend (TODO)</span>
+├── ui/                     <span class="muted"># Nexus SvelteKit frontend</span>
+│   ├── Dockerfile           <span class="muted"># multi-stage build (bun → vite → nginx)</span>
+│   ├── vite.config.ts       <span class="muted"># dev proxy routes</span>
+│   ├── src/
+│   │   ├── routes/          <span class="muted"># SvelteKit pages</span>
+│   │   └── lib/
+│   │       ├── components/   <span class="muted"># chat, graph, ingestion, settings, MCP</span>
+│   │       ├── services/    <span class="muted"># lightrag, llama, kg-api, mcp, sync clients</span>
+│   │       └── constants.ts <span class="muted"># API routes & types</span>
+│   └── static/
+├── docker/                  <span class="muted"># nginx config for production reverse proxy</span>
+│   └── nginx/
+│       └── nginx.conf
 └── secrets/                <span class="muted"># SSL certs (not committed)</span>
 </pre>
 </div>
@@ -388,19 +410,25 @@ cp .env.example .env
 ./scripts/start-llama-servers.sh
 
 <span class="muted"># 4. Start LightRAG + PostgreSQL</span>
+docker compose up -d lightrag postgres
+
+<span class="muted"># 5. Start API backend + Nexus UI (Docker)</span>
 docker compose up -d
 
-<span class="muted"># 5. Start the API backend</span>
-./scripts/start-api.sh
+<span class="muted"># 6. Or start just LightRAG + PostgreSQL (without UI)</span>
+docker compose up -d lightrag postgres
 
-<span class="muted"># 6. Process an image (CLI)</span>
+<span class="muted"># 7. Process an image (CLI)</span>
 .venv/bin/python scripts/process_image.py --json photo.jpg
 
-<span class="muted"># 7. Process an image (API)</span>
+<span class="muted"># 8. Process an image (API)</span>
 curl -X POST http://localhost:8000/images/process-json \
   -F "file=@photo.jpg"
 
-<span class="muted"># 8. Open LightRAG WebUI</span>
+<span class="muted"># 9. Open Nexus UI</span>
+open http://localhost:3000
+
+<span class="muted"># Or open LightRAG built-in WebUI</span>
 open http://localhost:9621
 
 <span class="muted"># Stop everything</span>
@@ -431,12 +459,17 @@ open http://localhost:9621
     <h3>Why Python 3.11 venv?</h3>
     <p>macOS ships Python 3.9 which has a TensorFlow mutex crash. The project uses a <code>.venv/</code> with Python 3.11 (installed via Homebrew) where TensorFlow 2.21 + DeepFace work correctly. <code>start-api.sh</code> auto-detects the venv.</p>
   </div>
+  <div class="card">
+    <h3>Why nginx reverse proxy?</h3>
+    <p>In production, nginx serves the static SvelteKit build and proxies all API calls — LightRAG, KG API, llama-server, MCP, and WebSocket sync — through a single port (<code>:3000</code>). No CORS issues, no mixed content, clean routing. In dev, Vite's proxy handles the same routes.</p>
+  </div>
 </div>
 
 <!-- ─── Endpoints ────────────────────────────────────────────────────────── -->
 <h2>Endpoints</h2>
 <table>
   <tr><th>Service</th><th>URL</th><th>Notes</th></tr>
+  <tr><td>Nexus UI</td><td><a href="http://localhost:3000">http://localhost:3000</a></td><td>Custom SvelteKit frontend (chat, graph, ingestion)</td></tr>
   <tr><td>LightRAG WebUI</td><td><a href="http://localhost:9621">http://localhost:9621</a></td><td>Built-in React UI</td></tr>
   <tr><td>LightRAG API Docs</td><td><a href="http://localhost:9621/docs">http://localhost:9621/docs</a></td><td>Swagger UI</td></tr>
   <tr><td>LightRAG Health</td><td><a href="http://localhost:9621/health">http://localhost:9621/health</a></td><td>JSON status</td></tr>
@@ -459,6 +492,7 @@ open http://localhost:9621
     <tr><td>2025-07-07</td><td>Committed image processing pipeline + API backend (<code>83e379b</code>). Face recognition tested but blocked on macOS Python 3.9 (TensorFlow mutex) — works in principle, needs Python 3.11+ or Docker</td></tr>
     <tr><td>2025-07-07</td><td>Fixed face recognition blocker: created Python 3.11 venv (<code>.venv/</code>), added <code>deepface</code>, <code>tf-keras</code>, <code>opencv-python</code> to requirements. Face recognition now fully working — 3 faces detected with age, gender, emotion, race attributes. Updated <code>start-api.sh</code> to use venv Python.</td></tr>
     <tr><td>2025-07-07</td><td>Refactored LightRAG ingestion to two-step pipeline: (1) upload image file via <code>/documents/upload</code> for VLM description + entity extraction, (2) insert extracted metadata as text via <code>/documents/text</code> for structured entity creation (locations, people, dates). SSE events now stream both upload and metadata insertion progress.</td></tr>
+    <tr><td>2025-07-07</td><td>Integrated Nexus UI: SvelteKit frontend with chat, 3D graph visualization (3d-force-graph + Three.js), image ingestion, MCP tool calls, and settings. Dockerized behind nginx reverse proxy at <code>:3000</code>. Added API and Nexus services to docker-compose. Fixed missing <code>MCP_API</code> and <code>SYNC_URL</code> exports in constants.ts. Added nginx routes for MCP and WebSocket sync.</td></tr>
   </table>
 </div>
 
