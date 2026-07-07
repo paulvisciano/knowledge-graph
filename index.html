@@ -89,6 +89,56 @@
   a:hover { text-decoration: underline; }
   .subtitle { color: var(--text2); font-size: 1.05rem; margin-bottom: 1.5rem; }
   .mono { font-family: 'SF Mono', Consolas, monospace; }
+  /* ─── Tech Stack Footer ─── */
+  .tech-footer {
+    margin-top: 2.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .tech-footer h2 { margin-bottom: 0.75rem; }
+  .tech-footer p { margin-bottom: 0.75rem; }
+  .tech-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  .tech-row-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text2);
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+  .tech-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    text-decoration: none;
+    font-size: 0.78rem;
+    color: var(--text);
+    transition: border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .tech-chip:hover {
+    border-color: var(--accent);
+    background: var(--surface2);
+    text-decoration: none;
+  }
+  .tech-chip img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    opacity: 0.85;
+  }
+  .tech-chip:hover img { opacity: 1; }
 </style>
 </head>
 <body>
@@ -107,6 +157,14 @@
   <p style="margin-top:0.5rem">LightRAG stack running in Docker with PostgreSQL storage and host llama-servers on Metal GPU.</p>
 </div>
 
+<div class="card accent" style="margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:0.75rem">
+    <span class="badge green">Phase 2 — Complete</span>
+    <strong>Image Processing + API Backend</strong>
+  </div>
+  <p style="margin-top:0.5rem">FastAPI backend running on host:8000. EXIF extraction and face recognition fully tested end-to-end.</p>
+</div>
+
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
 <h2>Roadmap</h2>
 
@@ -121,10 +179,11 @@
 
 <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge blue">Phase 2 — In Progress</span>
+    <span class="badge green">Phase 2 ✓</span>
     <strong style="font-size:1.1rem">Image Processing + API Backend</strong>
   </div>
   <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction and face recognition, streams progress via SSE to the frontend, and inserts enriched metadata into LightRAG. Standalone <code>processors/</code> package lives outside the submodule and survives updates.</p>
+  <p style="margin-top:0.5rem"><strong>Status:</strong> EXIF extraction ✓ — Face recognition ✓ (3 faces detected, attributes extracted). Running on Python 3.11 venv (resolved TensorFlow mutex crash on macOS).</p>
   <table style="margin-top:0.5rem;font-size:0.85rem">
     <tr><td><code>processors/exif_extractor.py</code></td><td>EXIF + GPS → reverse geocoded location string</td></tr>
     <tr><td><code>processors/face_recognizer.py</code></td><td>DeepFace ArcFace: detect, embed, cluster, identify, attribute analysis</td></tr>
@@ -279,6 +338,7 @@ knowledge-graph/
 ├── docker-compose.yml      <span class="muted"># orchestrates LightRAG + PostgreSQL</span>
 ├── .env                    <span class="muted"># local config (not committed)</span>
 ├── .env.example            <span class="muted"># template to copy</span>
+├── .venv/                  <span class="muted"># Python 3.11 venv (not committed)</span>
 ├── README.md
 ├── models → ~/models       <span class="muted"># symlink to GGUF model files</span>
 ├── api/                    <span class="muted"># FastAPI backend (image processing + SSE)</span>
@@ -299,6 +359,7 @@ knowledge-graph/
 │   └── face_recognizer.py  <span class="muted"># DeepFace: detect, embed, cluster, identify</span>
 ├── scripts/
 │   ├── start-llama-servers.sh  <span class="muted"># start LLM, embed, reranker (Metal GPU)</span>
+│   ├── start-api.sh           <span class="muted"># start FastAPI backend (host, Metal GPU for DeepFace)</span>
 │   ├── stop-all.sh              <span class="muted"># stop everything</span>
 │   └── process_image.py        <span class="muted"># CLI: EXIF → faces → captions → LightRAG API</span>
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
@@ -315,23 +376,27 @@ knowledge-graph/
 <pre><span class="muted"># 1. Configure</span>
 cp .env.example .env
 
-<span class="muted"># 2. Start llama-servers on host</span>
+<span class="muted"># 2. Create Python 3.11+ venv and install deps</span>
+/opt/homebrew/bin/python3.11 -m venv .venv
+.venv/bin/pip install -r api/requirements.txt
+
+<span class="muted"># 3. Start llama-servers on host</span>
 ./scripts/start-llama-servers.sh
 
-<span class="muted"># 3. Start LightRAG + PostgreSQL</span>
+<span class="muted"># 4. Start LightRAG + PostgreSQL</span>
 docker compose up -d
 
-<span class="muted"># 4. Start the API backend</span>
+<span class="muted"># 5. Start the API backend</span>
 ./scripts/start-api.sh
 
-<span class="muted"># 5. Process an image (CLI)</span>
-python3 scripts/process_image.py --json photo.jpg
+<span class="muted"># 6. Process an image (CLI)</span>
+.venv/bin/python scripts/process_image.py --json photo.jpg
 
-<span class="muted"># 6. Process an image (API)</span>
+<span class="muted"># 7. Process an image (API)</span>
 curl -X POST http://localhost:8000/images/process-json \
-  -F "file=@photo.jpg" -F "skip_faces=true"
+  -F "file=@photo.jpg"
 
-<span class="muted"># 7. Open LightRAG WebUI</span>
+<span class="muted"># 8. Open LightRAG WebUI</span>
 open http://localhost:9621
 
 <span class="muted"># Stop everything</span>
@@ -358,6 +423,10 @@ open http://localhost:9621
     <h3>Why standalone processors?</h3>
     <p>Image processing modules live in <code>processors/</code> outside the <code>lightrag/</code> submodule. They talk to LightRAG via HTTP API, not by patching its source. This means LightRAG updates don't break image processing.</p>
   </div>
+  <div class="card">
+    <h3>Why Python 3.11 venv?</h3>
+    <p>macOS ships Python 3.9 which has a TensorFlow mutex crash. The project uses a <code>.venv/</code> with Python 3.11 (installed via Homebrew) where TensorFlow 2.21 + DeepFace work correctly. <code>start-api.sh</code> auto-detects the venv.</p>
+  </div>
 </div>
 
 <!-- ─── Endpoints ────────────────────────────────────────────────────────── -->
@@ -370,6 +439,8 @@ open http://localhost:9621
   <tr><td>LLM</td><td><code>http://localhost:8080</code></td><td>OpenAI-compatible</td></tr>
   <tr><td>Embedding</td><td><code>http://localhost:8081</code></td><td>OpenAI-compatible</td></tr>
   <tr><td>Reranker</td><td><code>http://localhost:8082/v1/rerank</code></td><td>Jina-compatible</td></tr>
+  <tr><td>API Backend (SSE)</td><td><a href="http://localhost:8000/images/health">http://localhost:8000</a></td><td>Image processing + real-time SSE</td></tr>
+  <tr><td>API Backend Docs</td><td><a href="http://localhost:8000/docs">http://localhost:8000/docs</a></td><td>Swagger UI</td></tr>
 </table>
 
 <!-- ─── Changelog ────────────────────────────────────────────────────────── -->
@@ -381,7 +452,44 @@ open http://localhost:9621
     <tr><td>2025-07-07</td><td>Switched storage to PostgreSQL (pgvector/pgvector:pg18) for KV, Vector, and DocStatus; NetworkX for graph</td></tr>
     <tr><td>2025-07-07</td><td>Added image processing pipeline: <code>processors/exif_extractor.py</code> (EXIF + reverse geocoding), <code>processors/face_recognizer.py</code> (DeepFace), <code>scripts/process_image.py</code> (CLI orchestration)</td></tr>
     <tr><td>2025-07-07</td><td>Added FastAPI backend: <code>api/</code> with SSE streaming for real-time image processing progress, JSON endpoint, health checks. Tested end-to-end: EXIF extraction → caption building → LightRAG insertion</td></tr>
+    <tr><td>2025-07-07</td><td>Committed image processing pipeline + API backend (<code>83e379b</code>). Face recognition tested but blocked on macOS Python 3.9 (TensorFlow mutex) — works in principle, needs Python 3.11+ or Docker</td></tr>
+    <tr><td>2025-07-07</td><td>Fixed face recognition blocker: created Python 3.11 venv (<code>.venv/</code>), added <code>deepface</code>, <code>tf-keras</code>, <code>opencv-python</code> to requirements. Face recognition now fully working — 3 faces detected with age, gender, emotion, race attributes. Updated <code>start-api.sh</code> to use venv Python.</td></tr>
   </table>
+</div>
+
+<!-- ─── Powered By ────────────────────────────────────────────────────────── -->
+<div class="tech-footer">
+  <h2>Powered By</h2>
+  <p>Open-source-first. No cloud APIs. Runs entirely on local hardware.</p>
+  <div class="tech-row"><span class="tech-row-label">AI</span>
+    <a href="https://github.com/HKUDS/LightRAG" class="tech-chip" target="_blank" rel="noopener"><img src="https://avatars.githubusercontent.com/HKUDS" alt="" style="border-radius:2px" onerror="this.style.display='none'">LightRAG</a>
+    <a href="https://github.com/ggerganov/llama.cpp" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/llama.cpp/white" alt="" onerror="this.style.display='none'">llama.cpp</a>
+    <a href="https://github.com/serengil/deepface" class="tech-chip" target="_blank" rel="noopener"><img src="https://avatars.githubusercontent.com/serengil" alt="" style="border-radius:2px" onerror="this.style.display='none'">DeepFace</a>
+    <a href="https://github.com/nomic-ai/nomic-embed" class="tech-chip" target="_blank" rel="noopener"><img src="https://avatars.githubusercontent.com/nomic-ai" alt="" style="border-radius:2px" onerror="this.style.display='none'">nomic-embed</a>
+  </div>
+  <div class="tech-row"><span class="tech-row-label">Data</span>
+    <a href="https://github.com/pgvector/pgvector" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/postgresql/white" alt="" onerror="this.style.display='none'">PostgreSQL</a>
+    <a href="https://github.com/networkx/networkx" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/python/white" alt="" onerror="this.style.display='none'">NetworkX</a>
+  </div>
+  <div class="tech-row"><span class="tech-row-label">Backend</span>
+    <a href="https://github.com/fastapi/fastapi" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/fastapi/white" alt="" onerror="this.style.display='none'">FastAPI</a>
+    <a href="https://github.com/encode/uvicorn" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/python/white" alt="" onerror="this.style.display='none'">uvicorn</a>
+    <a href="https://github.com/sysid/sse-starlette" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/starlette/white" alt="" onerror="this.style.display='none'">sse-starlette</a>
+    <a href="https://github.com/opencv/opencv" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/opencv/white" alt="" onerror="this.style.display='none'">OpenCV</a>
+  </div>
+  <div class="tech-row"><span class="tech-row-label">Frontend</span>
+    <a href="https://github.com/sveltejs/kit" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/svelte/white" alt="" onerror="this.style.display='none'">SvelteKit</a>
+    <a href="https://github.com/vasturiano/3d-force-graph" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/threedotjs/white" alt="" onerror="this.style.display='none'">3D Force Graph</a>
+    <a href="https://github.com/d3/d3" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/d3.js/white" alt="" onerror="this.style.display='none'">D3.js</a>
+    <a href="https://github.com/mrdoob/three.js" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/threedotjs/white" alt="" onerror="this.style.display='none'">Three.js</a>
+    <a href="https://github.com/tailwindlabs/tailwindcss" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/tailwindcss/white" alt="" onerror="this.style.display='none'">Tailwind</a>
+    <a href="https://github.com/vitejs/vite" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/vite/white" alt="" onerror="this.style.display='none'">Vite</a>
+    <a href="https://github.com/framework7io/framework7" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/framework7/white" alt="" onerror="this.style.display='none'">Framework7</a>
+  </div>
+  <div class="tech-row"><span class="tech-row-label">Infra</span>
+    <a href="https://github.com/docker/compose" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/docker/white" alt="" onerror="this.style.display='none'">Docker Compose</a>
+    <a href="https://developer.apple.com/metal/" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/apple/white" alt="" onerror="this.style.display='none'">Apple Metal</a>
+  </div>
 </div>
 
 </body>
