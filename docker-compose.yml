@@ -1,3 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Knowledge Graph — Docker Compose
+# ═══════════════════════════════════════════════════════════════════════════════
+# Usage:
+#   docker compose up -d          — start full stack
+#   docker compose logs -f        — follow logs
+#   docker compose down           — stop
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and customize
+#   2. llama-server processes running on host (ports 8080, 8081, 8082)
+#
+# Storage:
+#   PostgreSQL for KV, Vector, and DocStatus stores.
+#   NetworkX for Graph storage (no AGE extension needed).
+#   To switch to file-based storage, remove the LIGHTRAG_*_STORAGE vars
+#   from .env and the defaults (JsonKVStorage, NanoVectorDBStorage, etc.) apply.
+# ═══════════════════════════════════════════════════════════════════════════════
+
 services:
   lightrag:
     build:
@@ -5,6 +24,9 @@ services:
       dockerfile: Dockerfile
     container_name: knowledge-graph-lightrag
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${LIGHTRAG_PORT:-9621}:9621"
     volumes:
@@ -25,5 +47,22 @@ services:
       start_period: 30s
       retries: 5
 
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: knowledge-graph-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lightrag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-lightrag}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lightrag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   lightrag_data:
+  postgres_data:

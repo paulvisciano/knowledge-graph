@@ -99,22 +99,60 @@
 <!-- ─── Status Dashboard ────────────────────────────────────────────────── -->
 <h2>Current Status</h2>
 
-<div class="grid grid-3">
-  <div class="card success">
-    <div class="stat">Phase 1</div>
-    <div class="stat-label">Vanilla LightRAG</div>
-    <p>Docker + local LLMs running</p>
+<div class="card success" style="margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:0.75rem">
+    <span class="badge green">Phase 1 — Complete</span>
+    <strong>Docker + LightRAG</strong>
   </div>
-  <div class="card">
-    <div class="stat" style="color:var(--text2)">Phase 2</div>
-    <div class="stat-label">Custom UI</div>
-    <p>Not started</p>
+  <p style="margin-top:0.5rem">Vanilla LightRAG stack running in Docker with host llama-servers on Metal GPU.</p>
+</div>
+
+<!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
+<h2>Roadmap</h2>
+
+<div class="card accent" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge green">Phase 1 ✓</span>
+    <strong style="font-size:1.1rem">Docker + LightRAG</strong>
   </div>
-  <div class="card">
-    <div class="stat" style="color:var(--text2)">Phase 3</div>
-    <div class="stat-label">Pipeline & Integrations</div>
-    <p>Not started</p>
+  <p>Get the core stack running: LightRAG in Docker, llama-servers on host (Metal GPU), file-based storage, basic document ingestion and querying. Validate the full pipeline end-to-end — insert, query, and verify the knowledge graph builds correctly.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Working LightRAG instance with local LLMs, accessible via API and built-in WebUI.</p>
+</div>
+
+<div class="card" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge blue">Phase 2 — Next</span>
+    <strong style="font-size:1.1rem">Image Processing</strong>
   </div>
+  <p>Add support for image ingestion into the knowledge graph. Images get processed by the VLM (Gemma 4 12B) to extract descriptions, objects, scenes, and relationships — then stored as entities/edges in the KG alongside text documents.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Pipeline that accepts images, generates VLM descriptions, and inserts them into the KG.</p>
+</div>
+
+<div class="card" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge purple">Phase 3 — Planned</span>
+    <strong style="font-size:1.1rem">Llama UI + Knowledge Graph Integration</strong>
+  </div>
+  <p>Integrate the Llama UI with LightRAG so the chat interface can query and display the knowledge graph. Users can have natural-language conversations that pull from the KG, with citations and entity references surfaced inline.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Chat UI connected to LightRAG API — query the KG conversationally with context-aware responses.</p>
+</div>
+
+<div class="card" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge yellow">Phase 4</span>
+    <strong style="font-size:1.1rem">Custom Chat + KG UI</strong>
+  </div>
+  <p>Port or build from scratch a custom UI that combines chat and knowledge graph visualization. Think split-pane or tabbed layout: conversational interface on one side, interactive graph explorer on the other. Entities and relationships clickable and explorable.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> with chat + KG exploration.</p>
+</div>
+
+<div class="card" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge red">Phase 5</span>
+    <strong style="font-size:1.1rem">Enhanced Image Intelligence</strong>
+  </div>
+  <p>Supercharge image processing with deep metadata extraction: EXIF data (camera, timestamps, GPS coordinates), face recognition and clustering, location detection and reverse geocoding, object detection with bounding boxes, OCR for text in images, and scene classification. All extracted as structured entities in the KG.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Rich image pipeline that turns photos into queryable knowledge — "find all photos from summer 2024 with faces" or "show me everything taken near Central Park."</p>
 </div>
 
 <!-- ─── Architecture ────────────────────────────────────────────────────── -->
