@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a; source "$PROJECT_DIR/.env"; set +a
+fi
+
+API_PORT="${API_PORT:-8000}"
+API_HOST="${API_HOST:-0.0.0.0}"
+
+echo "Starting Knowledge Graph API backend on port ${API_PORT}..."
+echo ""
+
+cd "$PROJECT_DIR"
+
+PYTHONPATH="$PROJECT_DIR" python3 -m uvicorn api.main:app \
+    --host "$API_HOST" \
+    --port "$API_PORT" \
+    --no-access-log

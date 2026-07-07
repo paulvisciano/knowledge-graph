@@ -94,7 +94,7 @@
 <body>
 
 <h1>Knowledge Graph</h1>
-<p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + custom UI</p>
+<p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + image processing + custom UI</p>
 
 <!-- ─── Status Dashboard ────────────────────────────────────────────────── -->
 <h2>Current Status</h2>
@@ -102,9 +102,9 @@
 <div class="card success" style="margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:0.75rem">
     <span class="badge green">Phase 1 — Complete</span>
-    <strong>Docker + LightRAG</strong>
+    <strong>Docker + LightRAG + PostgreSQL</strong>
   </div>
-  <p style="margin-top:0.5rem">Vanilla LightRAG stack running in Docker with host llama-servers on Metal GPU.</p>
+  <p style="margin-top:0.5rem">LightRAG stack running in Docker with PostgreSQL storage and host llama-servers on Metal GPU.</p>
 </div>
 
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
@@ -115,26 +115,32 @@
     <span class="badge green">Phase 1 ✓</span>
     <strong style="font-size:1.1rem">Docker + LightRAG</strong>
   </div>
-  <p>Get the core stack running: LightRAG in Docker, llama-servers on host (Metal GPU), file-based storage, basic document ingestion and querying. Validate the full pipeline end-to-end — insert, query, and verify the knowledge graph builds correctly.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Working LightRAG instance with local LLMs, accessible via API and built-in WebUI.</p>
+  <p>Core stack running: LightRAG in Docker with PostgreSQL storage, llama-servers on host (Metal GPU), VLM-enabled document ingestion and querying. Full pipeline validated end-to-end.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Working LightRAG instance with local LLMs + PostgreSQL, accessible via API and built-in WebUI.</p>
 </div>
 
 <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge blue">Phase 2 — Next</span>
-    <strong style="font-size:1.1rem">Image Processing</strong>
+    <span class="badge blue">Phase 2 — In Progress</span>
+    <strong style="font-size:1.1rem">Image Processing + API Backend</strong>
   </div>
-  <p>Add support for image ingestion into the knowledge graph. Images get processed by the VLM (Gemma 4 12B) to extract descriptions, objects, scenes, and relationships — then stored as entities/edges in the KG alongside text documents.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Pipeline that accepts images, generates VLM descriptions, and inserts them into the KG.</p>
+  <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction and face recognition, streams progress via SSE to the frontend, and inserts enriched metadata into LightRAG. Standalone <code>processors/</code> package lives outside the submodule and survives updates.</p>
+  <table style="margin-top:0.5rem;font-size:0.85rem">
+    <tr><td><code>processors/exif_extractor.py</code></td><td>EXIF + GPS → reverse geocoded location string</td></tr>
+    <tr><td><code>processors/face_recognizer.py</code></td><td>DeepFace ArcFace: detect, embed, cluster, identify, attribute analysis</td></tr>
+    <tr><td><code>api/services/processor.py</code></td><td>Async orchestrator: EXIF → faces → captions → SSE events</td></tr>
+    <tr><td><code>api/routes/images.py</code></td><td>SSE + JSON endpoints for image processing</td></tr>
+  </table>
+  <p class="muted" style="margin-top:0.5rem"><strong>API Endpoints:</strong> <code>POST /images/process</code> (SSE stream), <code>POST /images/process-json</code> (JSON), <code>GET /images/health</code></p>
 </div>
 
 <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
     <span class="badge purple">Phase 3 — Planned</span>
-    <strong style="font-size:1.1rem">Llama UI + Knowledge Graph Integration</strong>
+    <strong style="font-size:1.1rem">Custom UI with Real-Time Graph Visualization</strong>
   </div>
-  <p>Integrate the Llama UI with LightRAG so the chat interface can query and display the knowledge graph. Users can have natural-language conversations that pull from the KG, with citations and entity references surfaced inline.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Chat UI connected to LightRAG API — query the KG conversationally with context-aware responses.</p>
+  <p>Port the Nexus frontend (SvelteKit) and connect it to the API backend. Users can chat with the knowledge graph, attach images, and watch data extraction happen in real-time via SSE — EXIF fields appear, faces are identified, then the graph updates live as entities are inserted.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Vision:</strong> Attach a photo → watch EXIF + faces stream in → see "Saint Petersburg, Florida, US" and "Identified persons: Paul" appear → graph node appears → query "photos of Paul in Florida" returns it.</p>
 </div>
 
 <div class="card" style="margin-bottom:0.5rem">
@@ -151,8 +157,8 @@
     <span class="badge red">Phase 5 — Planned</span>
     <strong style="font-size:1.1rem">Enhanced Image Intelligence</strong>
   </div>
-  <p>Supercharge image processing with deep metadata extraction: EXIF data (camera, timestamps, GPS coordinates), face recognition and clustering, location detection and reverse geocoding, object detection with bounding boxes, OCR for text in images, and scene classification. All extracted as structured entities in the KG.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Rich image pipeline that turns photos into queryable knowledge — "find all photos from summer 2024 with faces" or "show me everything taken near Central Park."</p>
+  <p>Deeper face clustering (batch face_index.py), face crop review UI, object detection, OCR, and scene classification — all as structured KG entities.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Rich image pipeline that turns photos into queryable knowledge — "find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
 </div>
 
 <!-- ─── Architecture ────────────────────────────────────────────────────── -->
@@ -160,15 +166,18 @@
 
 <div class="card accent">
 <pre>
-<span class="muted">Browser</span>
-  <span class="arrow">→</span> <span class="badge blue">UI</span> <span class="muted">(localhost:3000, TODO)</span>
-
-<span class="muted">MCP Clients (Claude, etc.)</span>
-  <span class="arrow">→</span> <span class="badge purple">LightRAG MCP</span> <span class="muted">(port 9650, TODO)</span>
-
-<span class="muted">Any client</span>
-  <span class="arrow">→</span> <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
+<span class="muted">Browser (Nexus UI)</span>
+  <span class="arrow">→</span> <span class="badge blue">SvelteKit :5180</span>
+  <span class="muted">chat, graph, image uploads</span>
         <span class="arrow">↓</span>
+  <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE</span>
+  <span class="muted">  ├─ EXIF extraction</span>
+  <span class="muted">  ├─ Face recognition (DeepFace)</span>
+  <span class="muted">  └─ SSE progress streaming</span>
+        <span class="arrow">↓</span>
+  <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
+        <span class="arrow">↓</span>
+  <span class="badge purple">PostgreSQL</span> <span class="muted">KV + Vector + DocStatus</span>
   <span class="badge yellow">llama-server :8080</span> <span class="muted">LLM (Gemma 4 12B)</span>
   <span class="badge yellow">llama-server :8081</span> <span class="muted">Embedding (nomic-embed-v2)</span>
   <span class="badge yellow">llama-server :8082</span> <span class="muted">Reranker (bge-reranker-v2-m3)</span>
@@ -184,6 +193,20 @@
     <td><code>9621</code></td>
     <td>—</td>
     <td>~1.2 GB image</td>
+  </tr>
+  <tr>
+    <td><span class="badge purple">PostgreSQL</span></td>
+    <td>Docker</td>
+    <td><code>5432</code> (internal)</td>
+    <td>pgvector/pgvector:pg18</td>
+    <td>~400 MB image</td>
+  </tr>
+  <tr>
+    <td><span class="badge blue">API Backend</span></td>
+    <td>Host</td>
+    <td><code>8000</code></td>
+    <td>FastAPI + processors</td>
+    <td>~50 MB deps</td>
   </tr>
   <tr>
     <td><span class="badge yellow">LLM</span></td>
@@ -239,13 +262,12 @@
 <div class="card">
   <h3>Storage</h3>
   <table>
-    <tr><th>Component</th><th>Current</th><th>PG Upgrade</th></tr>
-    <tr><td>Vector DB</td><td>NanoVectorDB <span class="badge blue">file</span></td><td>PGVectorStorage</td></tr>
-    <tr><td>Knowledge Graph</td><td>NetworkX <span class="badge blue">file</span></td><td>NetworkX (same)</td></tr>
-    <tr><td>Key-Value</td><td>JsonKVStorage <span class="badge blue">file</span></td><td>PGKVStorage</td></tr>
-    <tr><td>Doc Status</td><td>JsonDocStatusStorage <span class="badge blue">file</span></td><td>PGDocStatusStorage</td></tr>
+    <tr><th>Component</th><th>Current</th><th>Notes</th></tr>
+    <tr><td>Vector DB</td><td><span class="badge purple">PGVectorStorage</span></td><td>PostgreSQL + pgvector HNSW</td></tr>
+    <tr><td>Knowledge Graph</td><td><span class="badge blue">NetworkXStorage</span></td><td>File-based (PGGraphStorage requires AGE extension)</td></tr>
+    <tr><td>Key-Value</td><td><span class="badge purple">PGKVStorage</span></td><td>PostgreSQL</td></tr>
+    <tr><td>Doc Status</td><td><span class="badge purple">PGDocStatusStorage</span></td><td>PostgreSQL</td></tr>
   </table>
-  <p class="muted" style="margin-top:0.5rem">File-based storage works for single-instance. Switch to PostgreSQL for persistence and scale — see docker-compose.yml postgres service (commented out).</p>
 </div>
 
 <!-- ─── Project Structure ────────────────────────────────────────────────── -->
@@ -254,20 +276,33 @@
 <div class="card">
 <pre>
 knowledge-graph/
-├── docker-compose.yml      <span class="muted"># orchestrates all Docker services</span>
+├── docker-compose.yml      <span class="muted"># orchestrates LightRAG + PostgreSQL</span>
 ├── .env                    <span class="muted"># local config (not committed)</span>
 ├── .env.example            <span class="muted"># template to copy</span>
 ├── README.md
 ├── models → ~/models       <span class="muted"># symlink to GGUF model files</span>
+├── api/                    <span class="muted"># FastAPI backend (image processing + SSE)</span>
+│   ├── main.py             <span class="muted"># app entry point, CORS, routers</span>
+│   ├── requirements.txt    <span class="muted"># Python dependencies</span>
+│   ├── routes/
+│   │   ├── health.py       <span class="muted"># GET /health</span>
+│   │   └── images.py        <span class="muted"># POST /images/process (SSE), /images/process-json</span>
+│   └── services/
+│       └── processor.py     <span class="muted"># EXIF → faces → captions orchestrator</span>
 ├── lightrag/               <span class="muted"># LightRAG source (local build, git repo)</span>
 │   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
 │   ├── lightrag/            <span class="muted"># Python package source</span>
-│   ├── lightrag_webui/     <span class="muted"># React 19 frontend (bundled in Docker)</span>
 │   └── ...
+├── processors/              <span class="muted"># standalone image processing modules</span>
+│   ├── exif_extractor.py   <span class="muted"># EXIF + GPS → reverse geocode</span>
+│   └── face_recognizer.py  <span class="muted"># DeepFace: detect, embed, cluster, identify</span>
 ├── scripts/
 │   ├── start-llama-servers.sh  <span class="muted"># start LLM, embed, reranker (Metal GPU)</span>
-│   └── stop-all.sh              <span class="muted"># stop everything</span>
+│   ├── stop-all.sh              <span class="muted"># stop everything</span>
+│   └── process_image.py        <span class="muted"># CLI: EXIF → faces → captions → LightRAG API</span>
+├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
+├── inputs/                  <span class="muted"># images to process</span>
 ├── ui/                     <span class="muted"># custom frontend (TODO)</span>
 └── secrets/                <span class="muted"># SSL certs (not committed)</span>
 </pre>
@@ -283,10 +318,20 @@ cp .env.example .env
 <span class="muted"># 2. Start llama-servers on host</span>
 ./scripts/start-llama-servers.sh
 
-<span class="muted"># 3. Start LightRAG</span>
+<span class="muted"># 3. Start LightRAG + PostgreSQL</span>
 docker compose up -d
 
-<span class="muted"># 4. Open WebUI</span>
+<span class="muted"># 4. Start the API backend</span>
+./scripts/start-api.sh
+
+<span class="muted"># 5. Process an image (CLI)</span>
+python3 scripts/process_image.py --json photo.jpg
+
+<span class="muted"># 6. Process an image (API)</span>
+curl -X POST http://localhost:8000/images/process-json \
+  -F "file=@photo.jpg" -F "skip_faces=true"
+
+<span class="muted"># 7. Open LightRAG WebUI</span>
 open http://localhost:9621
 
 <span class="muted"># Stop everything</span>
@@ -298,8 +343,8 @@ open http://localhost:9621
 
 <div class="grid grid-2">
   <div class="card">
-    <h3>Why file-based storage?</h3>
-    <p>Starting simple. NanoVectorDB + NetworkX + JsonKV require zero infra — no database to manage. The <code>docker-compose.yml</code> has a commented-out PostgreSQL service ready to uncomment when needed. Switching requires re-ingesting documents.</p>
+    <h3>Why PostgreSQL?</h3>
+    <p>Persistent, queryable storage for vectors, KV, and doc status. NetworkX for graph storage (AGE extension needed for PG graph — not worth the custom image). HNSW index for fast vector search.</p>
   </div>
   <div class="card">
     <h3>Why host llama-servers?</h3>
@@ -310,8 +355,8 @@ open http://localhost:9621
     <p><code>docker-compose.yml</code> builds from <code>./lightrag</code> source rather than pulling <code>ghcr.io/hkuds/lightrag:latest</code>. This lets us modify LightRAG code and rebuild with <code>docker compose up -d --build</code>.</p>
   </div>
   <div class="card">
-    <h3>Why nomic over bge-m3?</h3>
-    <p>768-dim vs 1024-dim. Smaller, faster on Apple Silicon. With reranking enabled the quality gap is negligible for English content. bge-m3 is better for multilingual — switch requires re-ingestion.</p>
+    <h3>Why standalone processors?</h3>
+    <p>Image processing modules live in <code>processors/</code> outside the <code>lightrag/</code> submodule. They talk to LightRAG via HTTP API, not by patching its source. This means LightRAG updates don't break image processing.</p>
   </div>
 </div>
 
@@ -333,6 +378,9 @@ open http://localhost:9621
   <table>
     <tr><th>Date</th><th>Change</th></tr>
     <tr><td>2025-07-07</td><td>Initial setup: vanilla LightRAG in Docker, local build from source, file-based storage, 3 host llama-servers (Metal GPU)</td></tr>
+    <tr><td>2025-07-07</td><td>Switched storage to PostgreSQL (pgvector/pgvector:pg18) for KV, Vector, and DocStatus; NetworkX for graph</td></tr>
+    <tr><td>2025-07-07</td><td>Added image processing pipeline: <code>processors/exif_extractor.py</code> (EXIF + reverse geocoding), <code>processors/face_recognizer.py</code> (DeepFace), <code>scripts/process_image.py</code> (CLI orchestration)</td></tr>
+    <tr><td>2025-07-07</td><td>Added FastAPI backend: <code>api/</code> with SSE streaming for real-time image processing progress, JSON endpoint, health checks. Tested end-to-end: EXIF extraction → caption building → LightRAG insertion</td></tr>
   </table>
 </div>
 

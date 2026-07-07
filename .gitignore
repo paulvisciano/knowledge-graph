@@ -16,3 +16,9 @@ lightrag/
 !lightrag/.env.example
 
 secrets/
+
+known_faces/*/
+known_faces/*.pkl
+!known_faces/.gitkeep
+
+inputs/*
