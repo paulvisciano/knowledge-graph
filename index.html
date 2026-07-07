@@ -182,13 +182,13 @@
     <span class="badge green">Phase 2 ✓</span>
     <strong style="font-size:1.1rem">Image Processing + API Backend</strong>
   </div>
-  <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction and face recognition, streams progress via SSE to the frontend, and inserts enriched metadata into LightRAG. Standalone <code>processors/</code> package lives outside the submodule and survives updates.</p>
-  <p style="margin-top:0.5rem"><strong>Status:</strong> EXIF extraction ✓ — Face recognition ✓ (3 faces detected, attributes extracted). Running on Python 3.11 venv (resolved TensorFlow mutex crash on macOS).</p>
+  <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction and face recognition, then uploads the image to LightRAG for VLM description + entity extraction AND inserts extracted metadata as a separate document. Two-step ingestion ensures both visual understanding (VLM) and structured metadata (locations, people, dates) become queryable knowledge graph entities.</p>
+  <p style="margin-top:0.5rem"><strong>Status:</strong> EXIF extraction ✓ — Face recognition ✓ — LightRAG dual-ingestion (image upload + metadata text) ✓</p>
   <table style="margin-top:0.5rem;font-size:0.85rem">
     <tr><td><code>processors/exif_extractor.py</code></td><td>EXIF + GPS → reverse geocoded location string</td></tr>
     <tr><td><code>processors/face_recognizer.py</code></td><td>DeepFace ArcFace: detect, embed, cluster, identify, attribute analysis</td></tr>
-    <tr><td><code>api/services/processor.py</code></td><td>Async orchestrator: EXIF → faces → captions → SSE events</td></tr>
-    <tr><td><code>api/routes/images.py</code></td><td>SSE + JSON endpoints for image processing</td></tr>
+    <tr><td><code>api/services/processor.py</code></td><td>Async orchestrator: EXIF → faces → upload image to LightRAG + insert metadata text</td></tr>
+    <tr><td><code>api/routes/images.py</code></td><td>SSE + JSON endpoints with real-time progress for both steps</td></tr>
   </table>
   <p class="muted" style="margin-top:0.5rem"><strong>API Endpoints:</strong> <code>POST /images/process</code> (SSE stream), <code>POST /images/process-json</code> (JSON), <code>GET /images/health</code></p>
 </div>
@@ -232,9 +232,13 @@
   <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE</span>
   <span class="muted">  ├─ EXIF extraction</span>
   <span class="muted">  ├─ Face recognition (DeepFace)</span>
+  <span class="muted">  ├─ Upload image → LightRAG (VLM description + entities)</span>
+  <span class="muted">  ├─ Insert metadata text → LightRAG (locations, people, dates)</span>
   <span class="muted">  └─ SSE progress streaming</span>
-        <span class="arrow">↓</span>
+        <span class="arrow">↓</span> <span class="muted">(two-step ingestion)</span>
   <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
+  <span class="muted">  ├─ Image upload → VLM describes image → entity extraction</span>
+  <span class="muted">  └─ Metadata text → entity extraction (GPS, faces, camera)</span>
         <span class="arrow">↓</span>
   <span class="badge purple">PostgreSQL</span> <span class="muted">KV + Vector + DocStatus</span>
   <span class="badge yellow">llama-server :8080</span> <span class="muted">LLM (Gemma 4 12B)</span>
@@ -348,7 +352,7 @@ knowledge-graph/
 │   │   ├── health.py       <span class="muted"># GET /health</span>
 │   │   └── images.py        <span class="muted"># POST /images/process (SSE), /images/process-json</span>
 │   └── services/
-│       └── processor.py     <span class="muted"># EXIF → faces → captions orchestrator</span>
+│       └── processor.py     <span class="muted"># EXIF → faces → image upload + metadata insert</span>
 ├── lightrag/               <span class="muted"># LightRAG source (local build, git repo)</span>
 │   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
@@ -361,7 +365,7 @@ knowledge-graph/
 │   ├── start-llama-servers.sh  <span class="muted"># start LLM, embed, reranker (Metal GPU)</span>
 │   ├── start-api.sh           <span class="muted"># start FastAPI backend (host, Metal GPU for DeepFace)</span>
 │   ├── stop-all.sh              <span class="muted"># stop everything</span>
-│   └── process_image.py        <span class="muted"># CLI: EXIF → faces → captions → LightRAG API</span>
+│   └── process_image.py        <span class="muted"># CLI: EXIF → faces → LightRAG upload + metadata</span>
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
 ├── inputs/                  <span class="muted"># images to process</span>
 ├── ui/                     <span class="muted"># custom frontend (TODO)</span>
@@ -454,6 +458,7 @@ open http://localhost:9621
     <tr><td>2025-07-07</td><td>Added FastAPI backend: <code>api/</code> with SSE streaming for real-time image processing progress, JSON endpoint, health checks. Tested end-to-end: EXIF extraction → caption building → LightRAG insertion</td></tr>
     <tr><td>2025-07-07</td><td>Committed image processing pipeline + API backend (<code>83e379b</code>). Face recognition tested but blocked on macOS Python 3.9 (TensorFlow mutex) — works in principle, needs Python 3.11+ or Docker</td></tr>
     <tr><td>2025-07-07</td><td>Fixed face recognition blocker: created Python 3.11 venv (<code>.venv/</code>), added <code>deepface</code>, <code>tf-keras</code>, <code>opencv-python</code> to requirements. Face recognition now fully working — 3 faces detected with age, gender, emotion, race attributes. Updated <code>start-api.sh</code> to use venv Python.</td></tr>
+    <tr><td>2025-07-07</td><td>Refactored LightRAG ingestion to two-step pipeline: (1) upload image file via <code>/documents/upload</code> for VLM description + entity extraction, (2) insert extracted metadata as text via <code>/documents/text</code> for structured entity creation (locations, people, dates). SSE events now stream both upload and metadata insertion progress.</td></tr>
   </table>
 </div>
 

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, UploadFile
 from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
-from api.services.processor import ProcessingEvent, process_image, insert_into_lightrag
+from api.services.processor import ProcessingEvent, process_image, upload_image_to_lightrag, insert_metadata_into_lightrag
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ async def _process_and_stream(
     insert: bool,
 ):
     content_list: list[dict] | None = None
+    metadata_text: str | None = None
 
     async for event in process_image(
         file_path,
@@ -44,28 +46,47 @@ async def _process_and_stream(
     ):
         if event.event == "captions_built":
             content_list = event.data.get("content_list")
+            metadata_text = event.data.get("metadata_text")
         yield ServerSentEvent(
             event="message",
             data=json.dumps(asdict(event)),
         )
 
-    if insert and content_list:
-        logger.info("Inserting into LightRAG at %s", LIGHTRAG_URL)
+    if insert:
+        # Step 1: Upload the image to LightRAG for VLM processing
         yield ServerSentEvent(
             event="message",
-            data=json.dumps({"event": "inserting_into_graph", "data": {}, "timestamp": event.timestamp}),
+            data=json.dumps({"event": "uploading_to_lightrag", "data": {"file_source": file_source}, "timestamp": time.time()}),
         )
         try:
-            result = await insert_into_lightrag(LIGHTRAG_URL, content_list, file_source)
+            upload_result = await upload_image_to_lightrag(LIGHTRAG_URL, file_path, filename=file_source)
             yield ServerSentEvent(
                 event="message",
-                data=json.dumps({"event": "insert_complete", "data": result, "timestamp": event.timestamp}),
+                data=json.dumps({"event": "upload_complete", "data": upload_result, "timestamp": time.time()}),
             )
         except Exception as exc:
             yield ServerSentEvent(
                 event="message",
-                data=json.dumps({"event": "insert_failed", "data": {"error": str(exc)}, "timestamp": event.timestamp}),
+                data=json.dumps({"event": "upload_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
             )
+
+        # Step 2: Insert extracted metadata as a separate text document
+        if metadata_text:
+            yield ServerSentEvent(
+                event="message",
+                data=json.dumps({"event": "inserting_metadata", "data": {"file_source": file_source}, "timestamp": time.time()}),
+            )
+            try:
+                meta_result = await insert_metadata_into_lightrag(LIGHTRAG_URL, metadata_text, file_source)
+                yield ServerSentEvent(
+                    event="message",
+                    data=json.dumps({"event": "metadata_insert_complete", "data": meta_result, "timestamp": time.time()}),
+                )
+            except Exception as exc:
+                yield ServerSentEvent(
+                    event="message",
+                    data=json.dumps({"event": "metadata_insert_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
+                )
 
 
 @router.post("/process")
@@ -122,6 +143,7 @@ async def process_image_json(
 
         events: list[ProcessingEvent] = []
         content_list: list[dict] | None = None
+        metadata_text: str | None = None
 
         async for event in process_image(
             tmp.name,
@@ -132,14 +154,24 @@ async def process_image_json(
             events.append(event)
             if event.event == "captions_built":
                 content_list = event.data.get("content_list")
+                metadata_text = event.data.get("metadata_text")
 
-        if insert_bool and content_list:
-            logger.info("Inserting into LightRAG at %s", LIGHTRAG_URL)
+        if insert_bool:
+            upload_result = None
+            meta_result = None
+
             try:
-                insert_result = await insert_into_lightrag(LIGHTRAG_URL, content_list, file_source)
-                events.append(ProcessingEvent(event="insert_complete", data=insert_result))
+                upload_result = await upload_image_to_lightrag(LIGHTRAG_URL, tmp.name, filename=file_source)
+                events.append(ProcessingEvent(event="upload_complete", data=upload_result))
             except Exception as exc:
-                events.append(ProcessingEvent(event="insert_failed", data={"error": str(exc)}))
+                events.append(ProcessingEvent(event="upload_failed", data={"error": str(exc)}))
+
+            if metadata_text:
+                try:
+                    meta_result = await insert_metadata_into_lightrag(LIGHTRAG_URL, metadata_text, file_source)
+                    events.append(ProcessingEvent(event="metadata_insert_complete", data=meta_result))
+                except Exception as exc:
+                    events.append(ProcessingEvent(event="metadata_insert_failed", data={"error": str(exc)}))
 
         return {"events": [asdict(e) for e in events]}
     finally:

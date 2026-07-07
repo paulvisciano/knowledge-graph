@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from processors.exif_extractor import extract_exif_metadata
 from processors.face_recognizer import analyze_attributes, identify_person
 
 logger = logging.getLogger("api.processor")
+
+LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 
 
 @dataclass
@@ -36,6 +39,74 @@ class ProcessingResult:
     events: list[ProcessingEvent]
 
 
+def _build_metadata_text(
+    exif_data: dict[str, Any] | None,
+    face_data: dict[str, Any] | None,
+    image_path: str,
+) -> str:
+    """Build structured text from extracted metadata for LightRAG text insertion.
+
+    This becomes a separate knowledge graph document containing all the
+    EXIF/face information so entities like locations, people, dates, and
+    camera settings become queryable nodes.
+    """
+    sections: list[str] = []
+
+    filename = Path(image_path).name
+    sections.append(f"Image metadata for {filename}")
+
+    if exif_data:
+        lines: list[str] = []
+        date = exif_data.get("date_taken_friendly") or exif_data.get("date_taken")
+        if date:
+            lines.append(f"Date taken: {date}")
+        camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
+        if camera:
+            lines.append(f"Camera: {camera}")
+        location = exif_data.get("location")
+        if location:
+            if isinstance(location, str):
+                lines.append(f"Location: {location}")
+            elif isinstance(location, dict):
+                loc_str = ", ".join(str(v) for v in location.values() if v)
+                if loc_str:
+                    lines.append(f"Location: {loc_str}")
+        for key in ("f_number", "exposure_time", "iso", "focal_length"):
+            val = exif_data.get(key)
+            if val:
+                lines.append(f"{key}: {val}")
+        gps = exif_data.get("gps")
+        if gps and isinstance(gps, dict):
+            lat = gps.get("latitude")
+            lon = gps.get("longitude")
+            if lat and lon:
+                lines.append(f"GPS coordinates: {lat}, {lon}")
+        if lines:
+            sections.append("\n".join(lines))
+
+    if face_data and face_data.get("faces"):
+        face_lines: list[str] = []
+        for face in face_data["faces"]:
+            name = face.get("name", "Unknown person")
+            descriptors: list[str] = []
+            for attr in ("age", "gender", "emotion", "race"):
+                val = face.get(attr)
+                if val:
+                    descriptors.append(f"{attr}: {val}")
+            if descriptors:
+                face_lines.append(f"{name} ({', '.join(descriptors)})")
+            else:
+                face_lines.append(name)
+        if face_lines:
+            sections.append("People in this image: " + "; ".join(face_lines))
+
+    metadata_text = exif_data.get("metadata_text") if exif_data else None
+    if metadata_text:
+        sections.append(metadata_text)
+
+    return "\n\n".join(sections) if sections else f"Image: {filename}"
+
+
 def _build_captions(
     exif_data: dict[str, Any] | None,
     face_data: dict[str, Any] | None,
@@ -45,6 +116,7 @@ def _build_captions(
 
     if exif_data:
         metadata_text = exif_data.get("metadata_text")
+
         if metadata_text:
             captions.append(metadata_text)
         else:
@@ -171,31 +243,60 @@ async def process_image(
 
     captions = _build_captions(exif_data, face_data, image_path)
     content_list = _build_content_list(image_path, captions)
+    metadata_text = _build_metadata_text(exif_data, face_data, image_path)
 
     yield ProcessingEvent(event="captions_built", data={
         "captions": captions,
         "content_list": content_list,
+        "metadata_text": metadata_text,
     })
 
 
-async def insert_into_lightrag(
+async def upload_image_to_lightrag(
     lightrag_url: str,
-    content_list: list[dict[str, Any]],
+    image_path: str,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Upload the image file to LightRAG for VLM processing and entity extraction.
+
+    This triggers the full LightRAG pipeline: VLM describes the image,
+    then entities and relationships are extracted from the VLM description.
+
+    Returns the LightRAG API response.
+    """
+    import httpx
+
+    url = f"{lightrag_url.rstrip('/')}/documents/upload"
+    file_name = filename or Path(image_path).name
+
+    async with httpx.AsyncClient(timeout=300) as client:
+        with open(image_path, "rb") as f:
+            files = {"file": (file_name, f)}
+            resp = await client.post(url, files=files)
+
+    logger.info("LightRAG upload response (%d): %s", resp.status_code, resp.text[:500])
+
+    if resp.status_code != 200:
+        logger.error("LightRAG upload failed: %d %s", resp.status_code, resp.text)
+        return {"status": "error", "reason": f"upload_failed_{resp.status_code}", "detail": resp.text[:500]}
+
+    return resp.json()
+
+
+async def insert_metadata_into_lightrag(
+    lightrag_url: str,
+    metadata_text: str,
     file_source: str,
 ) -> dict[str, Any]:
-    text_parts: list[str] = []
-    for item in content_list:
-        if item.get("type") == "image" and item.get("image_caption"):
-            text_parts.extend(item["image_caption"])
+    """Insert extracted metadata as text into LightRAG.
 
-    if not text_parts:
-        logger.warning("No caption text to insert for %s", file_source)
-        return {"status": "skipped", "reason": "no_caption_text"}
-
-    text = "\n\n".join(text_parts)
+    This creates a separate knowledge graph document with EXIF locations,
+    face names, dates, camera settings, etc. as structured entities
+    alongside the VLM-generated description from the image upload.
+    """
     payload = json.dumps({
-        "text": text,
-        "file_source": file_source,
+        "text": metadata_text,
+        "file_source": f"{file_source}:metadata",
     }).encode("utf-8")
 
     url = f"{lightrag_url.rstrip('/')}/documents/text"
@@ -204,11 +305,11 @@ async def insert_into_lightrag(
         req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=30) as resp:
             body = resp.read().decode("utf-8")
-            logger.info("LightRAG response (%d): %s", resp.status, body[:500])
+            logger.info("LightRAG metadata insertion (%d): %s", resp.status, body[:500])
             return json.loads(body)
 
     try:
         return await asyncio.to_thread(_post)
     except Exception:
-        logger.exception("LightRAG insertion failed for %s", file_source)
-        return {"status": "error", "reason": "insertion_failed"}
+        logger.exception("LightRAG metadata insertion failed for %s", file_source)
+        return {"status": "error", "reason": "metadata_insertion_failed"}

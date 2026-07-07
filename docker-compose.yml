@@ -46,6 +46,8 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 5
+    networks:
+      - internal
 
   postgres:
     image: pgvector/pgvector:pg18
@@ -62,6 +64,58 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - internal
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: knowledge-graph-api
+    restart: unless-stopped
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    environment:
+      LIGHTRAG_URL: "http://lightrag:9621"
+      KNOWN_FACES_PATH: "/app/known_faces"
+    volumes:
+      - ./known_faces:/app/known_faces:ro
+      - ./inputs:/app/inputs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - internal
+
+  nexus:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    container_name: knowledge-graph-nexus
+    restart: unless-stopped
+    environment:
+      LLAMA_HOST: "${LLAMA_HOST:-host.docker.internal}"
+    ports:
+      - "${NEXUS_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+      lightrag:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
 
 volumes:
   lightrag_data:

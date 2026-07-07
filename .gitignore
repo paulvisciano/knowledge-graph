@@ -22,3 +22,16 @@ known_faces/*.pkl
 !known_faces/.gitkeep
 
 inputs/*
+
+# UI dependencies and build artifacts
+ui/node_modules/
+ui/.svelte-kit/
+ui/build/
+ui/bun.lock
+
+# Sisyphus workspace
+.sisyphus/
+
+# Python virtual environments
+.venv/
+venv/

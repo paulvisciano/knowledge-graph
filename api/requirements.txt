@@ -5,3 +5,7 @@ python-multipart>=0.0.18
 httpx>=0.28.0
 ExifRead>=3.0.0
 reverse_geocoder>=1.5.1
+deepface>=0.0.100
+tf-keras>=2.21.0
+numpy>=1.26.0
+opencv-python>=4.9.0

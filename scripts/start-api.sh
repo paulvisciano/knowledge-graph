@@ -16,7 +16,14 @@ echo ""
 
 cd "$PROJECT_DIR"
 
-PYTHONPATH="$PROJECT_DIR" python3 -m uvicorn api.main:app \
+PYTHON="$PROJECT_DIR/.venv/bin/python"
+if [[ ! -x "$PYTHON" ]]; then
+    echo "ERROR: Virtual environment not found at $PYTHON"
+    echo "Create it with: /opt/homebrew/bin/python3.11 -m venv .venv && .venv/bin/pip install -r api/requirements.txt"
+    exit 1
+fi
+
+PYTHONPATH="$PROJECT_DIR" "$PYTHON" -m uvicorn api.main:app \
     --host "$API_HOST" \
     --port "$API_PORT" \
     --no-access-log
