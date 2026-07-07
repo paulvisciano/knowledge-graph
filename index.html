@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graph — Project Overview</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #7ee787;
+    --warning: #d29922;
+    --danger: #f85149;
+    --success: #3fb950;
+    --purple: #d2a8ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; color: var(--accent); }
+  h2 { font-size: 1.4rem; margin: 2rem 0 0.75rem; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: var(--accent2); }
+  p { margin: 0.5rem 0; color: var(--text2); }
+  code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 0.85em;
+    color: var(--accent2);
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; color: var(--text); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin: 1rem 0;
+  }
+  .card.accent { border-left: 4px solid var(--accent); }
+  .card.success { border-left: 4px solid var(--success); }
+  .card.purple { border-left: 4px solid var(--purple); }
+  .card.warning { border-left: 4px solid var(--warning); }
+  .grid { display: grid; gap: 1rem; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+  th { background: var(--surface2); color: var(--text2); text-align: left; padding: 0.6rem 0.8rem; border-bottom: 2px solid var(--border); font-weight: 600; }
+  td { padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: var(--surface2); }
+  .badge {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 0.15em 0.5em; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.5px; vertical-align: middle;
+  }
+  .badge.green { background: rgba(63,185,80,0.15); color: var(--success); border: 1px solid var(--success); }
+  .badge.blue { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid var(--accent); }
+  .badge.purple { background: rgba(210,168,255,0.15); color: var(--purple); border: 1px solid var(--purple); }
+  .badge.yellow { background: rgba(210,153,34,0.15); color: var(--warning); border: 1px solid var(--warning); }
+  .badge.red { background: rgba(248,81,73,0.15); color: var(--danger); border: 1px solid var(--danger); }
+  .stat { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 0.8rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+  .arrow { color: var(--accent2); font-weight: 600; }
+  .muted { color: var(--text2); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .subtitle { color: var(--text2); font-size: 1.05rem; margin-bottom: 1.5rem; }
+  .mono { font-family: 'SF Mono', Consolas, monospace; }
+</style>
+</head>
+<body>
+
+<h1>Knowledge Graph</h1>
+<p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + custom UI</p>
+
+<!-- ─── Status Dashboard ────────────────────────────────────────────────── -->
+<h2>Current Status</h2>
+
+<div class="grid grid-3">
+  <div class="card success">
+    <div class="stat">Phase 1</div>
+    <div class="stat-label">Vanilla LightRAG</div>
+    <p>Docker + local LLMs running</p>
+  </div>
+  <div class="card">
+    <div class="stat" style="color:var(--text2)">Phase 2</div>
+    <div class="stat-label">Custom UI</div>
+    <p>Not started</p>
+  </div>
+  <div class="card">
+    <div class="stat" style="color:var(--text2)">Phase 3</div>
+    <div class="stat-label">Pipeline & Integrations</div>
+    <p>Not started</p>
+  </div>
+</div>
+
+<!-- ─── Architecture ────────────────────────────────────────────────────── -->
+<h2>Architecture</h2>
+
+<div class="card accent">
+<pre>
+<span class="muted">Browser</span>
+  <span class="arrow">→</span> <span class="badge blue">UI</span> <span class="muted">(localhost:3000, TODO)</span>
+
+<span class="muted">MCP Clients (Claude, etc.)</span>
+  <span class="arrow">→</span> <span class="badge purple">LightRAG MCP</span> <span class="muted">(port 9650, TODO)</span>
+
+<span class="muted">Any client</span>
+  <span class="arrow">→</span> <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
+        <span class="arrow">↓</span>
+  <span class="badge yellow">llama-server :8080</span> <span class="muted">LLM (Gemma 4 12B)</span>
+  <span class="badge yellow">llama-server :8081</span> <span class="muted">Embedding (nomic-embed-v2)</span>
+  <span class="badge yellow">llama-server :8082</span> <span class="muted">Reranker (bge-reranker-v2-m3)</span>
+</pre>
+</div>
+
+<h3>Service Inventory</h3>
+<table>
+  <tr><th>Service</th><th>Runtime</th><th>Port</th><th>Model</th><th>Size</th></tr>
+  <tr>
+    <td><span class="badge green">LightRAG</span></td>
+    <td>Docker</td>
+    <td><code>9621</code></td>
+    <td>—</td>
+    <td>~1.2 GB image</td>
+  </tr>
+  <tr>
+    <td><span class="badge yellow">LLM</span></td>
+    <td>Host (Metal)</td>
+    <td><code>8080</code></td>
+    <td>Gemma-4-12B-OBLITERATED-Q4_K_M</td>
+    <td>6.9 GB</td>
+  </tr>
+  <tr>
+    <td><span class="badge yellow">Embedding</span></td>
+    <td>Host (Metal)</td>
+    <td><code>8081</code></td>
+    <td>nomic-embed-text-v2-moe Q6_K</td>
+    <td>379 MB</td>
+  </tr>
+  <tr>
+    <td><span class="badge yellow">Reranker</span></td>
+    <td>Host (Metal)</td>
+    <td><code>8082</code></td>
+    <td>bge-reranker-v2-m3 Q4_K_M</td>
+    <td>418 MB</td>
+  </tr>
+</table>
+
+<!-- ─── Configuration ────────────────────────────────────────────────────── -->
+<h2>Configuration</h2>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>LLM Settings</h3>
+    <table>
+      <tr><td>Binding</td><td><code>openai</code> (llama-server OpenAI compat)</td></tr>
+      <tr><td>Model</td><td>Gemma-4-12B-OBLITERATED-Q4_K_M</td></tr>
+      <tr><td>Context</td><td>32,768 tokens</td></tr>
+      <tr><td>Extract temp</td><td>0.1</td></tr>
+      <tr><td>Query temp</td><td>0.7</td></tr>
+      <tr><td>VLM</td><td>Enabled (same model)</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Embedding & Reranking</h3>
+    <table>
+      <tr><td>Embedding model</td><td>nomic-embed-text-v2-moe Q6_K</td></tr>
+      <tr><td>Dimensions</td><td>768</td></tr>
+      <tr><td>Context</td><td>8,192 tokens</td></tr>
+      <tr><td>Reranker</td><td>bge-reranker-v2-m3 Q4_K_M</td></tr>
+      <tr><td>Rerank binding</td><td>jina (llama-server /v1/rerank)</td></tr>
+      <tr><td>Rerank by default</td><td>true</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Storage</h3>
+  <table>
+    <tr><th>Component</th><th>Current</th><th>PG Upgrade</th></tr>
+    <tr><td>Vector DB</td><td>NanoVectorDB <span class="badge blue">file</span></td><td>PGVectorStorage</td></tr>
+    <tr><td>Knowledge Graph</td><td>NetworkX <span class="badge blue">file</span></td><td>NetworkX (same)</td></tr>
+    <tr><td>Key-Value</td><td>JsonKVStorage <span class="badge blue">file</span></td><td>PGKVStorage</td></tr>
+    <tr><td>Doc Status</td><td>JsonDocStatusStorage <span class="badge blue">file</span></td><td>PGDocStatusStorage</td></tr>
+  </table>
+  <p class="muted" style="margin-top:0.5rem">File-based storage works for single-instance. Switch to PostgreSQL for persistence and scale — see docker-compose.yml postgres service (commented out).</p>
+</div>
+
+<!-- ─── Project Structure ────────────────────────────────────────────────── -->
+<h2>Project Structure</h2>
+
+<div class="card">
+<pre>
+knowledge-graph/
+├── docker-compose.yml      <span class="muted"># orchestrates all Docker services</span>
+├── .env                    <span class="muted"># local config (not committed)</span>
+├── .env.example            <span class="muted"># template to copy</span>
+├── README.md
+├── models → ~/models       <span class="muted"># symlink to GGUF model files</span>
+├── lightrag/               <span class="muted"># LightRAG source (local build, git repo)</span>
+│   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
+│   ├── Dockerfile           <span class="muted"># multi-stage build</span>
+│   ├── lightrag/            <span class="muted"># Python package source</span>
+│   ├── lightrag_webui/     <span class="muted"># React 19 frontend (bundled in Docker)</span>
+│   └── ...
+├── scripts/
+│   ├── start-llama-servers.sh  <span class="muted"># start LLM, embed, reranker (Metal GPU)</span>
+│   └── stop-all.sh              <span class="muted"># stop everything</span>
+├── ui/                     <span class="muted"># custom frontend (TODO)</span>
+└── secrets/                <span class="muted"># SSL certs (not committed)</span>
+</pre>
+</div>
+
+<!-- ─── Quick Start ──────────────────────────────────────────────────────── -->
+<h2>Quick Start</h2>
+
+<div class="card success">
+<pre><span class="muted"># 1. Configure</span>
+cp .env.example .env
+
+<span class="muted"># 2. Start llama-servers on host</span>
+./scripts/start-llama-servers.sh
+
+<span class="muted"># 3. Start LightRAG</span>
+docker compose up -d
+
+<span class="muted"># 4. Open WebUI</span>
+open http://localhost:9621
+
+<span class="muted"># Stop everything</span>
+./scripts/stop-all.sh</pre>
+</div>
+
+<!-- ─── Key Decisions ────────────────────────────────────────────────────── -->
+<h2>Key Decisions</h2>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Why file-based storage?</h3>
+    <p>Starting simple. NanoVectorDB + NetworkX + JsonKV require zero infra — no database to manage. The <code>docker-compose.yml</code> has a commented-out PostgreSQL service ready to uncomment when needed. Switching requires re-ingesting documents.</p>
+  </div>
+  <div class="card">
+    <h3>Why host llama-servers?</h3>
+    <p>Apple Silicon Metal GPU acceleration can't run in Docker. llama-server runs natively on the host with full Metal support. LightRAG in Docker connects via <code>host.docker.internal</code>.</p>
+  </div>
+  <div class="card">
+    <h3>Why local build?</h3>
+    <p><code>docker-compose.yml</code> builds from <code>./lightrag</code> source rather than pulling <code>ghcr.io/hkuds/lightrag:latest</code>. This lets us modify LightRAG code and rebuild with <code>docker compose up -d --build</code>.</p>
+  </div>
+  <div class="card">
+    <h3>Why nomic over bge-m3?</h3>
+    <p>768-dim vs 1024-dim. Smaller, faster on Apple Silicon. With reranking enabled the quality gap is negligible for English content. bge-m3 is better for multilingual — switch requires re-ingestion.</p>
+  </div>
+</div>
+
+<!-- ─── Endpoints ────────────────────────────────────────────────────────── -->
+<h2>Endpoints</h2>
+<table>
+  <tr><th>Service</th><th>URL</th><th>Notes</th></tr>
+  <tr><td>LightRAG WebUI</td><td><a href="http://localhost:9621">http://localhost:9621</a></td><td>Built-in React UI</td></tr>
+  <tr><td>LightRAG API Docs</td><td><a href="http://localhost:9621/docs">http://localhost:9621/docs</a></td><td>Swagger UI</td></tr>
+  <tr><td>LightRAG Health</td><td><a href="http://localhost:9621/health">http://localhost:9621/health</a></td><td>JSON status</td></tr>
+  <tr><td>LLM</td><td><code>http://localhost:8080</code></td><td>OpenAI-compatible</td></tr>
+  <tr><td>Embedding</td><td><code>http://localhost:8081</code></td><td>OpenAI-compatible</td></tr>
+  <tr><td>Reranker</td><td><code>http://localhost:8082/v1/rerank</code></td><td>Jina-compatible</td></tr>
+</table>
+
+<!-- ─── Changelog ────────────────────────────────────────────────────────── -->
+<h2>Changelog</h2>
+<div class="card">
+  <table>
+    <tr><th>Date</th><th>Change</th></tr>
+    <tr><td>2025-07-07</td><td>Initial setup: vanilla LightRAG in Docker, local build from source, file-based storage, 3 host llama-servers (Metal GPU)</td></tr>
+  </table>
+</div>
+
+</body>
+</html>
