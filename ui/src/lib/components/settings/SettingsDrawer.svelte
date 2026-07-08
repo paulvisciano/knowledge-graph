@@ -1,7 +1,6 @@
 <script lang="ts">
   import { settingsDrawerOpen } from '$lib/stores/ui';
   import Icon from '$lib/components/ui/Icon.svelte';
-  import MCPSettings from '$lib/components/mcp/MCPSettings.svelte';
   import SystemPromptEditor from '$lib/components/settings/SystemPromptEditor.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
 
@@ -47,7 +46,6 @@
           </button>
         </div>
         <div class="flex-1 overflow-y-auto overscroll-contain p-4">
-          <MCPSettings />
           <SystemPromptEditor />
         </div>
       </div>
@@ -83,7 +81,6 @@
         </div>
 
         <div class="drawer-content">
-          <MCPSettings />
           <SystemPromptEditor />
         </div>
       </aside>

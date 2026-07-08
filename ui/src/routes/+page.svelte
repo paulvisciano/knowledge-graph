@@ -22,6 +22,7 @@
   import AttachmentPreview from '$lib/components/ui/AttachmentPreview.svelte';
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
   import { lightragClient } from '$lib/services/lightrag-client';
+  import { kgApiClient } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
   import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, type Attachment } from '$lib/utils/file-utils';
 
@@ -798,7 +799,26 @@
       scrollToBottom();
     });
 
+    // Process image attachments through the KG pipeline in the background
+    processImageAttachments(sentAttachments);
+
     await streamAssistantResponse(sentAttachments);
+  }
+
+  /** Send image attachments through the knowledge graph pipeline (EXIF, faces, VLM, LightRAG). */
+  async function processImageAttachments(atts: Attachment[]) {
+    const imageFiles = atts.filter((a) => isImageType(a.mimeType) && a.file);
+    if (imageFiles.length === 0) return;
+
+    for (const att of imageFiles) {
+      try {
+        await kgApiClient.processImage(att.file, { insert: true });
+        // Refresh graph after successful insertion
+        graphStore.refresh();
+      } catch (err) {
+        console.warn(`KG image processing failed for ${att.name}:`, err);
+      }
+    }
   }
 
   /**

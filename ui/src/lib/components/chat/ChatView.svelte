@@ -5,6 +5,7 @@
   import ChatMessages from './ChatMessages.svelte';
   import ChatInput from './ChatInput.svelte';
   import { buildMessageContent, isImageType, type Attachment } from '$lib/utils/file-utils';
+  import { kgApiClient } from '$lib/services/kg-api-client';
 
   interface Conversation {
     id: string;
@@ -98,6 +99,14 @@
       conv.title = text.slice(0, 50) + (text.length > 50 ? '…' : '');
     }
     conv.updatedAt = Date.now();
+
+    // Process image attachments through the KG pipeline in the background
+    const imageFiles = attachments.filter((a) => isImageType(a.mimeType) && a.file);
+    for (const att of imageFiles) {
+      kgApiClient.processImage(att.file, { insert: true }).catch((err) => {
+        console.warn(`KG image processing failed for ${att.name}:`, err);
+      });
+    }
 
     const assistantMsg: ChatMessage = {
       id: generateId(),

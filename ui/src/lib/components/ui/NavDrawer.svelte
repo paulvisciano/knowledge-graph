@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navDrawerOpen, activeTab, settingsDrawerOpen, lightragStatus, llamaStatus, mcpStatus, type TabId } from '$lib/stores/ui';
+  import { navDrawerOpen, activeTab, settingsDrawerOpen, lightragStatus, llamaStatus, type TabId } from '$lib/stores/ui';
   import Icon from '$lib/components/ui/Icon.svelte';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
@@ -89,10 +89,6 @@
           <div class="status-item" title="llama-server">
             <StatusDot status={$llamaStatus} size={6} />
             <span class="status-label">LLM</span>
-          </div>
-          <div class="status-item" title="MCP">
-            <StatusDot status={$mcpStatus} size={6} />
-            <span class="status-label">MCP</span>
           </div>
         </div>
         <button

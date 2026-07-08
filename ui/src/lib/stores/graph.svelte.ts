@@ -71,6 +71,10 @@ class GraphStore {
     this.searchQuery = '';
   }
 
+  async refresh() {
+    await this.loadGraph(undefined, undefined, undefined);
+  }
+
   reset() {
     this.nodes = [];
     this.edges = [];

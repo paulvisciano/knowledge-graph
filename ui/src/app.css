@@ -308,3 +308,11 @@
   color: #00d4ff;
   transform: scale(0.92);
 }
+
+/* Framework7 sets `button { width: 100% }` globally — undo that for buttons
+   that use Tailwind utility sizing (w-9, h-9, shrink-0, etc.) so they size
+   to their content instead of stretching full-width. Scoped Svelte styles
+   and intentional full-width buttons are unaffected. */
+button:not(.tabbar-item):not(.mobile-topbar-btn) {
+  width: auto;
+}

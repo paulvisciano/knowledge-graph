@@ -8,21 +8,19 @@
   import MobileTabBar from '$lib/components/mobile/MobileTabBar.svelte';
   import { navDrawerOpen, historyPanelOpen, settingsDrawerOpen, activeTab, type TabId } from '$lib/stores/ui';
   import { connectionStore } from '$lib/stores/connection.svelte';
-  import { lightragStatus, llamaStatus, mcpStatus } from '$lib/stores/ui';
+  import { lightragStatus, llamaStatus } from '$lib/stores/ui';
   import { isMobile } from '$lib/composables/use-breakpoint';
 
   let { children }: { children: import('svelte').Snippet } = $props();
 
   $effect(() => {
     connectionStore.startPolling();
-    connectionStore.connectMcp();
     return () => connectionStore.stopPolling();
   });
 
   $effect(() => {
     lightragStatus.set(connectionStore.lightragConnected ? 'connected' : 'disconnected');
     llamaStatus.set(connectionStore.llamaConnected ? 'connected' : 'disconnected');
-    mcpStatus.set(connectionStore.mcpConnected ? 'connected' : 'disconnected');
   });
 
   function openMobileNav() {
