@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, UploadFile
 from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
-from api.services.processor import ProcessingEvent, process_image, upload_image_to_lightrag, insert_metadata_into_lightrag
+from api.services.processor import ProcessingEvent, process_image, upload_image_to_lightrag, describe_image_with_vlm, inject_exif_relations, link_exif_to_visual_entities
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ async def _process_and_stream(
 ):
     content_list: list[dict] | None = None
     metadata_text: str | None = None
+    exif_data: dict | None = None
 
     async for event in process_image(
         file_path,
@@ -47,19 +48,21 @@ async def _process_and_stream(
         if event.event == "captions_built":
             content_list = event.data.get("content_list")
             metadata_text = event.data.get("metadata_text")
+            exif_data = event.data.get("exif_data")
         yield ServerSentEvent(
             event="message",
             data=json.dumps(asdict(event)),
         )
 
     if insert:
-        # Step 1: Upload the image to LightRAG for VLM processing
         yield ServerSentEvent(
             event="message",
-            data=json.dumps({"event": "uploading_to_lightrag", "data": {"file_source": file_source}, "timestamp": time.time()}),
+            data=json.dumps({"event": "describing_image", "data": {"file_source": file_source}, "timestamp": time.time()}),
         )
         try:
-            upload_result = await upload_image_to_lightrag(LIGHTRAG_URL, file_path, filename=file_source)
+            upload_result = await upload_image_to_lightrag(
+                LIGHTRAG_URL, file_path, filename=file_source, metadata_text=metadata_text,
+            )
             yield ServerSentEvent(
                 event="message",
                 data=json.dumps({"event": "upload_complete", "data": upload_result, "timestamp": time.time()}),
@@ -70,22 +73,22 @@ async def _process_and_stream(
                 data=json.dumps({"event": "upload_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
             )
 
-        # Step 2: Insert extracted metadata as a separate text document
-        if metadata_text:
+        if exif_data:
             yield ServerSentEvent(
                 event="message",
-                data=json.dumps({"event": "inserting_metadata", "data": {"file_source": file_source}, "timestamp": time.time()}),
+                data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}),
             )
             try:
-                meta_result = await insert_metadata_into_lightrag(LIGHTRAG_URL, metadata_text, file_source)
+                injection_result = await inject_exif_relations(LIGHTRAG_URL, file_source, exif_data)
                 yield ServerSentEvent(
                     event="message",
-                    data=json.dumps({"event": "metadata_insert_complete", "data": meta_result, "timestamp": time.time()}),
+                    data=json.dumps({"event": "exif_relations_complete", "data": injection_result, "timestamp": time.time()}),
                 )
             except Exception as exc:
+                logger.exception("EXIF relation injection failed for %s", file_source)
                 yield ServerSentEvent(
                     event="message",
-                    data=json.dumps({"event": "metadata_insert_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
+                    data=json.dumps({"event": "exif_relations_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
                 )
 
 
@@ -144,6 +147,7 @@ async def process_image_json(
         events: list[ProcessingEvent] = []
         content_list: list[dict] | None = None
         metadata_text: str | None = None
+        exif_data: dict | None = None
 
         async for event in process_image(
             tmp.name,
@@ -155,23 +159,26 @@ async def process_image_json(
             if event.event == "captions_built":
                 content_list = event.data.get("content_list")
                 metadata_text = event.data.get("metadata_text")
+                exif_data = event.data.get("exif_data")
 
         if insert_bool:
             upload_result = None
-            meta_result = None
 
             try:
-                upload_result = await upload_image_to_lightrag(LIGHTRAG_URL, tmp.name, filename=file_source)
+                upload_result = await upload_image_to_lightrag(
+                    LIGHTRAG_URL, tmp.name, filename=file_source, metadata_text=metadata_text,
+                )
                 events.append(ProcessingEvent(event="upload_complete", data=upload_result))
             except Exception as exc:
                 events.append(ProcessingEvent(event="upload_failed", data={"error": str(exc)}))
 
-            if metadata_text:
+            if exif_data:
                 try:
-                    meta_result = await insert_metadata_into_lightrag(LIGHTRAG_URL, metadata_text, file_source)
-                    events.append(ProcessingEvent(event="metadata_insert_complete", data=meta_result))
+                    injection_result = await inject_exif_relations(LIGHTRAG_URL, file_source, exif_data)
+                    events.append(ProcessingEvent(event="exif_relations_complete", data=injection_result))
                 except Exception as exc:
-                    events.append(ProcessingEvent(event="metadata_insert_failed", data={"error": str(exc)}))
+                    logger.exception("EXIF relation injection failed for %s", file_source)
+                    events.append(ProcessingEvent(event="exif_relations_failed", data={"error": str(exc)}))
 
         return {"events": [asdict(e) for e in events]}
     finally:
@@ -182,3 +189,14 @@ async def process_image_json(
 @router.get("/health")
 async def images_health():
     return {"status": "ok", "lightrag_url": LIGHTRAG_URL, "known_faces_path": KNOWN_FACES_PATH}
+
+
+@router.post("/link-exif-entities")
+async def link_exif_entities(file_source: str, photo_name: str):
+    """Link LLM-extracted visual entities to the photo node in the knowledge graph.
+
+    Call this after LightRAG has finished processing a document. It finds
+    entities with matching file_path and creates edges from them to the photo node.
+    """
+    result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
+    return result

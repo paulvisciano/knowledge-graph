@@ -79,11 +79,18 @@ services:
     environment:
       LIGHTRAG_URL: "http://lightrag:9621"
       KNOWN_FACES_PATH: "/app/known_faces"
+      VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
+      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-gemma-4-12B-it-qat-UD-Q4_K_XL}"
+      VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
+      FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-retinaface}"
+      FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
     volumes:
       - ./known_faces:/app/known_faces:ro
       - ./inputs:/app/inputs
+      - deepface_weights:/root/.deepface
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: ${API_MEMORY_LIMIT:-4g}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
@@ -120,3 +127,4 @@ networks:
 volumes:
   lightrag_data:
   postgres_data:
+  deepface_weights:
