@@ -162,7 +162,7 @@
     <span class="badge green">Phase 2 — Complete</span>
     <strong>Image Processing + API Backend</strong>
   </div>
-  <p style="margin-top:0.5rem">FastAPI backend running on host:8000. EXIF extraction and face recognition fully tested end-to-end.</p>
+  <p style="margin-top:0.5rem">FastAPI backend running on host:8000. EXIF extraction, face recognition, and VLM-based image ingestion all tested end-to-end. LightRAG PGVectorStorage bug (OpenAI SDK response parsing) fixed and verified.</p>
 </div>
 
 <div class="card success" style="margin-bottom:1rem">
@@ -170,7 +170,16 @@
     <span class="badge green">Phase 3 — Complete</span>
     <strong>Nexus UI + Docker Integration</strong>
   </div>
-  <p style="margin-top:0.5rem">SvelteKit frontend running in Docker at localhost:3000 via nginx reverse proxy. Chat, graph visualization, image ingestion, MCP tool integration, and settings — all wired to LightRAG + API backend.</p>
+  <p style="margin-top:0.5rem">Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization, image ingestion with real-time SSE, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+</div>
+
+<div class="card accent" style="margin-bottom:1rem">
+  <div style="display:flex;align-items:center;gap:0.75rem">
+    <span class="badge blue">Phase 4 — In Progress</span>
+    <strong>Connected Knowledge Graph</strong>
+  </div>
+  <p style="margin-top:0.5rem">Photo node as central hub. EXIF entities (Date, Location, Camera) linked via <code>taken_on</code>/<code>taken_at</code>/<code>taken_with</code> edges. Visual entities linked via <code>appears_in</code> edges. Combined VLM+metadata document. Context-aware VLM prompt. Day-level Date nodes. Deduplication against existing labels. 18 connected nodes, 0 isolated, no duplicates.</p>
+  <p class="muted" style="margin-top:0.25rem"><strong>Blocked:</strong> 409 stale index after DELETE (clean-slate only). <strong>Remaining:</strong> Automate post-processing linking, real-time progressive UI.</p>
 </div>
 
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
@@ -185,20 +194,20 @@
   <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Working LightRAG instance with local LLMs + PostgreSQL, accessible via API and built-in WebUI.</p>
 </div>
 
-<div class="card" style="margin-bottom:0.5rem">
+  <div class="card accent" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
     <span class="badge green">Phase 2 ✓</span>
-    <strong style="font-size:1.1rem">Image Processing + API Backend</strong>
+    <strong style="font-size:1.1rem">Image Processing + Knowledge Graph Intelligence</strong>
   </div>
-  <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction and face recognition, then uploads the image to LightRAG for VLM description + entity extraction AND inserts extracted metadata as a separate document. Two-step ingestion ensures both visual understanding (VLM) and structured metadata (locations, people, dates) become queryable knowledge graph entities.</p>
-  <p style="margin-top:0.5rem"><strong>Status:</strong> EXIF extraction ✓ — Face recognition ✓ — LightRAG dual-ingestion (image upload + metadata text) ✓</p>
+  <p>FastAPI backend (<code>api/</code>) processes images through EXIF extraction, face recognition, and VLM-based description generation. Images are inserted as a <strong>single combined document</strong> (VLM description + EXIF metadata context) into LightRAG. EXIF metadata (Date, Location, Camera) is injected as separate entity nodes linked to a central <strong>Photo node</strong> via <code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code> edges. After LightRAG processes the document, visual entities (Backyard, Person, etc.) are linked to the Photo node via <code>appears_in</code> edges, creating a fully connected knowledge graph.</p>
+  <p style="margin-top:0.5rem"><strong>Status:</strong> EXIF extraction ✓ — Face recognition ✓ — VLM description (context-aware prompt) ✓ — Combined document insertion ✓ — EXIF graph injection ✓ — Visual entity linking ✓ — Knowledge graph fully connected ✓</p>
   <table style="margin-top:0.5rem;font-size:0.85rem">
     <tr><td><code>processors/exif_extractor.py</code></td><td>EXIF + GPS → reverse geocoded location string</td></tr>
-    <tr><td><code>processors/face_recognizer.py</code></td><td>DeepFace ArcFace: detect, embed, cluster, identify, attribute analysis</td></tr>
-    <tr><td><code>api/services/processor.py</code></td><td>Async orchestrator: EXIF → faces → upload image to LightRAG + insert metadata text</td></tr>
-    <tr><td><code>api/routes/images.py</code></td><td>SSE + JSON endpoints with real-time progress for both steps</td></tr>
+    <tr><td><code>processors/face_recognizer.py</code></td><td>DeepFace: detect, embed, cluster, identify, attribute analysis</td></tr>
+    <tr><td><code>api/services/processor.py</code></td><td>Async orchestrator: EXIF → faces → VLM description (with EXIF context) → combined text insert → EXIF entity injection → visual entity linking</td></tr>
+    <tr><td><code>api/routes/images.py</code></td><td>SSE + JSON endpoints + <code>POST /images/link-exif-entities</code> for post-processing graph linking</td></tr>
   </table>
-  <p class="muted" style="margin-top:0.5rem"><strong>API Endpoints:</strong> <code>POST /images/process</code> (SSE stream), <code>POST /images/process-json</code> (JSON), <code>GET /images/health</code></p>
+  <p class="muted" style="margin-top:0.5rem"><strong>API Endpoints:</strong> <code>POST /images/process</code> (SSE stream), <code>POST /images/process-json</code> (JSON), <code>POST /images/link-exif-entities</code> (post-processing), <code>GET /images/health</code></p>
 </div>
 
 <div class="card success" style="margin-bottom:0.5rem">
@@ -210,13 +219,15 @@
   <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> — chat + graph exploration + image ingestion + MCP tool calls.</p>
 </div>
 
-<div class="card" style="margin-bottom:0.5rem">
+  <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge yellow">Phase 4 — Planned</span>
+    <span class="badge blue">Phase 4 — In Progress</span>
     <strong style="font-size:1.1rem">Enhanced Image Intelligence</strong>
   </div>
-  <p>Deeper face clustering (batch face_index.py), face crop review UI, object detection, OCR, and scene classification — all as structured KG entities.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Rich image pipeline that turns photos into queryable knowledge — "find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
+  <p>Connected knowledge graph with Photo node as central hub. EXIF metadata (Date, Location, Camera) and VLM-extracted visual entities (people, objects, scenes) all link to a single <code>filename (Photo)</code> node via typed edges (<code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code>, <code>appears_in</code>). Date nodes use day-level granularity so same-day photos link together. Deduplication prevents "Saint Petersburg" vs "Saint Petersburg, Florida, US (Location)" duplicates.</p>
+  <p style="margin-top:0.5rem"><strong>Done:</strong> Combined VLM+metadata document ✓ — Context-aware VLM prompt (EXIF metadata prepended) ✓ — EXIF entity injection (<code>inject_exif_relations()</code>) ✓ — Visual entity linking (<code>link_exif_to_visual_entities()</code>) ✓ — Day-level Date nodes ✓ — Deduplication (fuzzy matching against existing labels) ✓ — URL encoding fix for labels with spaces ✓ — 400/409 duplicate handling ✓ — <code>POST /images/link-exif-entities</code> endpoint ✓</p>
+  <p style="margin-top:0.5rem"><strong>Remaining:</strong> Automate <code>link_exif_to_visual_entities</code> call after LightRAG processing completes (currently manual endpoint) — Fix 409 stale index issue after <code>DELETE /documents</code> (EXIF entities not created on clean slate) — Real-time progressive UI (image → EXIF nodes → visual entities) — Face clustering (batch face_index.py) — Object detection, OCR, scene classification</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Real-time graph UI that shows entities appearing as they're processed. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
 </div>
 
 <!-- ─── Architecture ────────────────────────────────────────────────────── -->
@@ -233,15 +244,16 @@
   <span class="muted">  └─ /api/sync/    → API Backend (WebSocket)</span>
         <span class="arrow">↓</span>
   <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE</span>
-  <span class="muted">  ├─ EXIF extraction</span>
+  <span class="muted">  ├─ EXIF extraction → reverse geocode</span>
   <span class="muted">  ├─ Face recognition (DeepFace)</span>
-  <span class="muted">  ├─ Upload image → LightRAG (VLM description + entities)</span>
-  <span class="muted">  ├─ Insert metadata text → LightRAG (locations, people, dates)</span>
+  <span class="muted">  ├─ VLM describe image (with EXIF context) → combined text insert</span>
+  <span class="muted">  ├─ EXIF entity injection (Date, Location, Camera nodes + edges)</span>
+  <span class="muted">  ├─ Visual entity linking (appears_in edges to Photo node)</span>
   <span class="muted">  └─ SSE progress streaming</span>
-        <span class="arrow">↓</span> <span class="muted">(two-step ingestion)</span>
+        <span class="arrow">↓</span> <span class="muted">(single combined document + graph entity injection)</span>
   <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
-  <span class="muted">  ├─ Image upload → VLM describes image → entity extraction</span>
-  <span class="muted">  └─ Metadata text → entity extraction (GPS, faces, camera)</span>
+  <span class="muted">  ├─ Combined VLM+metadata text → entity extraction</span>
+  <span class="muted">  └─ Graph entity/relation CRUD for EXIF and visual linking</span>
         <span class="arrow">↓</span>
   <span class="badge purple">PostgreSQL</span> <span class="muted">KV + Vector + DocStatus</span>
   <span class="badge yellow">llama-server :8080</span> <span class="muted">LLM (Gemma 4 12B)</span>
@@ -360,9 +372,9 @@ knowledge-graph/
 │   ├── requirements.txt    <span class="muted"># Python dependencies</span>
 │   ├── routes/
 │   │   ├── health.py       <span class="muted"># GET /health</span>
-│   │   └── images.py        <span class="muted"># POST /images/process (SSE), /images/process-json</span>
+│   │   └── images.py        <span class="muted"># POST /images/process (SSE), /process-json, /link-exif-entities</span>
 │   └── services/
-│       └── processor.py     <span class="muted"># EXIF → faces → image upload + metadata insert</span>
+│       └── processor.py     <span class="muted"># EXIF → faces → VLM (context-aware) → combined doc insert → EXIF entity injection → visual entity linking</span>
 ├── lightrag/               <span class="muted"># LightRAG source (local build, git repo)</span>
 │   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
@@ -452,6 +464,22 @@ open http://localhost:9621
     <p><code>docker-compose.yml</code> builds from <code>./lightrag</code> source rather than pulling <code>ghcr.io/hkuds/lightrag:latest</code>. This lets us modify LightRAG code and rebuild with <code>docker compose up -d --build</code>.</p>
   </div>
   <div class="card">
+    <h3>Why VLM-based image ingestion?</h3>
+    <p>LightRAG's <code>/documents/upload</code> only accepts text-based file types (txt, pdf, md, etc.). Image files (<code>.jpg</code>, <code>.png</code>) require the MinerU or Docling parser engines, neither of which is configured in our stack. Instead of deploying an external parser, we send images directly to the VLM (Gemma 4 with mmproj on the same llama-server) to generate a description, then insert that description as text into LightRAG via <code>/documents/text</code>. EXIF metadata (location, date, camera) is injected as separate entity nodes linked to a central Photo node.</p>
+  </div>
+  <div class="card">
+    <h3>Why a combined document instead of separate VLM + metadata docs?</h3>
+    <p>Initially, VLM descriptions and EXIF metadata were inserted as two separate LightRAG documents. This created disconnected subgraphs — "Saint Petersburg" from metadata had no edge to "Backyard" from the VLM description, because LightRAG's entity extraction LLM treated them as unrelated. Combining them into a single document (with EXIF context prepended to the VLM prompt) and injecting EXIF entities as graph nodes with edges to a Photo hub node ensures everything is connected.</p>
+  </div>
+  <div class="card">
+    <h3>Why EXIF entity injection + visual entity linking?</h3>
+    <p>Even in a combined document, LightRAG's entity extraction can't reliably infer that "Saint Petersburg" (from EXIF) and "Backyard" (from VLM) are about the same photo. The reference implementation (<code>memory-search-latest</code>) solves this by programmatically creating Date, Location, and Camera entity nodes with edges (<code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code>) to the photo node, and linking visual entities (Backyard, Person, etc.) back to the photo via <code>appears_in</code> edges. This makes the Photo node the central hub connecting all subgraphs.</p>
+  </div>
+  <div class="card">
+    <h3>Why patch LightRAG's openai.py?</h3>
+    <p>The OpenAI Python SDK (v2.36.0) returns a <code>list</code> instead of <code>CreateEmbeddingResponse</code> when the <code>base_url</code> doesn't end with <code>/v1</code>. Since our <code>EMBEDDING_BINDING_HOST=http://host.docker.internal:8081</code> lacks the <code>/v1</code> suffix, every embedding call crashed with <code>'list' object has no attribute 'data'</code>. The fix normalizes both response shapes and handles the extra nesting in the list case. This is a known SDK compatibility issue with OpenAI-compatible servers.</p>
+  </div>
+  <div class="card">
     <h3>Why standalone processors?</h3>
     <p>Image processing modules live in <code>processors/</code> outside the <code>lightrag/</code> submodule. They talk to LightRAG via HTTP API, not by patching its source. This means LightRAG updates don't break image processing.</p>
   </div>
@@ -491,8 +519,21 @@ open http://localhost:9621
     <tr><td>2025-07-07</td><td>Added FastAPI backend: <code>api/</code> with SSE streaming for real-time image processing progress, JSON endpoint, health checks. Tested end-to-end: EXIF extraction → caption building → LightRAG insertion</td></tr>
     <tr><td>2025-07-07</td><td>Committed image processing pipeline + API backend (<code>83e379b</code>). Face recognition tested but blocked on macOS Python 3.9 (TensorFlow mutex) — works in principle, needs Python 3.11+ or Docker</td></tr>
     <tr><td>2025-07-07</td><td>Fixed face recognition blocker: created Python 3.11 venv (<code>.venv/</code>), added <code>deepface</code>, <code>tf-keras</code>, <code>opencv-python</code> to requirements. Face recognition now fully working — 3 faces detected with age, gender, emotion, race attributes. Updated <code>start-api.sh</code> to use venv Python.</td></tr>
-    <tr><td>2025-07-07</td><td>Refactored LightRAG ingestion to two-step pipeline: (1) upload image file via <code>/documents/upload</code> for VLM description + entity extraction, (2) insert extracted metadata as text via <code>/documents/text</code> for structured entity creation (locations, people, dates). SSE events now stream both upload and metadata insertion progress.</td></tr>
+    <tr><td>2025-07-07</td><td>Initial two-step ingestion pipeline: send images to VLM for description generation + insert metadata as text via <code>/documents/text</code>. SSE events stream both VLM description and metadata insertion progress.</td></tr>
     <tr><td>2025-07-07</td><td>Integrated Nexus UI: SvelteKit frontend with chat, 3D graph visualization (3d-force-graph + Three.js), image ingestion, MCP tool calls, and settings. Dockerized behind nginx reverse proxy at <code>:3000</code>. Added API and Nexus services to docker-compose. Fixed missing <code>MCP_API</code> and <code>SYNC_URL</code> exports in constants.ts. Added nginx routes for MCP and WebSocket sync.</td></tr>
+    <tr><td>2025-07-07</td><td>Fixed image ingestion pipeline: LightRAG's <code>/documents/upload</code> rejects image files (only text-based formats). Rewrote <code>upload_image_to_lightrag()</code> to send images directly to the VLM (Gemma 4 with mmproj) for description generation, then insert the description as text into LightRAG via <code>/documents/text</code>. Added VLM env vars (<code>VLM_LLM_BINDING_HOST</code>, <code>VLM_LLM_MODEL</code>, <code>VLM_LLM_BINDING_API_KEY</code>) to API container. Fixed API Dockerfile <code>COPY requirements.txt</code> path.</td></tr>
+    <tr><td>2025-07-07</td><td>Fixed critical LightRAG bug: OpenAI SDK v2.36.0 returns a <code>list</code> instead of <code>CreateEmbeddingResponse</code> when <code>base_url</code> doesn't end with <code>/v1</code>. This caused every embedding call during document processing to crash with <code>'list' object has no attribute 'data'</code>, and a secondary <code>ndim</code> error where embeddings had shape <code>(1,1,768)</code> instead of <code>(1,768)</code>. Patched <code>lightrag/llm/openai.py</code> to normalize both response shapes and flatten the extra nesting in the list case. Full pipeline now works end-to-end: document insertion ✓, image processing ✓, VLM description ✓, knowledge graph queries ✓</td></tr>
+    <tr><td>2025-07-08</td><td>Connected knowledge graph: merged VLM description and EXIF metadata into a single LightRAG document. Previously two separate docs created disconnected subgraphs ("Saint Petersburg" from metadata had no edge to "Backyard" from VLM). Single document with context-aware VLM prompt (EXIF metadata prepended) ensures coherent entity extraction.</td></tr>
+    <tr><td>2025-07-08</td><td>Implemented <code>inject_exif_relations()</code>: programmatically creates Photo entity node (<code>filename (Photo)</code>), Date node (day-level granularity: <code>2026-06-27 (Date)</code>), Location node, and Camera node. Links Photo→Date (<code>taken_on</code>), Photo→Location (<code>taken_at</code>), Photo→Camera (<code>taken_with</code>), and cross-links between EXIF entities. Day-level dates enable same-day photo linking.</td></tr>
+    <tr><td>2025-07-08</td><td>Implemented <code>link_exif_to_visual_entities()</code>: after LightRAG processes a document, queries all graph labels to find visual entities (people, objects, scenes) with matching <code>file_path</code>, creates <code>appears_in</code> edges from each visual entity back to the Photo node. Makes Photo node the central hub connecting all subgraphs.</td></tr>
+    <tr><td>2025-07-08</td><td>Improved VLM prompt: changed from generic "Describe this image in detail..." to structured knowledge-graph prompt requesting specific proper nouns, spatial relationships, verbatim text, physical attributes, and scene types.</td></tr>
+    <tr><td>2025-07-08</td><td>Added EXIF context to VLM prompt: <code>describe_image_with_vlm()</code> accepts <code>context</code> param. Metadata sentence ("This image was taken in Saint Petersburg, Florida, US, on 2026-06-27 at 17:05, with a Google Pixel 10 Pro XL.") prepended to VLM prompt so description naturally references location/camera.</td></tr>
+    <tr><td>2025-07-08</td><td>Removed metadata text from LightRAG document: since EXIF entities are now injected as separate graph nodes with edges, the metadata sentence is no longer appended to the LightRAG text document. Document is just <code>Image: {filename}\n\n{description}</code>.</td></tr>
+    <tr><td>2025-07-08</td><td>Added deduplication in <code>inject_exif_relations()</code>: before creating EXIF entities, checks existing graph labels. If "Saint Petersburg" already exists (from LLM extraction), links to it instead of creating "Saint Petersburg, Florida, US (Location)". Uses fuzzy matching on raw value to avoid duplicate nodes.</td></tr>
+    <tr><td>2025-07-08</td><td>Fixed URL encoding in <code>link_exif_to_visual_entities()</code>: labels with spaces (e.g., "Saint Petersburg, Florida, US") were failing with 404. Added <code>urllib.parse.quote(label, safe='')</code> for proper URL encoding.</td></tr>
+    <tr><td>2025-07-08</td><td>Fixed 400 Bad Request handling: LightRAG returns 400 (not just 409) for duplicate entity/relation creation. Updated all URLError handlers to treat both 400 and 409 as "already exists" and continue.</td></tr>
+    <tr><td>2025-07-08</td><td>Added <code>POST /images/link-exif-entities</code> endpoint: triggers <code>link_exif_to_visual_entities()</code> after LightRAG finishes processing a document. Required because LightRAG entity extraction is asynchronous.</td></tr>
+    <tr><td>2025-07-08</td><td>Known issue: 409 stale index after <code>DELETE /documents</code>. LightRAG's entity index returns 409 Conflict for entities that don't actually exist after a graph clear. EXIF entities must be re-created after processing completes or via the <code>/link-exif-entities</code> endpoint. Only affects clean-slate testing; production (no clears) works fine.</td></tr>
   </table>
 </div>
 
