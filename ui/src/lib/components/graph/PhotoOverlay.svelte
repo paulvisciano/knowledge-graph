@@ -1,10 +1,8 @@
 <script lang="ts">
   import { graphStore } from '$lib/stores/graph.svelte';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
-  import type { KGNode } from '$lib/constants';
 
   let {
-    graphCanvas,
     containerEl,
   }: {
     graphCanvas: any;
@@ -16,259 +14,245 @@
     dataUrl: string;
     status: string;
     stageLabel: string;
-    x: number;
-    y: number;
-    visible: boolean;
     complete: boolean;
     error: boolean;
     errorMsg: string;
-  };
-
-  const STAGE_ICONS: Record<string, string> = {
-    attaching: '📷',
-    extracting_metadata: '📋',
-    creating_entities: '🔷',
-    uploading: '☁️',
-    processing_ai: '🧠',
-    linking_entities: '🔗',
-    complete: '✅',
-    error: '❌',
+    exifRows: { label: string; value: string }[];
+    showExif: boolean;
   };
 
   let cards = $state<PhotoCard[]>([]);
-  let rafId = 0;
 
-  function updateCards() {
-    const graph = graphCanvas?.getGraph?.();
-    const rect = containerEl?.getBoundingClientRect();
-    if (!graph || !rect) {
-      rafId = requestAnimationFrame(updateCards);
-      return;
-    }
-
+  $effect(() => {
     const photos = graphStore.photoImages;
     const statuses = imageProcessingStore.statuses;
     const newCards: PhotoCard[] = [];
 
     for (const [nodeId, dataUrl] of Object.entries(photos)) {
       const procStatus = statuses[nodeId];
-      const stage = procStatus?.stage ?? 'attaching';
-      const stageLabel = procStatus?.stageLabel ?? 'Attaching image...';
+      const stage = procStatus?.stage ?? 'extracting_metadata';
+      const stageLabel = procStatus?.stageLabel ?? 'Analyzing image...';
       const errorMsg = procStatus?.error ?? '';
-
-      let x = 0;
-      let y = 0;
-      let visible = false;
-
-      try {
-        const data = graph.graphData();
-        const node = data?.nodes?.find((n: KGNode) => String(n.id) === nodeId);
-        if (node && node.x !== undefined) {
-          const coords = graph.graph2ScreenCoords(node.x, node.y, node.z);
-          x = coords.x - rect.left;
-          y = coords.y - rect.top;
-          visible = true;
-        }
-      } catch {}
+      const exifRows = imageProcessingStore.getExifSummary(nodeId);
+      const showExif = stage !== 'extracting_metadata' && exifRows.length > 0;
 
       newCards.push({
         nodeId,
         dataUrl,
         status: stage,
         stageLabel,
-        x,
-        y,
-        visible,
         complete: stage === 'complete',
         error: stage === 'error',
         errorMsg,
+        exifRows,
+        showExif,
       });
     }
 
     cards = newCards;
-    rafId = requestAnimationFrame(updateCards);
-  }
-
-  onMount(() => {
-    rafId = requestAnimationFrame(updateCards);
-    return () => cancelAnimationFrame(rafId);
   });
-
-  import { onMount } from 'svelte';
 </script>
 
 {#each cards as card (card.nodeId)}
-  {#if card.visible}
-    <div
-      class="photo-card"
-      style="left:{card.x + 20}px;top:{card.y - 120}px;"
-      class:complete={card.complete}
-      class:error={card.error}
-    >
-      <div class="photo-card-image">
-        <img src={card.dataUrl} alt={card.nodeId} />
-        {#if !card.complete && !card.error}
-          <div class="scan-line"></div>
-        {/if}
-        {#if card.complete}
-          <div class="photo-card-check">✓</div>
-        {/if}
-        {#if card.error}
-          <div class="photo-card-error-badge">!</div>
-        {/if}
-      </div>
-      <div class="photo-card-info">
-        <div class="photo-card-filename">{card.nodeId.replace(' (Photo)', '')}</div>
-        <div class="photo-card-status" class:status-complete={card.complete} class:status-error={card.error}>
-          {#if !card.complete && !card.error}
-            <span class="status-spinner"></span>
-          {/if}
-          {STAGE_ICONS[card.status] ?? '📷'} {card.stageLabel}
+  <div class="photo-overlay" class:complete={card.complete} class:error={card.error}>
+    <div class="photo-image-wrapper">
+      <img src={card.dataUrl} alt={card.nodeId} />
+      {#if !card.complete && !card.error}
+        <div class="progress-bar"><div class="progress-bar-inner"></div></div>
+      {/if}
+      {#if card.complete}
+        <div class="photo-badge-check">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-        {#if card.error && card.errorMsg}
-          <div class="photo-card-error-msg">{card.errorMsg}</div>
-        {/if}
-      </div>
+      {/if}
+      {#if card.error}
+        <div class="photo-badge-error">!</div>
+      {/if}
     </div>
-  {/if}
+    <div class="photo-info">
+      <div class="photo-filename">{card.nodeId.replace(' (Photo)', '')}</div>
+      <div class="photo-status" class:status-done={card.complete} class:status-err={card.error}>
+        {#if !card.complete && !card.error}
+          <span class="spinner"></span>
+        {/if}
+        {card.stageLabel}
+      </div>
+      {#if card.error && card.errorMsg}
+        <div class="photo-error-msg">{card.errorMsg}</div>
+      {/if}
+      {#if card.showExif}
+        <div class="photo-exif">
+          {#each card.exifRows as row}
+            <div class="exif-row">
+              <span class="exif-label">{row.label}</span>
+              <span class="exif-value">{row.value}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </div>
 {/each}
 
 <style>
-  .photo-card {
-    position: absolute;
-    z-index: 40;
-    pointer-events: none;
+  .photo-overlay {
+    position: fixed;
+    top: 45%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 50;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    background: rgba(17, 24, 39, 0.92);
-    border: 1px solid rgba(0, 255, 255, 0.3);
-    border-radius: 12px;
-    padding: 10px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(0, 255, 255, 0.1);
-    transition: border-color 0.4s, box-shadow 0.4s;
-    min-width: 240px;
-    max-width: 320px;
+    gap: 16px;
+    background: #1e1e2e;
+    border: 1px solid #3a3a4e;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+    min-width: 380px;
+    max-width: 480px;
+    animation: overlay-in 0.25s ease-out;
+    pointer-events: none;
   }
 
-  .photo-card.complete {
-    border-color: rgba(34, 197, 94, 0.5);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(34, 197, 94, 0.15);
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
   }
 
-  .photo-card.error {
-    border-color: rgba(255, 51, 102, 0.5);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 51, 102, 0.15);
+  .photo-overlay.complete {
+    border-color: #4ade80;
   }
 
-  .photo-card-image {
+  .photo-overlay.error {
+    border-color: #f87171;
+  }
+
+  .photo-image-wrapper {
     position: relative;
     width: 100%;
-    aspect-ratio: 4/3;
-    flex-shrink: 0;
-    border-radius: 8px;
+    aspect-ratio: 4 / 3;
+    border-radius: 10px;
     overflow: hidden;
+    background: #2a2a3a;
   }
 
-  .photo-card-image img {
+  .photo-image-wrapper img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 8px;
+    display: block;
   }
 
-  .scan-line {
+  .progress-bar {
     position: absolute;
+    bottom: 0;
     left: 0;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.8), transparent);
-    box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
-    animation: scan 1.8s ease-in-out infinite;
+    right: 0;
+    height: 3px;
+    background: #3a3a4e;
   }
 
-  @keyframes scan {
-    0% { top: 0; }
-    50% { top: calc(100% - 2px); }
-    100% { top: 0; }
+  .progress-bar-inner {
+    height: 100%;
+    background: #60a5fa;
+    animation: progress-slide 1.5s ease-in-out infinite;
+    width: 40%;
+    border-radius: 0 2px 2px 0;
   }
 
-  .photo-card-check {
+  @keyframes progress-slide {
+    0% { transform: translateX(-100%); }
+    50% { width: 60%; }
+    100% { transform: translateX(350%); }
+  }
+
+  .photo-badge-check {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(34, 197, 94, 0.25);
-    color: #22c55e;
-    font-size: 36px;
-    font-weight: 700;
-    border-radius: 8px;
+    background: rgba(74, 222, 128, 0.2);
   }
 
-  .photo-card-error-badge {
+  .photo-badge-check svg {
+    width: 48px;
+    height: 48px;
+    color: #4ade80;
+  }
+
+  .photo-badge-error {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 51, 102, 0.25);
-    color: #ff3366;
-    font-size: 36px;
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+    font-size: 48px;
     font-weight: 700;
-    border-radius: 8px;
   }
 
-  .photo-card-info {
+  .photo-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 8px;
     min-width: 0;
   }
 
-  .photo-card-filename {
-    font-size: 12px;
+  .photo-filename {
+    font-size: 15px;
     font-weight: 600;
-    color: #e2e8f0;
+    color: #f0f0f5;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 280px;
   }
 
-  .photo-card-status {
-    font-size: 11px;
-    color: #00ffff;
+  .photo-status {
+    font-size: 13px;
+    font-weight: 500;
+    color: #60a5fa;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
   }
 
-  .photo-card-status.status-complete {
-    color: #22c55e;
+    .photo-status.status-done {
+    color: #4ade80;
   }
 
-  .photo-card-status.status-error {
-    color: #ff3366;
+  .photo-status.status-err {
+    color: #f87171;
   }
 
-  .status-spinner {
-    width: 12px;
-    height: 12px;
-    border: 1.5px solid rgba(0, 255, 255, 0.3);
-    border-top-color: #00ffff;
+  .photo-status.status-err {
+    color: #f87171;
+  }
+
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #3a3a4e;
+    border-top-color: #60a5fa;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     flex-shrink: 0;
   }
 
-  .status-complete .status-spinner {
-    border-color: rgba(34, 197, 94, 0.3);
-    border-top-color: #22c55e;
+  .status-done .spinner {
+    border-color: #4a6e4a;
+    border-top-color: #4ade80;
   }
 
-  .status-error .status-spinner {
+  .status-err .spinner {
     display: none;
   }
 
@@ -276,10 +260,48 @@
     to { transform: rotate(360deg); }
   }
 
-  .photo-card-error-msg {
-    font-size: 10px;
-    color: #ff3366;
-    max-width: 280px;
+  .photo-error-msg {
+    font-size: 12px;
+    color: #f87171;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .photo-exif {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 12px;
+    background: #262637;
+    border: 1px solid #3a3a4e;
+    border-radius: 8px;
+  }
+
+  .exif-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .exif-label {
+    color: #8888a0;
+    flex-shrink: 0;
+    min-width: 80px;
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .exif-value {
+    color: #e0e0f0;
+    font-weight: 600;
+    text-align: right;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
