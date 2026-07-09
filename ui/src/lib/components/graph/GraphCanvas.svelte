@@ -4,6 +4,7 @@
   import type { ForceGraph3DInstance, NodeObject, LinkObject } from '3d-force-graph';
   import * as THREE from 'three';
   import { onMount } from 'svelte';
+  import { graphStore } from '$lib/stores/graph.svelte';
 
   const FALLBACK_COLORS = ['#5a6b80', '#7c8da5', '#4a6fa5', '#6b8f71', '#8b7ec8', '#c77d5a'];
   const TYPE_COLORS: Record<string, string> = {
@@ -363,13 +364,14 @@
       for (const node of data.nodes as GraphNode[]) {
         const nodeId = String(node.id);
         if (hubSet.has(nodeId) && node.x !== undefined) {
-          hubPositionLookup.set(nodeId, { x: node.x, y: node.y, z: node.z });
+          hubPositionLookup.set(nodeId, { x: node.x!, y: node.y!, z: node.z! });
         }
       }
 
       // Strong force pulling satellites toward their hub
       graph.d3Force('clusterX', ((alpha: number) => {
-        const currentData = graph!.graphData();
+        const currentData = graph?.graphData();
+        if (!currentData) return;
         for (const node of currentData.nodes as GraphNode[]) {
           const nodeId = String(node.id);
           const hubId = hubMap.get(nodeId);
@@ -464,46 +466,20 @@
     const color = hashColor(node.labels?.[0] ?? 'default');
     const opacity = nodeOpacity.get(nodeId) ?? 0;
 
+    // Photo nodes get a distinctive cyan color; the image is shown as an HTML overlay
+    const isPhoto = node.labels?.includes('Photo') || (node.properties?.entity_type === 'Photo') || nodeId?.includes('(Photo)');
+    const nodeColor = isPhoto ? '#00ffff' : color;
+
     const geometry = new THREE.SphereGeometry(size, 16, 16);
     const material = new THREE.MeshLambertMaterial({
-      color: new THREE.Color(color),
+      color: new THREE.Color(nodeColor),
       transparent: true,
       opacity
     });
     const mesh = new THREE.Mesh(geometry, material);
     group.add(mesh);
 
-    if (showLabels) {
-      const label = getNodeLabel(node);
-      const canvas2d = document.createElement('canvas');
-      const ctx = canvas2d.getContext('2d');
-      if (ctx) {
-        const fontSize = 48;
-        ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
-        const textMetrics = ctx.measureText(label);
-        canvas2d.width = Math.max(textMetrics.width + 20, 64);
-        canvas2d.height = fontSize + 16;
-
-        ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, canvas2d.width / 2, canvas2d.height / 2);
-
-        const texture = new THREE.CanvasTexture(canvas2d);
-        texture.needsUpdate = true;
-        const spriteMat = new THREE.SpriteMaterial({
-          map: texture,
-          transparent: true,
-          opacity,
-          depthTest: false
-        });
-        const sprite = new THREE.Sprite(spriteMat);
-        sprite.position.y = size + 1.5;
-        sprite.scale.set(canvas2d.width / fontSize * 0.5, canvas2d.height / fontSize * 0.5, 1);
-        group.add(sprite);
-      }
-    }
+    if (showLabels) addLabel(group, node, nodeColor, size, opacity);
 
     // Store references for opacity animation
     (group as unknown as Record<string, unknown>).__nodeId = nodeId;
@@ -511,6 +487,38 @@
     (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
 
     return group;
+  }
+
+  function addLabel(group: THREE.Group, node: GraphNode, color: string, size: number, opacity: number) {
+    const label = getNodeLabel(node);
+    const canvas2d = document.createElement('canvas');
+    const ctx = canvas2d.getContext('2d');
+    if (!ctx) return;
+
+    const fontSize = 48;
+    ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
+    const textMetrics = ctx.measureText(label);
+    canvas2d.width = Math.max(textMetrics.width + 20, 64);
+    canvas2d.height = fontSize + 16;
+
+    ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, canvas2d.width / 2, canvas2d.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas2d);
+    texture.needsUpdate = true;
+    const spriteMat = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      opacity,
+      depthTest: false
+    });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.position.y = size + 1.5;
+    sprite.scale.set(canvas2d.width / fontSize * 0.5, canvas2d.height / fontSize * 0.5, 1);
+    group.add(sprite);
   }
 
   /** Animate per-node opacity each frame */
@@ -997,6 +1005,22 @@
     graph.zoomToFit(500, 20);
   }
 
+  export function getGraph() {
+    return graph;
+  }
+
+  export function focusNode(nodeId: string) {
+    if (!graph) return;
+    const data = graph.graphData();
+    const node = data?.nodes?.find((n: NodeObject) => String(n.id) === nodeId);
+    if (!node || node.x === undefined) return;
+    graph.cameraPosition(
+      { x: node.x, y: node.y, z: node.z },
+      undefined,
+      600
+    );
+  }
+
   onMount(() => {
     if (typeof window === 'undefined') return;
     buildDegreeMap();
@@ -1013,7 +1037,7 @@
   });
 </script>
 
-<div bind:this={container} class="w-full h-full relative overflow-hidden">
+<div bind:this={container} data-testid="graph-canvas" class="w-full h-full relative overflow-hidden">
   <div
     bind:this={tooltipEl}
     style="display:none; position:absolute; z-index:50; pointer-events:none; background:rgba(17,24,39,0.95); border:1px solid #1e2d45; border-radius:8px; padding:8px 12px; font-size:12px; color:#c8d6e5; max-width:250px; backdrop-filter:blur(8px); box-shadow:0 4px 20px rgba(0,0,0,0.5);"

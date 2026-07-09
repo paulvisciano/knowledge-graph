@@ -1,13 +1,16 @@
 <script lang="ts">
   import { type KGNode, type KGEdge, type KGGraph } from '$lib/constants';
   import { LightragClient } from '$lib/services/lightrag-client';
+  import { graphStore } from '$lib/stores/graph.svelte';
   import GraphCanvas from './GraphCanvas.svelte';
   import GraphControls from './GraphControls.svelte';
   import NodeDetail from './NodeDetail.svelte';
   import GraphSearch from './GraphSearch.svelte';
+  import PhotoOverlay from './PhotoOverlay.svelte';
 
   const client = new LightragClient();
 
+  let graphContainerEl: HTMLDivElement | undefined = $state();
 
   let allNodes = $state<KGNode[]>([]);
   let allEdges = $state<KGEdge[]>([]);
@@ -316,12 +319,56 @@
     initVisibleNodes();
   }
 
+  // Merge optimistic/sse nodes from graphStore into the local graph data
+  $effect(() => {
+    const storeNodes = graphStore.nodes;
+    const storeEdges = graphStore.edges;
+    if (storeNodes.length === 0 && storeEdges.length === 0) return;
+
+    const existingNodeIds = new Set(allNodes.map((n) => n.id));
+    const existingEdgeIds = new Set(allEdges.map((e) => e.id));
+    let changed = false;
+    let newPhotoNodeId: string | null = null;
+
+    for (const node of storeNodes) {
+      if (!existingNodeIds.has(node.id)) {
+        allNodes = [...allNodes, node];
+        existingNodeIds.add(node.id);
+        changed = true;
+        if (node.labels?.includes('Photo') || node.properties?.entity_type === 'Photo' || node.id.includes('(Photo)')) {
+          newPhotoNodeId = node.id;
+        }
+      }
+    }
+    for (const edge of storeEdges) {
+      if (!existingEdgeIds.has(edge.id)) {
+        allEdges = [...allEdges, edge];
+        existingEdgeIds.add(edge.id);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      // Make all newly-added nodes visible
+      const newVisible = new Set(visibleNodeIds);
+      for (const node of storeNodes) {
+        newVisible.add(node.id);
+      }
+      visibleNodeIds = newVisible;
+    }
+
+    // Auto-focus on newly attached Photo nodes
+    if (newPhotoNodeId) {
+      setTimeout(() => graphCanvas?.focusNode(newPhotoNodeId), 300);
+    }
+  });
+
   $effect(() => {
     loadGraph();
   });
 </script>
 
-<div class="graph-view-container relative w-full h-full overflow-hidden bg-cyber-bg {isLoading ? 'animate-pulse-glow' : ''}">
+<div bind:this={graphContainerEl} data-testid="graph-view" class="graph-view-container relative w-full h-full overflow-hidden bg-cyber-bg {isLoading ? 'animate-pulse-glow' : ''}">
   {#if allNodes.length > 0}
     <div class="absolute bottom-4 right-4 z-10 animate-fade-in-up">
       <div class="bg-cyber-surface/80 backdrop-blur-md rounded-xl border border-cyber-border px-3 py-2 text-xs text-cyber-text-dim flex items-center gap-2">
@@ -401,6 +448,8 @@
       onexpandNeighbors={handleExpandNeighbors}
     />
   {/if}
+
+  <PhotoOverlay graphCanvas={graphCanvas} containerEl={graphContainerEl} />
 </div>
 
 <style>
