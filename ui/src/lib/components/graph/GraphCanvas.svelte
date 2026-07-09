@@ -459,32 +459,99 @@
     graph.graphData(data);
   }
 
+  const photoTextureCache = new Map<string, THREE.Texture>();
+  const photoTextureLoaded = new Map<string, boolean>();
+
+  function loadPhotoTexture(nodeId: string): THREE.Texture | undefined {
+    const dataUrl = graphStore.photoImages[nodeId];
+    if (!dataUrl) return undefined;
+    const cached = photoTextureCache.get(nodeId);
+    if (cached) return cached;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const texture = new THREE.Texture(img);
+    texture.needsUpdate = false;
+    photoTextureCache.set(nodeId, texture);
+    photoTextureLoaded.set(nodeId, false);
+    img.onload = () => {
+      texture.needsUpdate = true;
+      photoTextureLoaded.set(nodeId, true);
+    };
+    img.src = dataUrl;
+    return texture;
+  }
+
   function createNodeThreeObject(node: GraphNode): THREE.Object3D {
     const group = new THREE.Group();
     const nodeId = String(node.id);
     const size = getNodeSize(nodeId);
     const color = hashColor(node.labels?.[0] ?? 'default');
-    const opacity = nodeOpacity.get(nodeId) ?? 0;
+    const opacity = Math.max(nodeOpacity.get(nodeId) ?? 0, 0.01);
 
-    // Photo nodes get a distinctive cyan color; the image is shown as an HTML overlay
     const isPhoto = node.labels?.includes('Photo') || (node.properties?.entity_type === 'Photo') || nodeId?.includes('(Photo)');
-    const nodeColor = isPhoto ? '#00ffff' : color;
 
-    const geometry = new THREE.SphereGeometry(size, 16, 16);
-    const material = new THREE.MeshLambertMaterial({
-      color: new THREE.Color(nodeColor),
-      transparent: true,
-      opacity
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    group.add(mesh);
+    if (isPhoto) {
+      const photoTexture = loadPhotoTexture(nodeId);
+      const textureReady = photoTexture && photoTextureLoaded.get(nodeId) === true;
 
-    if (showLabels) addLabel(group, node, nodeColor, size, opacity);
+      if (textureReady && photoTexture) {
+        // Render photo as textured plane — naturally zooms with 3D camera
+        const planeWidth = Math.max(size * 2.5, 8);
+        const planeHeight = planeWidth * 0.75;
+        const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+        const material = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          map: photoTexture,
+          transparent: true,
+          opacity,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        group.add(mesh);
+
+        // Cyan border frame
+        const borderGeom = new THREE.EdgesGeometry(geometry);
+        const borderMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: opacity * 0.8 });
+        const borderLine = new THREE.LineSegments(borderGeom, borderMat);
+        group.add(borderLine);
+
+        (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
+        (group as unknown as Record<string, unknown>).__fadeSprite = borderLine;
+      } else {
+        // Loading placeholder — cyan sphere
+        const geometry = new THREE.SphereGeometry(size, 16, 16);
+        const material = new THREE.MeshLambertMaterial({
+          color: 0x00ffff,
+          transparent: true,
+          opacity,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        group.add(mesh);
+
+        if (showLabels) addLabel(group, node, '#00ffff', size, opacity);
+
+        (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
+        (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
+      }
+    } else {
+      const nodeColor = color;
+      const geometry = new THREE.SphereGeometry(size, 16, 16);
+      const material = new THREE.MeshLambertMaterial({
+        color: new THREE.Color(nodeColor),
+        transparent: true,
+        opacity
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      group.add(mesh);
+
+      if (showLabels) addLabel(group, node, nodeColor, size, opacity);
+
+      (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
+      (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
+    }
 
     // Store references for opacity animation
     (group as unknown as Record<string, unknown>).__nodeId = nodeId;
-    (group as unknown as Record<string, unknown>).__fadeMaterial = material;
-    (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
 
     return group;
   }
@@ -544,14 +611,18 @@
         next = Math.max(current - 0.08, target); // fade out: ~12 frames
       } else {
         // Already at target — but still need to update emissive for highlight changes
-        const material = rec.__fadeMaterial as THREE.MeshLambertMaterial | undefined;
-        if (material) {
-          if (hasHighlights && highlightedIds.has(nodeId)) {
-            material.emissive = new THREE.Color(CYAN);
-            material.emissiveIntensity = 0.8;
-          } else {
-            material.emissive = new THREE.Color(0x000000);
-            material.emissiveIntensity = 0;
+        const materials = rec.__fadeMaterials as THREE.Material[] | undefined;
+        if (materials) {
+          for (const mat of materials) {
+            if (mat instanceof THREE.MeshLambertMaterial) {
+              if (hasHighlights && highlightedIds.has(nodeId)) {
+                mat.emissive = new THREE.Color(CYAN);
+                mat.emissiveIntensity = 0.8;
+              } else {
+                mat.emissive = new THREE.Color(0x000000);
+                mat.emissiveIntensity = 0;
+              }
+            }
           }
         }
         return;
@@ -559,17 +630,21 @@
 
       nodeOpacity.set(nodeId, next);
 
-      // Apply to mesh material
-      const material = rec.__fadeMaterial as THREE.MeshLambertMaterial | undefined;
-      if (material) {
-        material.opacity = next;
-        // Highlighted nodes get a cyan emissive glow
-        if (hasHighlights && highlightedIds.has(nodeId)) {
-          material.emissive = new THREE.Color(CYAN);
-          material.emissiveIntensity = 0.8;
-        } else {
-          material.emissive = new THREE.Color(0x000000);
-          material.emissiveIntensity = 0;
+      // Apply to all mesh materials in the group
+      const materials = rec.__fadeMaterials as THREE.Material[] | undefined;
+      if (materials) {
+        for (const mat of materials) {
+          mat.opacity = next;
+          // Highlighted nodes get a cyan emissive glow (only MeshLambertMaterial supports emissive)
+          if (mat instanceof THREE.MeshLambertMaterial) {
+            if (hasHighlights && highlightedIds.has(nodeId)) {
+              mat.emissive = new THREE.Color(CYAN);
+              mat.emissiveIntensity = 0.8;
+            } else {
+              mat.emissive = new THREE.Color(0x000000);
+              mat.emissiveIntensity = 0;
+            }
+          }
         }
       }
 
@@ -697,7 +772,7 @@
       .linkDirectionalArrowLength(0)
       .nodeVisibility((node: NodeObject) => {
         const nodeId = String(node.id);
-        const opacity = nodeOpacity.get(nodeId) ?? 0;
+    const opacity = Math.max(nodeOpacity.get(nodeId) ?? 0, 0.01);
         return opacity > 0.01;
       })
       .linkVisibility((link: LinkObject<GraphNode>) => {
@@ -844,7 +919,7 @@
     }
   }
 
-  function refreshGraph() {
+  export function refreshGraph() {
     if (!graph) return;
     buildDegreeMap();
     graph.graphData(buildGraphData());
@@ -1013,11 +1088,14 @@
     if (!graph) return;
     const data = graph.graphData();
     const node = data?.nodes?.find((n: NodeObject) => String(n.id) === nodeId);
-    if (!node || node.x === undefined) return;
+    if (!node || node.x === undefined || node.z === undefined) return;
+    const nx = node.x as number;
+    const ny = (node.y ?? 0) as number;
+    const nz = node.z as number;
     const distance = 80;
     graph.cameraPosition(
-      { x: node.x, y: node.y, z: node.z },
-      { x: node.x, y: node.y, z: node.z + distance },
+      { x: nx, y: ny, z: nz },
+      { x: nx, y: ny, z: nz + distance },
       600
     );
   }
