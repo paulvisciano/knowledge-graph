@@ -488,7 +488,11 @@
     const color = hashColor(node.labels?.[0] ?? 'default');
     const opacity = Math.max(nodeOpacity.get(nodeId) ?? 0, 0.01);
 
-    const isPhoto = node.labels?.includes('Photo') || (node.properties?.entity_type === 'Photo') || nodeId?.includes('(Photo)');
+    const isPhoto = node.labels?.some(l => /^(Photo|Image)$/i.test(l))
+      || node.properties?.entity_type === 'Photo'
+      || node.properties?.entity_type === 'Image'
+      || nodeId?.includes('(Photo)')
+      || nodeId?.includes('(Image)');
 
     if (isPhoto) {
       const photoTexture = loadPhotoTexture(nodeId);
