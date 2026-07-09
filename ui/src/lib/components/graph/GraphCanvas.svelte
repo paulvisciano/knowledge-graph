@@ -492,47 +492,40 @@
 
     if (isPhoto) {
       const photoTexture = loadPhotoTexture(nodeId);
-      const textureReady = photoTexture && photoTextureLoaded.get(nodeId) === true;
+      const textureReady = photoTextureLoaded.get(nodeId) === true;
 
+      // Always render as a plane — use texture if ready, otherwise cyan fill
+      const planeWidth = Math.max(size * 2.5, 8);
+      const planeHeight = planeWidth * 0.75;
+      const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+
+      let material: THREE.MeshBasicMaterial;
       if (textureReady && photoTexture) {
-        // Render photo as textured plane — naturally zooms with 3D camera
-        const planeWidth = Math.max(size * 2.5, 8);
-        const planeHeight = planeWidth * 0.75;
-        const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
-        const material = new THREE.MeshBasicMaterial({
+        material = new THREE.MeshBasicMaterial({
           color: 0xffffff,
           map: photoTexture,
           transparent: true,
           opacity,
           side: THREE.DoubleSide,
         });
-        const mesh = new THREE.Mesh(geometry, material);
-        group.add(mesh);
-
-        // Cyan border frame
-        const borderGeom = new THREE.EdgesGeometry(geometry);
-        const borderMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: opacity * 0.8 });
-        const borderLine = new THREE.LineSegments(borderGeom, borderMat);
-        group.add(borderLine);
-
-        (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
-        (group as unknown as Record<string, unknown>).__fadeSprite = borderLine;
       } else {
-        // Loading placeholder — cyan sphere
-        const geometry = new THREE.SphereGeometry(size, 16, 16);
-        const material = new THREE.MeshLambertMaterial({
-          color: 0x00ffff,
+        material = new THREE.MeshBasicMaterial({
+          color: 0x00d4ff,
           transparent: true,
-          opacity,
+          opacity: opacity * 0.7,
+          side: THREE.DoubleSide,
         });
-        const mesh = new THREE.Mesh(geometry, material);
-        group.add(mesh);
-
-        if (showLabels) addLabel(group, node, '#00ffff', size, opacity);
-
-        (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
-        (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
       }
+      const mesh = new THREE.Mesh(geometry, material);
+      group.add(mesh);
+
+      const borderGeom = new THREE.EdgesGeometry(geometry);
+      const borderMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: opacity * 0.8 });
+      const borderLine = new THREE.LineSegments(borderGeom, borderMat);
+      group.add(borderLine);
+
+      (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
+      (group as unknown as Record<string, unknown>).__fadeSprite = borderLine;
     } else {
       const nodeColor = color;
       const geometry = new THREE.SphereGeometry(size, 16, 16);
