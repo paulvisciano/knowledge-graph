@@ -695,9 +695,11 @@ async def create_exif_relations(
         base_url, photo_name,
         {"description": f"Photo: {file_source}", "entity_type": "Photo", "source_id": file_source},
     )
+    photo_result["entity_name"] = photo_name
+    photo_result["entity_type"] = "Photo"
     results["entities_created"].append(photo_result)
 
-    await asyncio.sleep(3.0)
+    await asyncio.sleep(1.0)
 
     existing_labels = set()
     try:
@@ -721,8 +723,10 @@ async def create_exif_relations(
                 base_url, entity_name,
                 {"description": dim["description"], "entity_type": dim["entity_type"], "source_id": file_source},
             )
+            entity_result["entity_name"] = entity_name
+            entity_result["entity_type"] = dim["entity_type"]
             results["entities_created"].append(entity_result)
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(0.5)
 
     for dim in exif_dimensions:
         entity_name = dim["name"]
@@ -731,6 +735,8 @@ async def create_exif_relations(
             base_url, photo_name, entity_name,
             {"description": dim["edge_description"], "keywords": dim["edge_keyword"], "weight": 1.0},
         )
+        relation_result["source"] = photo_name
+        relation_result["target"] = entity_name
         results["relations_created"].append(relation_result)
 
         for other_dim in exif_dimensions:
@@ -740,6 +746,8 @@ async def create_exif_relations(
                 base_url, entity_name, other_dim["name"],
                 {"description": f"{dim['edge_description']}, also {other_dim['edge_keyword']} {other_dim['name']}", "keywords": dim["edge_keyword"], "weight": 1.0},
             )
+            cross_result["source"] = entity_name
+            cross_result["target"] = other_dim["name"]
             results["relations_created"].append(cross_result)
 
     logger.info("[EXIF Relations] Complete for %s: %d entities, %d relations",
@@ -805,9 +813,96 @@ async def link_exif_to_visual_entities(
                 base_url, label, photo_name,
                 {"description": f"{label} appears in {file_source}", "keywords": "appears_in", "weight": 1.0},
             )
+            link_result["source"] = label
+            link_result["target"] = photo_name
             results["visual_links_created"].append(link_result)
             break
 
     logger.info("[EXIF Links] Linking complete for %s: %d visual links created",
                 file_source, len(results["visual_links_created"]))
     return results
+
+
+async def wait_for_lightrag_processing(
+    lightrag_url: str,
+    file_source: str,
+    *,
+    poll_interval: float = 3.0,
+    timeout: float = 300.0,
+) -> str:
+    """Poll LightRAG until document processing finishes.
+
+    Checks the pipeline status endpoint until it is no longer busy,
+    then verifies the specific document reached a terminal state
+    (``PROCESSED`` or ``FAILED``).
+
+    Returns the final status string ("processed" or "failed").
+    Raises ``TimeoutError`` if the timeout is exceeded.
+    """
+    base_url = lightrag_url.rstrip("/")
+    start = time.monotonic()
+
+    # Phase 1: wait for pipeline to become idle
+    while True:
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout:
+            raise TimeoutError(
+                f"Timed out waiting for LightRAG pipeline to become idle after {timeout}s"
+            )
+
+        try:
+            def _poll_pipeline() -> dict:
+                req = Request(
+                    f"{base_url}/documents/pipeline_status",
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            pipeline_status = await asyncio.to_thread(_poll_pipeline)
+            busy = pipeline_status.get("busy", True)
+            logger.info(
+                "[LightRAG Wait] Pipeline poll — busy=%s, elapsed=%.1fs, file=%s",
+                busy, elapsed, file_source,
+            )
+            if not busy:
+                break
+        except Exception as exc:
+            logger.warning("[LightRAG Wait] Pipeline status poll failed: %s", exc)
+
+        await asyncio.sleep(poll_interval)
+
+    # Phase 2: confirm document status
+    try:
+        def _get_docs() -> list[dict]:
+            req = Request(
+                f"{base_url}/documents",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        docs = await asyncio.to_thread(_get_docs)
+        # docs may be a list or a dict with a "documents" key
+        doc_list = docs if isinstance(docs, list) else docs.get("documents", docs.get("data", []))
+
+        for doc in doc_list:
+            if not isinstance(doc, dict):
+                continue
+            # Match by file_source against potential field names
+            doc_name = doc.get("file_path") or doc.get("filename") or doc.get("name") or ""
+            if doc_name == file_source or doc_name.endswith(file_source):
+                status = str(doc.get("status", "")).lower()
+                logger.info(
+                    "[LightRAG Wait] Document '%s' final status: %s", file_source, status,
+                )
+                return status
+
+        logger.warning(
+            "[LightRAG Wait] Could not find document '%s' in documents list; assuming processed",
+            file_source,
+        )
+        return "processed"
+    except Exception as exc:
+        logger.warning("[LightRAG Wait] Failed to fetch documents list: %s", exc)
+        return "processed"
