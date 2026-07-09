@@ -197,6 +197,8 @@
             graphStore.setPhotoImage(photoNodeId, att.dataUrl);
             imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
           }
+          // Start processing immediately — don't wait for user to send a message
+          processSingleImage(att);
         }
       } catch (e) {
         attachError = e instanceof Error ? e.message : 'Failed to attach file';
@@ -808,95 +810,103 @@
       scrollToBottom();
     });
 
-    // Process image attachments through the KG pipeline in the background
-    processImageAttachments(sentAttachments);
+    // Images are now processed immediately on attach via processSingleImage
 
     await streamAssistantResponse(sentAttachments);
+  }
+
+  /** Process a single image through the KG pipeline with real-time SSE progress. */
+  async function processSingleImage(att: Attachment) {
+    const photoNodeId = `${att.name} (Photo)`;
+    try {
+      const { stream, cancel } = kgApiClient.processImageSse(att.file, { insert: true });
+
+      for await (const sseEvent of stream) {
+        let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number };
+        try {
+          payload = JSON.parse(sseEvent.data);
+        } catch {
+          continue;
+        }
+
+        const eventName = payload.event;
+        const eventData = payload.data ?? {};
+        if (!eventName) continue;
+
+        // Update image processing status
+        const mappedStage = imageProcessingStore.mapEventToStage(eventName);
+        if (mappedStage) {
+          const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
+            ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
+          imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
+        }
+
+        // Capture EXIF data for the overlay card
+        if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
+          imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
+        }
+
+        // Push progress to activity feed
+        eventBus.pushEvent({
+          id: crypto.randomUUID(),
+          type: 'graph_update',
+          title: eventName.replace(/_/g, ' '),
+          description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
+          timestamp: Date.now(),
+          status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
+            ? 'completed'
+            : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
+              ? 'error'
+              : 'running',
+          meta: eventData as Record<string, unknown>,
+        });
+
+        // Live graph updates on entity creation events
+        if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
+          const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
+          const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
+          graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
+          if (eventName === 'photo_node_created' && att.dataUrl) {
+            graphStore.setPhotoImage(nodeId, att.dataUrl);
+          }
+        } else if (eventName === 'visual_entity_linked') {
+          const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
+          const targetId = String(eventData.target ?? eventData.entity_name ?? '');
+          const edgeType = String(eventData.relation_type ?? 'depicts');
+          graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+        } else if (eventName === 'exif_relation_created') {
+          const sourceId = String(eventData.source ?? '');
+          const targetId = String(eventData.target ?? '');
+          const edgeType = String(eventData.relation_type ?? 'has_exif');
+          graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+        }
+
+        // Final sync
+        if (eventName === 'pipeline_complete') {
+          graphStore.pipelineDone = true;
+          graphStore.refresh();
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.warn(`KG image processing failed for ${att.name}:`, err);
+      imageProcessingStore.updateStage(photoNodeId, 'error', err instanceof Error ? err.message : 'Unknown error');
+      eventBus.pushEvent({
+        id: crypto.randomUUID(),
+        type: 'graph_update',
+        title: 'Image processing failed',
+        description: `${att.name}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        timestamp: Date.now(),
+        status: 'error',
+      });
+    }
   }
 
   /** Send image attachments through the KG pipeline with real-time SSE progress. */
   async function processImageAttachments(atts: Attachment[]) {
     const imageFiles = atts.filter((a) => isImageType(a.mimeType) && a.file);
-    if (imageFiles.length === 0) return;
-
     for (const att of imageFiles) {
-      const photoNodeId = `${att.name} (Photo)`;
-      try {
-        const { stream, cancel } = kgApiClient.processImageSse(att.file, { insert: true });
-
-        for await (const sseEvent of stream) {
-          let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number };
-          try {
-            payload = JSON.parse(sseEvent.data);
-          } catch {
-            continue;
-          }
-
-          const eventName = payload.event;
-          const eventData = payload.data ?? {};
-          if (!eventName) continue;
-
-          // Update image processing status
-          const mappedStage = imageProcessingStore.mapEventToStage(eventName);
-          if (mappedStage) {
-            const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
-              ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
-            imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
-          }
-
-          // Push progress to activity feed
-          eventBus.pushEvent({
-            id: crypto.randomUUID(),
-            type: 'graph_update',
-            title: eventName.replace(/_/g, ' '),
-            description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
-            timestamp: Date.now(),
-            status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
-              ? 'completed'
-              : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
-                ? 'error'
-                : 'running',
-            meta: eventData as Record<string, unknown>,
-          });
-
-          // Live graph updates on entity creation events
-          if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
-            const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
-            const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
-            graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
-            if (eventName === 'photo_node_created' && att.dataUrl) {
-              graphStore.setPhotoImage(nodeId, att.dataUrl);
-            }
-          } else if (eventName === 'visual_entity_linked') {
-            const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
-            const targetId = String(eventData.target ?? eventData.entity_name ?? '');
-            const edgeType = String(eventData.relation_type ?? 'depicts');
-            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
-          } else if (eventName === 'exif_relation_created') {
-            const sourceId = String(eventData.source ?? '');
-            const targetId = String(eventData.target ?? '');
-            const edgeType = String(eventData.relation_type ?? 'has_exif');
-            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
-          }
-
-          // Final sync
-          if (eventName === 'pipeline_complete') {
-            graphStore.refresh();
-          }
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-        console.warn(`KG image processing failed for ${att.name}:`, err);
-        imageProcessingStore.updateStage(photoNodeId, 'error', err instanceof Error ? err.message : 'Unknown error');
-        eventBus.pushEvent({
-          id: crypto.randomUUID(),
-          type: 'graph_update',
-          title: 'Image processing failed',
-          description: `${att.name}: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          timestamp: Date.now(),
-          status: 'error',
-        });
-      }
+      processSingleImage(att);
     }
   }
 

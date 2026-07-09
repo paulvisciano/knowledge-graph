@@ -14,6 +14,7 @@
 
   let allNodes = $state<KGNode[]>([]);
   let allEdges = $state<KGEdge[]>([]);
+  let activePhotoCluster: Set<string> | null = null;
   let visibleNodeIds = $state<Set<string>>(new Set());
   let expandedNodeIds = $state<Set<string>>(new Set());
   let hoveredNodeId = $state<string | null>(null);
@@ -68,6 +69,11 @@
   });
 
   function initVisibleNodes() {
+    // If we're focused on a photo cluster, keep showing that cluster
+    if (activePhotoCluster && activePhotoCluster.size > 0) {
+      visibleNodeIds = new Set(activePhotoCluster);
+      return;
+    }
     // Show the top 50 entities with the most relations
     const sorted = [...allNodes].sort((a, b) =>
       (degreeMap.get(b.id) ?? 0) - (degreeMap.get(a.id) ?? 0)
@@ -316,6 +322,7 @@
     hoveredNode = null;
     highlightedIds = new Set();
     selectedNode = null;
+    activePhotoCluster = null;
     initVisibleNodes();
   }
 
@@ -349,17 +356,61 @@
     }
 
     if (changed) {
-      // Make all newly-added nodes visible
-      const newVisible = new Set(visibleNodeIds);
-      for (const node of storeNodes) {
-        newVisible.add(node.id);
+      // When a new Photo is attached, show only its cluster.
+      // Otherwise (e.g. SSE adding EXIF entities), expand the cluster.
+      if (newPhotoNodeId) {
+        const clusterIds = new Set<string>();
+        clusterIds.add(newPhotoNodeId);
+        // Include all nodes connected to the photo via edges
+        for (const edge of allEdges) {
+          if (edge.source === newPhotoNodeId) clusterIds.add(edge.target);
+          if (edge.target === newPhotoNodeId) clusterIds.add(edge.source);
+        }
+        // Also include any other newly-added nodes (they're likely related)
+        for (const node of storeNodes) {
+          clusterIds.add(node.id);
+        }
+        visibleNodeIds = clusterIds;
+        highlightedIds = new Set([newPhotoNodeId]);
+        activePhotoCluster = clusterIds;
+      } else if (activePhotoCluster) {
+        // SSE is adding EXIF/visual entities to the existing photo cluster
+        const expanded = new Set(activePhotoCluster);
+        for (const node of storeNodes) {
+          expanded.add(node.id);
+        }
+        for (const edge of storeEdges) {
+          expanded.add(edge.source);
+          expanded.add(edge.target);
+        }
+        visibleNodeIds = expanded;
+        activePhotoCluster = expanded;
+      } else {
+        // No photo cluster — just make new nodes visible alongside existing ones
+        const newVisible = new Set(visibleNodeIds);
+        for (const node of storeNodes) {
+          newVisible.add(node.id);
+        }
+        for (const edge of storeEdges) {
+          newVisible.add(edge.source);
+          newVisible.add(edge.target);
+        }
+        visibleNodeIds = newVisible;
       }
-      visibleNodeIds = newVisible;
     }
 
     // Auto-focus on newly attached Photo nodes
     if (newPhotoNodeId) {
       setTimeout(() => graphCanvas?.focusNode(newPhotoNodeId), 300);
+    }
+  });
+
+  // When pipeline completes, clear the photo cluster focus so the full graph is visible
+  $effect(() => {
+    if (graphStore.pipelineDone) {
+      activePhotoCluster = null;
+      graphStore.pipelineDone = false;
+      initVisibleNodes();
     }
   });
 
@@ -449,7 +500,7 @@
     />
   {/if}
 
-  <PhotoOverlay graphCanvas={graphCanvas} containerEl={graphContainerEl} />
+  <PhotoOverlay containerEl={graphContainerEl} />
 </div>
 
 <style>

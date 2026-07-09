@@ -1014,9 +1014,10 @@
     const data = graph.graphData();
     const node = data?.nodes?.find((n: NodeObject) => String(n.id) === nodeId);
     if (!node || node.x === undefined) return;
+    const distance = 80;
     graph.cameraPosition(
       { x: node.x, y: node.y, z: node.z },
-      undefined,
+      { x: node.x, y: node.y, z: node.z + distance },
       600
     );
   }
