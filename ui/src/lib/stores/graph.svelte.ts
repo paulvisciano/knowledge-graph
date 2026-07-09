@@ -9,6 +9,8 @@ class GraphStore {
   hoveredNode: KGNode | null = $state(null);
   searchQuery = $state('');
   isLoading = $state(false);
+  /** nodeId → dataUrl for Photo node images */
+  photoImages = $state<Record<string, string>>({});
 
   filteredNodes = $derived.by(() => {
     if (!this.searchQuery.trim()) return this.nodes;
@@ -73,6 +75,49 @@ class GraphStore {
 
   async refresh() {
     await this.loadGraph(undefined, undefined, undefined);
+  }
+
+  addNode(node: KGNode) {
+    const idx = this.nodes.findIndex((n) => n.id === node.id);
+    if (idx >= 0) {
+      this.nodes[idx] = node;
+    } else {
+      this.nodes = [...this.nodes, node];
+    }
+  }
+
+  addEdge(edge: KGEdge) {
+    const idx = this.edges.findIndex((e) => e.id === edge.id);
+    if (idx >= 0) {
+      this.edges[idx] = edge;
+    } else {
+      this.edges = [...this.edges, edge];
+    }
+  }
+
+  upsertNode(id: string, labels: string[], properties: Record<string, unknown>) {
+    const node: KGNode = { id, labels, properties };
+    const idx = this.nodes.findIndex((n) => n.id === id);
+    if (idx >= 0) {
+      this.nodes[idx] = node;
+    } else {
+      this.nodes = [...this.nodes, node];
+    }
+  }
+
+  upsertEdge(source: string, target: string, type: string, properties: Record<string, unknown> = {}) {
+    const id = `${source}-${type}-${target}`;
+    const edge: KGEdge = { id, source, target, type, properties };
+    const idx = this.edges.findIndex((e) => e.id === id);
+    if (idx >= 0) {
+      this.edges[idx] = edge;
+    } else {
+      this.edges = [...this.edges, edge];
+    }
+  }
+
+  setPhotoImage(nodeId: string, dataUrl: string) {
+    this.photoImages = { ...this.photoImages, [nodeId]: dataUrl };
   }
 
   reset() {
