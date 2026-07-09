@@ -19,12 +19,13 @@
   import { AudioRecorder, convertToWav, transcribeAudio, isAudioRecordingSupported } from '$lib/utils/audio-recording';
   import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
-  import AttachmentPreview from '$lib/components/ui/AttachmentPreview.svelte';
+
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
   import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, type Attachment } from '$lib/utils/file-utils';
+  import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
 
   interface Conversation {
     id: string;
@@ -189,6 +190,14 @@
       try {
         const att = await fileToAttachment(file);
         attachments = [...attachments, att];
+        if (isImageType(att.mimeType)) {
+          const photoNodeId = `${att.name} (Photo)`;
+          graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
+          if (att.dataUrl) {
+            graphStore.setPhotoImage(photoNodeId, att.dataUrl);
+            imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
+          }
+        }
       } catch (e) {
         attachError = e instanceof Error ? e.message : 'Failed to attach file';
       }
@@ -805,18 +814,88 @@
     await streamAssistantResponse(sentAttachments);
   }
 
-  /** Send image attachments through the knowledge graph pipeline (EXIF, faces, VLM, LightRAG). */
+  /** Send image attachments through the KG pipeline with real-time SSE progress. */
   async function processImageAttachments(atts: Attachment[]) {
     const imageFiles = atts.filter((a) => isImageType(a.mimeType) && a.file);
     if (imageFiles.length === 0) return;
 
     for (const att of imageFiles) {
+      const photoNodeId = `${att.name} (Photo)`;
       try {
-        await kgApiClient.processImage(att.file, { insert: true });
-        // Refresh graph after successful insertion
-        graphStore.refresh();
+        const { stream, cancel } = kgApiClient.processImageSse(att.file, { insert: true });
+
+        for await (const sseEvent of stream) {
+          let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number };
+          try {
+            payload = JSON.parse(sseEvent.data);
+          } catch {
+            continue;
+          }
+
+          const eventName = payload.event;
+          const eventData = payload.data ?? {};
+          if (!eventName) continue;
+
+          // Update image processing status
+          const mappedStage = imageProcessingStore.mapEventToStage(eventName);
+          if (mappedStage) {
+            const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
+              ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
+            imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
+          }
+
+          // Push progress to activity feed
+          eventBus.pushEvent({
+            id: crypto.randomUUID(),
+            type: 'graph_update',
+            title: eventName.replace(/_/g, ' '),
+            description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
+            timestamp: Date.now(),
+            status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
+              ? 'completed'
+              : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
+                ? 'error'
+                : 'running',
+            meta: eventData as Record<string, unknown>,
+          });
+
+          // Live graph updates on entity creation events
+          if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
+            const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
+            const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
+            graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
+            if (eventName === 'photo_node_created' && att.dataUrl) {
+              graphStore.setPhotoImage(nodeId, att.dataUrl);
+            }
+          } else if (eventName === 'visual_entity_linked') {
+            const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
+            const targetId = String(eventData.target ?? eventData.entity_name ?? '');
+            const edgeType = String(eventData.relation_type ?? 'depicts');
+            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+          } else if (eventName === 'exif_relation_created') {
+            const sourceId = String(eventData.source ?? '');
+            const targetId = String(eventData.target ?? '');
+            const edgeType = String(eventData.relation_type ?? 'has_exif');
+            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+          }
+
+          // Final sync
+          if (eventName === 'pipeline_complete') {
+            graphStore.refresh();
+          }
+        }
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         console.warn(`KG image processing failed for ${att.name}:`, err);
+        imageProcessingStore.updateStage(photoNodeId, 'error', err instanceof Error ? err.message : 'Unknown error');
+        eventBus.pushEvent({
+          id: crypto.randomUUID(),
+          type: 'graph_update',
+          title: 'Image processing failed',
+          description: `${att.name}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          timestamp: Date.now(),
+          status: 'error',
+        });
       }
     }
   }
@@ -1098,8 +1177,6 @@
           </div>
         {/if}
 
-        <AttachmentPreview {attachments} onRemove={removeAttachment} />
-
         {#if attachError}
           <div class="mx-4 mb-1 text-xs text-cyber-red">{attachError}</div>
         {/if}
@@ -1119,6 +1196,7 @@
             accept="image/*"
             multiple
             class="hidden"
+            data-testid="image-file-input"
             onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
           />
           <input
@@ -1127,6 +1205,7 @@
             accept=".txt,.md,.csv,.json,.html,.htm,.xml,.yaml,.yml,.log"
             multiple
             class="hidden"
+            data-testid="doc-file-input"
             onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
           />
           <AttachmentMenu
@@ -1142,6 +1221,7 @@
             onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, true); } }}
             placeholder="Ask me anything..."
             rows="1"
+            data-testid="chat-input"
             class="max-h-[144px] min-h-[24px] flex-1 resize-none bg-transparent text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40"
             disabled={isActiveConversationStreaming}
           ></textarea>
@@ -1157,6 +1237,7 @@
             <button
               onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, true) : handleMicClick()}
               disabled={isTranscribing || (!chatInput.trim() && attachments.length === 0 && !recordingSupported)}
+              data-testid="send-button"
               class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (chatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 hover:glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/50 text-cyber-text-dim/30 rounded-lg'}"
             >
               {#if isRecording}
@@ -1436,8 +1517,6 @@
             </div>
           {/if}
 
-          <AttachmentPreview {attachments} onRemove={removeAttachment} />
-
           <div class="flex items-center gap-2">
             <button
               onclick={() => { historyPanelOpen.update((v) => !v); }}
@@ -1459,6 +1538,7 @@
               onkeydown={handlePanelKeydown}
               placeholder="Continue..."
               rows="1"
+              data-testid="panel-chat-input"
               class="max-h-[96px] min-h-[24px] flex-1 resize-none rounded-lg bg-cyber-surface-2/50 px-3 py-2 text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40 border border-cyber-border/30 focus:border-cyber-cyan/40 transition-colors"
               disabled={isActiveConversationStreaming}
             ></textarea>
