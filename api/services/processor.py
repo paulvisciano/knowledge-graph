@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncGenerator
 from urllib.error import URLError
+from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -28,6 +29,162 @@ VLM_MODEL = os.environ.get("VLM_LLM_MODEL", "gemma-4-12B-it-qat-UD-Q4_K_XL")
 VLM_API_KEY = os.environ.get("VLM_LLM_BINDING_API_KEY", "llama-server")
 FACE_DETECTOR = os.environ.get("FACE_DETECTOR_BACKEND", "opencv")
 FACE_ATTRIBUTES = os.environ.get("FACE_ATTRIBUTES", "age,gender,emotion,race").split(",")
+
+_MAX_ENTITY_ATTEMPTS = 5
+_MAX_RELATION_ATTEMPTS = 5
+
+
+async def _create_entity_verified(
+    base_url: str,
+    entity_name: str,
+    entity_data: dict[str, Any],
+    *,
+    max_attempts: int = _MAX_ENTITY_ATTEMPTS,
+) -> dict[str, Any]:
+    """Create a graph entity, verifying it actually exists after creation.
+
+    LightRAG's entity creation may return 409 (conflict) even when the entity
+    does not actually exist due to a stale index. This helper verifies after
+    a conflict response and retries if the entity is missing.
+    """
+    payload = json.dumps({"entity_name": entity_name, "entity_data": entity_data}).encode("utf-8")
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            def _post(payload: bytes = payload) -> dict[str, Any]:
+                req = Request(
+                    f"{base_url}/graph/entity/create",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            result = await asyncio.to_thread(_post)
+            logger.info("[Entity] Created '%s' (attempt %d)", entity_name, attempt)
+            return {**result, "status": result.get("status", "success")}
+
+        except URLError as exc:
+            is_conflict = (
+                "409" in str(exc) or "Conflict" in str(exc)
+                or "400" in str(exc) or "already exists" in str(exc)
+            )
+            if not is_conflict:
+                logger.warning("[Entity] Failed '%s': %s", entity_name, exc)
+                return {"status": "error", "entity_name": entity_name, "error": str(exc)}
+
+            await asyncio.sleep(3.0 * attempt)
+
+            try:
+                def _check(name: str = entity_name) -> bool:
+                    req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
+                    with urlopen(req, timeout=30) as resp:
+                        labels = json.loads(resp.read().decode("utf-8"))
+                        return name in labels
+                entity_exists = await asyncio.to_thread(_check)
+            except Exception:
+                entity_exists = False
+
+            if entity_exists:
+                logger.info("[Entity] '%s' confirmed existing (attempt %d)", entity_name, attempt)
+                return {"status": "exists", "entity_name": entity_name}
+
+            logger.warning("[Entity] '%s' conflict but not found, retrying (%d/%d)", entity_name, attempt, max_attempts)
+
+        except Exception as exc:
+            logger.warning("[Entity] Unexpected error '%s': %s", entity_name, exc)
+            return {"status": "error", "entity_name": entity_name, "error": str(exc)}
+
+    logger.error("[Entity] All %d attempts failed for '%s'", max_attempts, entity_name)
+    return {"status": "error", "entity_name": entity_name, "error": f"Failed after {max_attempts} attempts"}
+
+
+async def _create_relation_verified(
+    base_url: str,
+    source_entity: str,
+    target_entity: str,
+    relation_data: dict[str, Any],
+    *,
+    max_attempts: int = _MAX_RELATION_ATTEMPTS,
+) -> dict[str, Any]:
+    """Create a graph relation, verifying it actually exists after creation.
+
+    LightRAG's graph/relation/create may return 400/409 (conflict) even when
+    the relation does not actually exist — a stale-index bug. This helper
+    works around it by querying the source entity's subgraph after a conflict
+    response to confirm the edge is present. If missing, creation is retried.
+    """
+    payload = json.dumps({
+        "source_entity": source_entity,
+        "target_entity": target_entity,
+        "relation_data": relation_data,
+    }).encode("utf-8")
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            def _post(payload: bytes = payload) -> dict[str, Any]:
+                req = Request(
+                    f"{base_url}/graph/relation/create",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            result = await asyncio.to_thread(_post)
+            logger.info("[Relation] Created '%s' -> '%s' (attempt %d)", source_entity, target_entity, attempt)
+            return {**result, "status": result.get("status", "success")}
+
+        except URLError as exc:
+            is_conflict = (
+                "409" in str(exc) or "Conflict" in str(exc)
+                or "400" in str(exc) or "already exists" in str(exc)
+            )
+            if not is_conflict:
+                logger.warning("[Relation] Failed '%s' -> '%s': %s", source_entity, target_entity, exc)
+                return {"status": "error", "source": source_entity, "target": target_entity, "error": str(exc)}
+
+            try:
+                def _verify(se: str = source_entity) -> bool:
+                    req = Request(
+                        f"{base_url}/graphs?label={url_quote(se, safe='')}",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urlopen(req, timeout=15) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    for edge in data.get("edges", []):
+                        src = edge.get("source", "")
+                        tgt = edge.get("target", "")
+                        if (src == source_entity and tgt == target_entity) or (
+                            src == target_entity and tgt == source_entity
+                        ):
+                            return True
+                    return False
+
+                edge_exists = await asyncio.to_thread(_verify)
+            except Exception:
+                edge_exists = False
+
+            if edge_exists:
+                logger.info("[Relation] '%s' -> '%s' confirmed existing (attempt %d)", source_entity, target_entity, attempt)
+                return {"status": "exists", "source": source_entity, "target": target_entity}
+
+            logger.warning(
+                "[Relation] '%s' -> '%s' conflict reported but edge not found, retrying (%d/%d)",
+                source_entity, target_entity, attempt, max_attempts,
+            )
+            if attempt < max_attempts:
+                await asyncio.sleep(3.0 * attempt)
+
+        except Exception as exc:
+            logger.warning("[Relation] Unexpected error '%s' -> '%s': %s", source_entity, target_entity, exc)
+            return {"status": "error", "source": source_entity, "target": target_entity, "error": str(exc)}
+
+    logger.error("[Relation] All %d attempts failed for '%s' -> '%s'", max_attempts, source_entity, target_entity)
+    return {"status": "error", "source": source_entity, "target": target_entity,
+            "error": f"Failed after {max_attempts} attempts — relation may not exist"}
 
 
 @dataclass
@@ -468,8 +625,6 @@ async def inject_exif_relations(
     base_url = lightrag_url.rstrip("/")
 
     photo_name = f"{file_source} (Photo)"
-    photo_description = f"Photo: {file_source}"
-
     exif_dimensions: list[dict[str, str]] = []
 
     date_taken_friendly = exif_data.get("date_taken_friendly")
@@ -511,55 +666,45 @@ async def inject_exif_relations(
         logger.info("[EXIF Relations] No EXIF dimensions to inject for %s", file_source)
         return {"status": "skipped", "reason": "no_exif_dimensions", "exif_dimensions": []}
 
-    results: dict[str, Any] = {"entities_created": [], "relations_created": [], "exif_dimensions": exif_dimensions, "photo_name": photo_name}
+    results: dict[str, Any] = {"exif_dimensions": exif_dimensions, "photo_name": photo_name}
+
+    logger.info("[EXIF Relations] Prepared %d EXIF dimensions for %s (entities will be created by link-exif-entities)",
+                len(exif_dimensions), file_source)
+    return results
+
+
+async def create_exif_relations(
+    lightrag_url: str,
+    file_source: str,
+    photo_name: str,
+    exif_dimensions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Create EXIF entity nodes and relation edges after LightRAG processing.
+
+    Entity creation is deferred here (instead of inject_exif_relations) because
+    LightRAG's entity index becomes stale after the first entity is created,
+    causing all subsequent entity and relation creations to fail with 409. By
+    running this after LightRAG has finished processing the document, the index
+    has stabilized and creation succeeds.
+    """
+    base_url = lightrag_url.rstrip("/")
+    results: dict[str, Any] = {"entities_created": [], "relations_created": []}
 
     # Create the photo entity node
-    photo_payload = json.dumps({
-        "entity_name": photo_name,
-        "entity_data": {
-            "description": photo_description,
-            "entity_type": "Photo",
-            "source_id": file_source,
-        },
-    }).encode("utf-8")
+    photo_result = await _create_entity_verified(
+        base_url, photo_name,
+        {"description": f"Photo: {file_source}", "entity_type": "Photo", "source_id": file_source},
+    )
+    results["entities_created"].append(photo_result)
 
-    try:
-        def _create_photo(payload: bytes = photo_payload) -> dict[str, Any]:
-            req = Request(
-                f"{base_url}/graph/entity/create",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urlopen(req, timeout=30) as resp:
-                body = resp.read().decode("utf-8")
-                logger.info("[EXIF Relations] Created photo entity '%s': %d", photo_name, resp.status)
-                return json.loads(body)
+    await asyncio.sleep(3.0)
 
-        photo_result = await asyncio.to_thread(_create_photo)
-        results["entities_created"].append(photo_result)
-    except URLError as exc:
-        if "409" in str(exc) or "Conflict" in str(exc) or "400" in str(exc) or "already exists" in str(exc):
-            logger.info("[EXIF Relations] Photo entity '%s' already exists", photo_name)
-            results["entities_created"].append({"status": "exists", "entity_name": photo_name})
-        else:
-            logger.warning("[EXIF Relations] Failed to create photo entity '%s': %s", photo_name, exc)
-            results["entities_created"].append({"status": "error", "entity_name": photo_name, "error": str(exc)})
-    except Exception as exc:
-        logger.warning("[EXIF Relations] Unexpected error creating photo entity '%s': %s", photo_name, exc)
-        results["entities_created"].append({"status": "error", "entity_name": photo_name, "error": str(exc)})
-
-    # Create EXIF entity nodes and link them to the photo node and to each other.
-    # For each EXIF dimension, check if a similar entity already exists (e.g.,
-    # LightRAG may have created "Saint Petersburg" from the VLM text).
-    # If so, link to the existing entity instead of creating a duplicate.
     existing_labels = set()
     try:
         def _get_labels() -> list[str]:
             req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
             with urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-
         existing_labels = set(await asyncio.to_thread(_get_labels))
     except Exception as exc:
         logger.warning("[EXIF Relations] Failed to get existing labels: %s", exc)
@@ -568,149 +713,36 @@ async def inject_exif_relations(
         entity_name = dim["name"]
         raw_value = dim["name"].rsplit(" (", 1)[0]
 
-        target_entity = entity_name
-        if entity_name in existing_labels:
-            target_entity = entity_name
-        elif raw_value in existing_labels:
-            target_entity = raw_value
-            logger.info("[EXIF Relations] Using existing entity '%s' instead of '%s'", raw_value, entity_name)
+        if entity_name in existing_labels or raw_value in existing_labels:
+            logger.info("[EXIF Relations] Entity '%s' already exists, skipping creation", entity_name)
+            results["entities_created"].append({"status": "exists", "entity_name": entity_name})
         else:
-            for label in existing_labels:
-                if not label.endswith((" (Date)", " (Camera)", " (Location)", " (Photo)")):
-                    if raw_value.lower().startswith(label.lower()) or label.lower().startswith(raw_value.lower()):
-                        target_entity = label
-                        logger.info("[EXIF Relations] Using existing entity '%s' as match for '%s'", label, entity_name)
-                        break
-
-        entity_payload = json.dumps({
-            "entity_name": entity_name,
-            "entity_data": {
-                "description": dim["description"],
-                "entity_type": dim["entity_type"],
-                "source_id": file_source,
-            },
-        }).encode("utf-8")
-
-        try:
-            def _create_entity(payload: bytes = entity_payload, name: str = entity_name) -> dict[str, Any]:
-                req = Request(
-                    f"{base_url}/graph/entity/create",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urlopen(req, timeout=30) as resp:
-                    body = resp.read().decode("utf-8")
-                    logger.info("[EXIF Relations] Created entity '%s': %d", name, resp.status)
-                    return json.loads(body)
-
-            entity_result = await asyncio.to_thread(_create_entity)
+            entity_result = await _create_entity_verified(
+                base_url, entity_name,
+                {"description": dim["description"], "entity_type": dim["entity_type"], "source_id": file_source},
+            )
             results["entities_created"].append(entity_result)
-        except URLError as exc:
-            if "409" in str(exc) or "Conflict" in str(exc) or "400" in str(exc) or "already exists" in str(exc):
-                # 409/400 may be stale — verify the entity actually exists and retry if not
-                if target_entity not in existing_labels:
-                    logger.info("[EXIF Relations] Entity '%s' reported conflict but not found in graph, retrying creation", target_entity)
-                    try:
-                        def _retry_create(payload: bytes = entity_payload, name: str = target_entity) -> dict[str, Any]:
-                            req = Request(
-                                f"{base_url}/graph/entity/create",
-                                data=payload,
-                                headers={"Content-Type": "application/json"},
-                                method="POST",
-                            )
-                            with urlopen(req, timeout=30) as resp:
-                                body = resp.read().decode("utf-8")
-                                logger.info("[EXIF Relations] Retry created entity '%s': %d", name, resp.status)
-                                return json.loads(body)
+            await asyncio.sleep(2.0)
 
-                        entity_result = await asyncio.to_thread(_retry_create)
-                        results["entities_created"].append(entity_result)
-                    except Exception as retry_exc:
-                        logger.warning("[EXIF Relations] Retry creation of '%s' also failed: %s", target_entity, retry_exc)
-                        results["entities_created"].append({"status": "exists", "entity_name": entity_name})
-                else:
-                    logger.info("[EXIF Relations] Entity '%s' already exists in graph, proceeding", target_entity)
-                    results["entities_created"].append({"status": "exists", "entity_name": entity_name})
-            else:
-                logger.warning("[EXIF Relations] Failed to create entity '%s': %s", entity_name, exc)
-                results["entities_created"].append({"status": "error", "entity_name": entity_name, "error": str(exc)})
-        except Exception as exc:
-            logger.warning("[EXIF Relations] Unexpected error creating entity '%s': %s", entity_name, exc)
-            results["entities_created"].append({"status": "error", "entity_name": entity_name, "error": str(exc)})
+    for dim in exif_dimensions:
+        entity_name = dim["name"]
 
-        # Link photo -> EXIF entity
-        relation_payload = json.dumps({
-            "source_entity": photo_name,
-            "target_entity": entity_name,
-            "relation_data": {
-                "description": dim["edge_description"],
-                "keywords": dim["edge_keyword"],
-                "weight": 1.0,
-            },
-        }).encode("utf-8")
+        relation_result = await _create_relation_verified(
+            base_url, photo_name, entity_name,
+            {"description": dim["edge_description"], "keywords": dim["edge_keyword"], "weight": 1.0},
+        )
+        results["relations_created"].append(relation_result)
 
-        try:
-            def _create_relation(payload: bytes = relation_payload, src: str = photo_name, tgt: str = entity_name) -> dict[str, Any]:
-                req = Request(
-                    f"{base_url}/graph/relation/create",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urlopen(req, timeout=30) as resp:
-                    body = resp.read().decode("utf-8")
-                    logger.info("[EXIF Relations] Created relation '%s' -> '%s': %d", src, tgt, resp.status)
-                    return json.loads(body)
-
-            relation_result = await asyncio.to_thread(_create_relation)
-            results["relations_created"].append(relation_result)
-        except URLError as exc:
-            if "409" in str(exc) or "Conflict" in str(exc) or "400" in str(exc) or "already exists" in str(exc):
-                results["relations_created"].append({"status": "exists", "source": photo_name, "target": entity_name})
-            else:
-                logger.warning("[EXIF Relations] Failed to create relation '%s' -> '%s': %s", photo_name, entity_name, exc)
-                results["relations_created"].append({"status": "error", "source": photo_name, "target": entity_name, "error": str(exc)})
-        except Exception as exc:
-            logger.warning("[EXIF Relations] Unexpected error creating relation '%s' -> '%s': %s", photo_name, entity_name, exc)
-            results["relations_created"].append({"status": "error", "source": photo_name, "target": entity_name, "error": str(exc)})
-
-        # Link EXIF entities to each other
         for other_dim in exif_dimensions:
             if other_dim["name"] == entity_name:
                 continue
-            cross_payload = json.dumps({
-                "source_entity": entity_name,
-                "target_entity": other_dim["name"],
-                "relation_data": {
-                    "description": f"{dim['edge_description']}, also {other_dim['edge_keyword']} {other_dim['name']}",
-                    "keywords": dim["edge_keyword"],
-                    "weight": 1.0,
-                },
-            }).encode("utf-8")
+            cross_result = await _create_relation_verified(
+                base_url, entity_name, other_dim["name"],
+                {"description": f"{dim['edge_description']}, also {other_dim['edge_keyword']} {other_dim['name']}", "keywords": dim["edge_keyword"], "weight": 1.0},
+            )
+            results["relations_created"].append(cross_result)
 
-            try:
-                def _create_cross(payload: bytes = cross_payload, src: str = entity_name, tgt: str = other_dim["name"]) -> dict[str, Any]:
-                    req = Request(
-                        f"{base_url}/graph/relation/create",
-                        data=payload,
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    )
-                    with urlopen(req, timeout=30) as resp:
-                        body = resp.read().decode("utf-8")
-                        return json.loads(body)
-
-                results["relations_created"].append(await asyncio.to_thread(_create_cross))
-            except URLError as exc:
-                if "409" in str(exc) or "Conflict" in str(exc) or "400" in str(exc) or "already exists" in str(exc):
-                    results["relations_created"].append({"status": "exists", "source": entity_name, "target": other_dim["name"]})
-                else:
-                    results["relations_created"].append({"status": "error", "source": entity_name, "target": other_dim["name"], "error": str(exc)})
-            except Exception as exc:
-                results["relations_created"].append({"status": "error", "source": entity_name, "target": other_dim["name"], "error": str(exc)})
-
-    logger.info("[EXIF Relations] Injection complete for %s: %d entities, %d relations",
+    logger.info("[EXIF Relations] Complete for %s: %d entities, %d relations",
                 file_source, len(results["entities_created"]), len(results["relations_created"]))
     return results
 
@@ -769,40 +801,11 @@ async def link_exif_to_visual_entities(
             if props.get("file_path") != file_source:
                 continue
 
-            relation_payload = json.dumps({
-                "source_entity": label,
-                "target_entity": photo_name,
-                "relation_data": {
-                    "description": f"{label} appears in {file_source}",
-                    "keywords": "appears_in",
-                    "weight": 1.0,
-                },
-            }).encode("utf-8")
-
-            try:
-                def _create_link(payload: bytes = relation_payload, src: str = label) -> dict[str, Any]:
-                    req = Request(
-                        f"{base_url}/graph/relation/create",
-                        data=payload,
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    )
-                    with urlopen(req, timeout=30) as resp:
-                        body = resp.read().decode("utf-8")
-                        logger.info("[EXIF Links] Linked '%s' -> '%s'", src, photo_name)
-                        return json.loads(body)
-
-                link_result = await asyncio.to_thread(_create_link)
-                results["visual_links_created"].append({"source": label, "target": photo_name, "status": "success"})
-            except URLError as exc:
-                if "409" in str(exc) or "Conflict" in str(exc) or "400" in str(exc) or "already exists" in str(exc):
-                    results["visual_links_created"].append({"source": label, "target": photo_name, "status": "exists"})
-                else:
-                    logger.warning("[EXIF Links] Failed to link '%s' -> '%s': %s", label, photo_name, exc)
-                    results["visual_links_created"].append({"source": label, "target": photo_name, "status": "error", "error": str(exc)})
-            except Exception as exc:
-                logger.warning("[EXIF Links] Unexpected error linking '%s' -> '%s': %s", label, photo_name, exc)
-                results["visual_links_created"].append({"source": label, "target": photo_name, "status": "error", "error": str(exc)})
+            link_result = await _create_relation_verified(
+                base_url, label, photo_name,
+                {"description": f"{label} appears in {file_source}", "keywords": "appears_in", "weight": 1.0},
+            )
+            results["visual_links_created"].append(link_result)
             break
 
     logger.info("[EXIF Links] Linking complete for %s: %d visual links created",

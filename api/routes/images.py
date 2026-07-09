@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, UploadFile
 from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
-from api.services.processor import ProcessingEvent, process_image, upload_image_to_lightrag, describe_image_with_vlm, inject_exif_relations, link_exif_to_visual_entities
+from api.services.processor import ProcessingEvent, process_image, upload_image_to_lightrag, describe_image_with_vlm, inject_exif_relations, create_exif_relations, link_exif_to_visual_entities
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +192,28 @@ async def images_health():
 
 
 @router.post("/link-exif-entities")
-async def link_exif_entities(file_source: str, photo_name: str):
-    """Link LLM-extracted visual entities to the photo node in the knowledge graph.
+async def link_exif_entities(
+    file_source: str,
+    photo_name: str,
+    exif_dimensions: Optional[str] = None,
+):
+    """Link EXIF and visual entities to the photo node in the knowledge graph.
 
-    Call this after LightRAG has finished processing a document. It finds
-    entities with matching file_path and creates edges from them to the photo node.
+    Call this after LightRAG has finished processing a document. It:
+    1. Creates relation edges between EXIF entities and the Photo node (if exif_dimensions provided)
+    2. Finds LLM-extracted visual entities with matching file_path and creates appears_in edges
     """
-    result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
-    return result
+    exif_result = None
+    if exif_dimensions:
+        import json as _json
+        dimensions = _json.loads(exif_dimensions)
+        exif_result = await create_exif_relations(
+            LIGHTRAG_URL, file_source, photo_name, dimensions,
+        )
+
+    visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
+
+    return {
+        "exif_relations": exif_result,
+        "visual_links": visual_result,
+    }
