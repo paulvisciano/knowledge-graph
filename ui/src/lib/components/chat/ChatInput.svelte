@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Attachment } from '$lib/utils/file-utils';
   import { fileToAttachment, isImageType, MAX_ATTACHMENTS, revokeAttachmentUrls } from '$lib/utils/file-utils';
-  import AttachmentPreview from '$lib/components/ui/AttachmentPreview.svelte';
+
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
 
   let {
@@ -156,8 +156,6 @@
         </div>
       </div>
     {/if}
-
-    <AttachmentPreview {attachments} onRemove={removeAttachment} />
 
     {#if attachError}
       <div class="mx-4 mb-1 text-xs text-cyber-red">{attachError}</div>

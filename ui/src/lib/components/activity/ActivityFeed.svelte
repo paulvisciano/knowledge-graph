@@ -15,7 +15,7 @@
   });
 </script>
 
-<div class="flex h-full flex-col overflow-hidden rounded-lg border border-cyber-border bg-cyber-surface">
+<div data-testid="activity-feed" class="flex h-full flex-col overflow-hidden rounded-lg border border-cyber-border bg-cyber-surface">
   <div class="flex shrink-0 items-center justify-between border-b border-cyber-border px-4 py-2.5">
     <div class="flex items-center gap-2">
       <h2 class="text-sm font-semibold text-cyber-text">Activity</h2>

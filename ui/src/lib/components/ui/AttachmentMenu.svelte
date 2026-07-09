@@ -49,6 +49,7 @@
   <button
     onclick={toggle}
     {disabled}
+    data-testid="attach-file-button"
     class="flex {sizeClass} shrink-0 items-center justify-center rounded-lg border border-cyber-border text-cyber-text-dim transition-colors hover:border-cyber-purple/40 hover:text-cyber-purple disabled:cursor-not-allowed disabled:opacity-30"
     title="Attach file"
   >
@@ -60,6 +61,7 @@
     <div class="absolute bottom-full left-0 mb-2 min-w-[160px] rounded-lg border border-cyber-border bg-cyber-surface-2 shadow-lg">
       <button
         onclick={pickImage}
+        data-testid="pick-image-button"
         class="flex w-full items-center gap-2.5 rounded-t-lg px-3 py-2 text-left text-sm text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
       >
         <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -12,6 +12,7 @@ export default defineConfig({
     exclude: ['framework7', 'framework7-svelte']
   },
   server: {
+    host: '0.0.0.0',
     port: 5180,
     proxy: {
       '/v1': {

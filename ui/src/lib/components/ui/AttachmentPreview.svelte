@@ -12,7 +12,7 @@
 </script>
 
 {#if attachments.length > 0}
-  <div class="flex flex-wrap gap-2 px-4 pt-2">
+  <div data-testid="attachment-preview" class="flex flex-wrap gap-2 px-4 pt-2">
     {#each attachments as att (att.id)}
       <div class="group/att relative flex items-center gap-2 rounded-lg border border-cyber-border bg-cyber-surface-2 px-2 py-1.5 text-xs transition-all hover:border-cyber-cyan/40">
         {#if isImageType(att.mimeType) && att.thumbnailUrl}

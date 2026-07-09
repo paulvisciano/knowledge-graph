@@ -90,6 +90,7 @@
             <StatusDot status={$llamaStatus} size={6} />
             <span class="status-label">LLM</span>
           </div>
+          <span data-testid="version" class="text-[10px] text-cyber-text-dim/50 ml-auto" title="App version">v0.2.0</span>
         </div>
         <button
           onclick={openSettings}
