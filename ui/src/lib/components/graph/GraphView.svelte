@@ -11,6 +11,7 @@
   const client = new LightragClient();
 
   let graphContainerEl: HTMLDivElement | undefined = $state();
+  let photoOverlay: PhotoOverlay | undefined = $state();
 
   let allNodes = $state<KGNode[]>([]);
   let allEdges = $state<KGEdge[]>([]);
@@ -26,6 +27,7 @@
   let nodeSizeMode = $state<'degree' | 'uniform'>('degree');
   let showLabels = $state(true);
   let graphCanvas: GraphCanvas | undefined = $state();
+  let fullscreenUrl = $state<string | null>(null);
 
   let highlightedIds = $state<Set<string>>(new Set());
 
@@ -135,16 +137,40 @@
   function handleSelectNode(node: KGNode) {
     selectedNode = node;
     expandedNodeIds = new Set([...expandedNodeIds, node.id]);
+    const nodeId = String(node.id);
+    const isPhoto = node.labels?.includes('Photo') || node.properties?.entity_type === 'Photo' || nodeId.includes('(Photo)');
+    if (isPhoto) {
+      photoOverlay?.showPhotoCard(nodeId);
+      if (graphStore.photoImages[nodeId]) {
+        fullscreenUrl = graphStore.photoImages[nodeId];
+      }
+    } else {
+      photoOverlay?.hidePhotoCard();
+    }
   }
 
   function handleHoverNode(node: KGNode | null) {
     hoveredNode = node;
     hoveredNodeId = node?.id ?? null;
+    if (node) {
+      const nodeId = String(node.id);
+      const isPhoto = node.labels?.includes('Photo') || node.properties?.entity_type === 'Photo' || nodeId.includes('(Photo)');
+      if (isPhoto) {
+        photoOverlay?.showPhotoCard(nodeId);
+      } else {
+        photoOverlay?.hidePhotoCard();
+      }
+    } else {
+      if (!selectedNode) {
+        photoOverlay?.hidePhotoCard();
+      }
+    }
   }
 
   function handleDeselect() {
     selectedNode = null;
     highlightedIds = new Set();
+    photoOverlay?.hidePhotoCard();
   }
 
   async function handleSelectLabel(label: string) {
@@ -405,6 +431,14 @@
     }
   });
 
+  // When photo images arrive, refresh graph so 3D textures update
+  $effect(() => {
+    const photos = graphStore.photoImages;
+    if (Object.keys(photos).length > 0 && graphCanvas) {
+      graphCanvas.refreshGraph();
+    }
+  });
+
   // When pipeline completes, clear the photo cluster focus so the full graph is visible
   $effect(() => {
     if (graphStore.pipelineDone) {
@@ -500,7 +534,7 @@
     />
   {/if}
 
-  <PhotoOverlay containerEl={graphContainerEl} />
+  <PhotoOverlay bind:this={photoOverlay} bind:fullscreenUrl {graphCanvas} containerEl={graphContainerEl} />
 </div>
 
 <style>
