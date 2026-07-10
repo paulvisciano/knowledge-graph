@@ -74,6 +74,8 @@ services:
     container_name: knowledge-graph-api
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       lightrag:
         condition: service_healthy
     environment:
@@ -84,6 +86,7 @@ services:
       VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
       FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-retinaface}"
       FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
+      DATABASE_URL: "postgresql://lightrag:lightrag@postgres:5432/lightrag"
     volumes:
       - ./known_faces:/app/known_faces:ro
       - ./inputs:/app/inputs
