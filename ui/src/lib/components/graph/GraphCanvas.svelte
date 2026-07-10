@@ -1064,6 +1064,15 @@
     setTimeout(() => {
       fg.zoomToFit(500, 80);
     }, 1000);
+
+    // Override default TrackballControls scroll zoom with cursor-centered zoom
+    const controls = fg.controls();
+    controls.noZoom = true; // disable default scroll zoom (TrackballControls uses noZoom, not enableZoom)
+
+    // Attach wheel handler to the canvas (not the container div) so that
+    // stopImmediatePropagation prevents the library's own wheel listener
+    const canvas = fg.renderer().domElement;
+    canvas.addEventListener('wheel', handleWheelZoom, { passive: false, capture: true });
   }
 
   function updateTooltip(node: GraphNode | null) {
@@ -1289,18 +1298,106 @@
     return () => cancelAnimationFrame(opacityRafId);
   });
 
-  export function zoomIn() {
+  /** Zoom toward a 3D point by a factor, keeping that point stationary on screen
+   *  without changing camera orientation (no rotation). */
+  function zoomToward(point: { x: number; y: number; z: number }, factor: number) {
     if (!graph) return;
     const camera = graph.camera();
-    const newPos = camera.position.clone().multiplyScalar(0.7);
-    graph.cameraPosition(newPos, undefined, 400);
+    const controls = graph.controls();
+
+    // Compute displacement: move camera along the point→camera line
+    const dx = (1 - factor) * (camera.position.x - point.x);
+    const dy = (1 - factor) * (camera.position.y - point.y);
+    const dz = (1 - factor) * (camera.position.z - point.z);
+
+    // Move camera position
+    camera.position.x -= dx;
+    camera.position.y -= dy;
+    camera.position.z -= dz;
+
+    // Move the controls' orbit target by the same delta to preserve orientation
+    controls.target.x -= dx;
+    controls.target.y -= dy;
+    controls.target.z -= dz;
+
+    // Keep the camera looking at the new target
+    camera.lookAt(controls.target);
+    controls.update();
+  }
+
+  /** Handle wheel events to zoom toward the cursor position. */
+  function handleWheelZoom(event: WheelEvent) {
+    if (!graph || !container) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    // Clamp deltaY to prevent extreme zoom steps
+    const delta = Math.sign(event.deltaY) * Math.min(Math.abs(event.deltaY), 100);
+    // Positive deltaY = scroll down = zoom out; negative = zoom in
+    const zoomFactor = delta > 0 ? 1.06 : 1 / 1.06;
+
+    // Convert mouse screen coords to graph 3D coords
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const camera = graph.camera();
+    // Distance from camera to the graph point at the cursor
+    const dist = camera.position.length();
+    const targetPoint = graph.screen2GraphCoords(x, y, dist);
+
+    if (targetPoint) {
+      zoomToward(targetPoint, zoomFactor);
+    }
+  }
+
+  export function zoomIn() {
+    if (!graph || !container) return;
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const camera = graph.camera();
+    const dist = camera.position.length();
+    const targetPoint = graph.screen2GraphCoords(centerX, centerY, dist);
+    if (targetPoint) {
+      zoomToward(targetPoint, 1 / 1.2);
+    } else {
+      // Fallback: simple camera move
+      const controls = graph.controls();
+      const factor = 1 / 1.2;
+      camera.position.x *= factor;
+      camera.position.y *= factor;
+      camera.position.z *= factor;
+      controls.target.x *= factor;
+      controls.target.y *= factor;
+      controls.target.z *= factor;
+      camera.lookAt(controls.target);
+      controls.update();
+    }
   }
 
   export function zoomOut() {
-    if (!graph) return;
+    if (!graph || !container) return;
+    const rect = container.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
     const camera = graph.camera();
-    const newPos = camera.position.clone().multiplyScalar(1.4);
-    graph.cameraPosition(newPos, undefined, 400);
+    const dist = camera.position.length();
+    const targetPoint = graph.screen2GraphCoords(centerX, centerY, dist);
+    if (targetPoint) {
+      zoomToward(targetPoint, 1.2);
+    } else {
+      const controls = graph.controls();
+      const factor = 1.2;
+      camera.position.x *= factor;
+      camera.position.y *= factor;
+      camera.position.z *= factor;
+      controls.target.x *= factor;
+      controls.target.y *= factor;
+      controls.target.z *= factor;
+      camera.lookAt(controls.target);
+      controls.update();
+    }
   }
 
   export function fitView() {
@@ -1337,6 +1434,10 @@
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(opacityRafId);
       if (graph) {
+        try {
+          const canvas = graph.renderer().domElement;
+          canvas.removeEventListener('wheel', handleWheelZoom, { capture: true } as EventListenerOptions);
+        } catch { /* graph may already be destroyed */ }
         graph._destructor();
         graph = null;
       }
