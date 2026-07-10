@@ -1,6 +1,9 @@
 import type { KGNode, KGEdge } from '$lib/constants';
+import { API } from '$lib/constants';
 import { lightragClient } from '$lib/services/lightrag-client';
 import { eventBus } from './event-bus.svelte';
+
+const KG_API_BASE = '/api/kg';
 
 class GraphStore {
   nodes = $state<KGNode[]>([]);
@@ -43,6 +46,7 @@ class GraphStore {
         status: 'completed',
         meta: { nodeCount: graph.nodes.length, edgeCount: graph.edges.length },
       });
+      this.fetchPhotoImages(graph.nodes);
     } catch (err) {
       eventBus.pushEvent({
         id: crypto.randomUUID(),
@@ -54,6 +58,43 @@ class GraphStore {
       });
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  /** Fetch images for Photo nodes from the API and populate photoImages. */
+  private async fetchPhotoImages(nodes: KGNode[]) {
+    const photoNodes = nodes.filter((n) =>
+      n.labels?.some((l) => /^(Photo|Image)$/i.test(l))
+      || n.properties?.entity_type === 'Photo'
+      || n.properties?.entity_type === 'Image'
+      || n.id?.includes('(Photo)')
+      || n.id?.includes('(Image)')
+    );
+    if (photoNodes.length === 0) return;
+
+    const updates: Record<string, string> = {};
+    await Promise.all(
+      photoNodes.map(async (node) => {
+        if (this.photoImages[node.id]) return;
+        const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+        if (!sourceId || sourceId === 'manual_creation') return;
+        try {
+          const url = `${KG_API_BASE}${API.kg.photoImage(String(sourceId))}`;
+          const resp = await fetch(url);
+          if (!resp.ok) return;
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          updates[node.id] = dataUrl;
+        } catch {
+        }
+      })
+    );
+    if (Object.keys(updates).length > 0) {
+      this.photoImages = { ...this.photoImages, ...updates };
     }
   }
 

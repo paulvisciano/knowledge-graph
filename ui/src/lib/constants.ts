@@ -12,6 +12,7 @@ export const API = {
     imagesProcess: '/images/process',
     imagesProcessJson: '/images/process-json',
     imagesHealth: '/images/health',
+    photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
   },
   lightrag: {
     health: '/health',
