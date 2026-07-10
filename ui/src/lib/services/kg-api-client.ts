@@ -117,6 +117,11 @@ export class KgApiClient {
       cancel: () => controller.abort(),
     };
   }
+
+  async deletePhotoEntities(fileSource: string): Promise<{ entities_deleted: { name: string; status: string }[]; errors: unknown[] }> {
+    const path = API.kg.deletePhotoEntities(fileSource);
+    return this.request(path, { method: 'DELETE' });
+  }
 }
 
 export const kgApiClient = new KgApiClient();

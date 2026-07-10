@@ -1,5 +1,7 @@
 <script lang="ts">
   import { lightragClient } from '$lib/services/lightrag-client';
+  import { kgApiClient } from '$lib/services/kg-api-client';
+  import { graphStore } from '$lib/stores/graph.svelte';
   import type { DocStatus, PipelineStatus } from '$lib/constants';
   import StatusBadge from './StatusBadge.svelte';
   import ScanButton from './ScanButton.svelte';
@@ -119,10 +121,18 @@
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, filePath?: string) {
     try {
       await lightragClient.deleteDocument(id);
+      if (filePath) {
+        try {
+          await kgApiClient.deletePhotoEntities(filePath);
+        } catch {
+          // Best-effort cleanup — entity deletion may fail if already gone
+        }
+      }
       await loadDocs();
+      graphStore.refresh();
     } catch {
       void 0;
     }
@@ -335,7 +345,7 @@
                       </svg>
                     </button>
                     <button
-                      onclick={() => handleDelete(doc.id)}
+                      onclick={() => handleDelete(doc.id, doc.file_path)}
                       class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red"
                       title="Delete"
                     >

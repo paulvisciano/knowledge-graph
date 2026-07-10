@@ -13,6 +13,7 @@ export const API = {
     imagesProcessJson: '/images/process-json',
     imagesHealth: '/images/health',
     photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
+    deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
   },
   lightrag: {
     health: '/health',
