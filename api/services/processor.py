@@ -936,3 +936,90 @@ async def wait_for_lightrag_processing(
     except Exception as exc:
         logger.warning("[LightRAG Wait] Failed to fetch documents list: %s", exc)
         return "processed"
+
+
+async def delete_photo_entities(
+    lightrag_url: str,
+    file_source: str,
+) -> dict[str, Any]:
+    """Delete the Photo node and EXIF entities created for a file source.
+
+    When a document is deleted from LightRAG, it removes the visual entities
+    it extracted (Pool, House, Person, etc.), but our manually created Photo
+    and EXIF entities (Date, Camera, Location) persist. This function cleans
+    those up by finding them via source_id and deleting them along with
+    their relations.
+    """
+    base_url = lightrag_url.rstrip("/")
+    results: dict[str, Any] = {"entities_deleted": [], "errors": []}
+    photo_name = f"{file_source} (Photo)"
+    exif_suffixes = (" (Date)", " (Camera)", " (Location)")
+
+    # Find all entities belonging to this file by querying the Photo node's subgraph
+    try:
+        def _get_graph() -> dict[str, Any]:
+            req = Request(
+                f"{base_url}/graphs?label={url_quote(photo_name)}",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        graph = await asyncio.to_thread(_get_graph)
+    except Exception as exc:
+        logger.warning("[Delete Entities] Failed to fetch graph for '%s': %s", photo_name, exc)
+        results["errors"].append({"step": "fetch_graph", "error": str(exc)})
+        return results
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+
+    # Collect entity names to delete: the Photo node + EXIF entities with matching source_id
+    entities_to_delete: list[str] = []
+    for node in nodes:
+        node_id = node.get("id", "")
+        props = node.get("properties", {})
+        source_id = props.get("source_id", "")
+        if node_id == photo_name or source_id == file_source:
+            if node_id not in entities_to_delete:
+                entities_to_delete.append(node_id)
+        elif any(node_id.endswith(s) for s in exif_suffixes):
+            connected = any(
+                e.get("source") == photo_name and e.get("target") == node_id
+                or e.get("target") == photo_name and e.get("source") == node_id
+                for e in edges
+            )
+            if connected and node_id not in entities_to_delete:
+                entities_to_delete.append(node_id)
+
+    for entity_name in entities_to_delete:
+        try:
+            def _delete(name: str = entity_name) -> dict[str, Any]:
+                payload = json.dumps({"entity_name": name}).encode("utf-8")
+                req = Request(
+                    f"{base_url}/graph/entity/delete",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="DELETE",
+                )
+                with urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            result = await asyncio.to_thread(_delete)
+            results["entities_deleted"].append({"name": entity_name, "status": "deleted"})
+            logger.info("[Delete Entities] Deleted '%s'", entity_name)
+            await asyncio.sleep(0.3)
+        except URLError as exc:
+            if "404" in str(exc) or "not found" in str(exc).lower():
+                results["entities_deleted"].append({"name": entity_name, "status": "not_found"})
+                logger.info("[Delete Entities] '%s' already gone", entity_name)
+            else:
+                results["errors"].append({"entity": entity_name, "error": str(exc)})
+                logger.warning("[Delete Entities] Failed to delete '%s': %s", entity_name, exc)
+        except Exception as exc:
+            results["errors"].append({"entity": entity_name, "error": str(exc)})
+            logger.warning("[Delete Entities] Unexpected error deleting '%s': %s", entity_name, exc)
+
+    logger.info("[Delete Entities] Cleanup for '%s': deleted %d entities, %d errors",
+                file_source, len(results["entities_deleted"]), len(results["errors"]))
+    return results
