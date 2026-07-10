@@ -88,6 +88,8 @@ services:
       - ./known_faces:/app/known_faces:ro
       - ./inputs:/app/inputs
       - deepface_weights:/root/.deepface
+    ports:
+      - "${API_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: ${API_MEMORY_LIMIT:-4g}
