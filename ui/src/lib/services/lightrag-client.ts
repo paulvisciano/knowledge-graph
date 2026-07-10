@@ -349,7 +349,8 @@ export class LightragClient {
   }
 
   personPhotoUrl(name: string): string {
-    return this.proxyUrl(API.lightrag.graph.personPhoto(name));
+    const KG_API_BASE = '/api/kg';
+    return `${KG_API_BASE}${API.kg.faceCrop(name)}`;
   }
 
   documentContentUrl(docId: string): string {

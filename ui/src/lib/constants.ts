@@ -14,6 +14,11 @@ export const API = {
     imagesHealth: '/images/health',
     photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
+    faceCrop: (name: string) => `/images/faces/crops/${encodeURIComponent(name)}`,
+    createJob: '/images/jobs',
+    listJobs: '/images/jobs',
+    jobStatus: (jobId: string) => `/images/jobs/${jobId}`,
+    jobEvents: (jobId: string, after?: number) => `/images/jobs/${jobId}/events${after ? `?after=${after}` : ''}`,
   },
   lightrag: {
     health: '/health',
@@ -34,7 +39,6 @@ export const API = {
       createEntity: '/graph/entity/create',
       createRelation: '/graph/relation/create',
       mergeEntities: '/graph/entities/merge',
-      personPhoto: (name: string) => `/faces/crops/${encodeURIComponent(name)}`,
     },
     documents: {
       scan: '/documents/scan',
