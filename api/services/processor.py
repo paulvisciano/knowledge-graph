@@ -19,7 +19,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from processors.exif_extractor import extract_exif_metadata
-from processors.face_recognizer import analyze_attributes, identify_person
+from processors.face_recognizer import analyze_attributes, identify_person, detect_faces
 
 logger = logging.getLogger("api.processor")
 
@@ -456,6 +456,82 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
         return None
 
 
+def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[str], source_id: str) -> None:
+    """Detect face bounding boxes and save cropped face images with a person-to-crop mapping.
+
+    Crops are saved to FACES_CACHE_DIR as JPEG files named by the person name.
+    A mapping file (face_mapping.json) records the person→filename association.
+    """
+    from PIL import Image
+
+    faces_cache_dir = Path(os.environ.get("FACES_CACHE_DIR", str(Path(_PROJECT_ROOT) / "face_crops")))
+    faces_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    bboxes = detect_faces(image_path)
+    if not bboxes:
+        logger.info("No face bounding boxes for crop saving in %s", image_path)
+        return
+
+    try:
+        img = Image.open(image_path)
+    except Exception as exc:
+        logger.warning("Failed to open image for face cropping: %s", exc)
+        return
+
+    img_w, img_h = img.size
+
+    for idx, face_info in enumerate(faces):
+        name = names[idx] if idx < len(names) else f"Person {idx + 1}"
+        if idx >= len(bboxes):
+            break
+
+        bbox = bboxes[idx].get("bbox", [])
+        if len(bbox) != 4:
+            continue
+
+        x1, y1, x2, y2 = bbox
+        face_w = x2 - x1
+        face_h = y2 - y1
+        pad_x = int(face_w * 0.3)
+        pad_y = int(face_h * 0.3)
+
+        cx1 = max(0, x1 - pad_x)
+        cy1 = max(0, y1 - pad_y)
+        cx2 = min(img_w, x2 + pad_x)
+        cy2 = min(img_h, y2 + pad_y)
+
+        try:
+            cropped = img.crop((cx1, cy1, cx2, cy2))
+            max_dim = 256
+            cropped.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+            safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
+            crop_path = faces_cache_dir / f"{safe_name}.jpg"
+            cropped.save(str(crop_path), "JPEG", quality=85)
+            logger.info("Saved face crop for '%s' → %s", name, crop_path.name)
+        except Exception as exc:
+            logger.warning("Failed to save face crop for '%s': %s", name, exc)
+
+    mapping_path = faces_cache_dir / "face_mapping.json"
+    mapping: dict[str, Any] = {}
+    if mapping_path.is_file():
+        try:
+            mapping = json.loads(mapping_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            mapping = {}
+
+    for idx, face_info in enumerate(faces):
+        name = names[idx] if idx < len(names) else f"Person {idx + 1}"
+        safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
+        mapping[name] = {
+            "source_id": source_id,
+            "face_index": idx,
+            "crop_file": f"{safe_name}.jpg",
+        }
+
+    mapping_path.write_text(json.dumps(mapping, indent=2))
+
+
 def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | None:
     """Detect faces and analyze attributes, optionally identifying known persons.
 
@@ -481,6 +557,7 @@ def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | N
                 identifications = id_result
 
         combined: list[dict[str, Any]] = []
+        names: list[str] = []
         for idx, face_attrs in enumerate(attributes):
             name = "Unknown"
             if idx < len(identifications) and isinstance(identifications[idx], dict):
@@ -488,13 +565,18 @@ def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | N
                 if identity and identity != "Unknown":
                     name = identity
 
+            names.append(name if name != "Unknown" else f"Person {idx + 1}")
             combined.append({
-                "name": name,
+                "name": names[-1],
                 "age": face_attrs.get("age"),
                 "gender": face_attrs.get("gender"),
                 "emotion": face_attrs.get("emotion"),
                 "race": face_attrs.get("race"),
             })
+
+        # Save face crops with person name mapping
+        source_id = Path(image_path).name
+        _save_face_crops(image_path, attributes, names, source_id)
 
         logger.info("Face analysis succeeded for %s — %d face(s)", image_path, len(combined))
         return {"faces": combined}

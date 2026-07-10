@@ -458,26 +458,72 @@ async def get_photo(filename: str):
 
 @router.get("/faces/crops/{name:path}")
 async def get_face_crop(name: str):
-    """Detect and crop a face from a source image for a person entity.
+    """Serve a cropped face image for a person entity.
 
-    Given a person name (e.g. "Person 1"), queries LightRAG for the entity,
-    finds the source image, detects faces, and returns a cropped face image.
-
-    Crops are cached on disk in FACES_CACHE_DIR to avoid re-processing.
+    First checks the face_mapping.json for the correct face-to-person mapping
+    (created during image processing). Falls back to on-the-fly detection
+    if no mapping exists. Crops are cached on disk.
     """
     import httpx
     from PIL import Image
     from processors.face_recognizer import detect_faces
 
-    # Sanitize name for cache
     safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
     cache_path = FACES_CACHE_DIR / f"{safe_name}.jpg"
 
-    # Return cached crop if available
     if cache_path.is_file():
         return FileResponse(str(cache_path), media_type="image/jpeg")
 
-    # Query LightRAG for the person node to find the source image
+    # Check face_mapping.json for the person-to-face mapping
+    mapping_path = FACES_CACHE_DIR / "face_mapping.json"
+    mapping: dict[str, Any] = {}
+    if mapping_path.is_file():
+        try:
+            mapping = json.loads(mapping_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            mapping = {}
+
+    if name in mapping:
+        entry = mapping[name]
+        source_id = entry.get("source_id", "")
+        if source_id:
+            image_path = INPUT_DIR / source_id
+            if not image_path.is_file():
+                for ext in ["", ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
+                    candidate = INPUT_DIR / f"{source_id}{ext}"
+                    if candidate.is_file():
+                        image_path = candidate
+                        break
+
+            if image_path.is_file():
+                faces = await asyncio.to_thread(detect_faces, str(image_path))
+                face_index = entry.get("face_index", 0)
+                if faces and face_index < len(faces):
+                    bbox = faces[face_index].get("bbox", [])
+                    if len(bbox) == 4:
+                        try:
+                            img = await asyncio.to_thread(Image.open, str(image_path))
+                            img_w, img_h = img.size
+                            x1, y1, x2, y2 = bbox
+                            face_w = x2 - x1
+                            face_h = y2 - y1
+                            pad_x = int(face_w * 0.3)
+                            pad_y = int(face_h * 0.3)
+                            cx1 = max(0, x1 - pad_x)
+                            cy1 = max(0, y1 - pad_y)
+                            cx2 = min(img_w, x2 + pad_x)
+                            cy2 = min(img_h, y2 + pad_y)
+                            cropped = img.crop((cx1, cy1, cx2, cy2))
+                            cropped.thumbnail((256, 256), Image.Resampling.LANCZOS)
+                            await asyncio.to_thread(cropped.save, str(cache_path), "JPEG", quality=85)
+                            img_bytes = io.BytesIO()
+                            cropped.save(img_bytes, format="JPEG", quality=85)
+                            img_bytes.seek(0)
+                            return Response(content=img_bytes.getvalue(), media_type="image/jpeg")
+                        except Exception as exc:
+                            logger.error("Failed to crop face for '%s': %s", name, exc)
+
+    # Fallback: query LightRAG for the person node and detect faces on-the-fly
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
@@ -490,7 +536,6 @@ async def get_face_crop(name: str):
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to query LightRAG: {exc}")
 
-    # Find the person node and its source image
     person_node = None
     source_file = None
     for node in graph_data.get("nodes", []):
@@ -507,10 +552,8 @@ async def get_face_crop(name: str):
     if not source_file:
         raise HTTPException(status_code=404, detail=f"No source image found for '{name}'")
 
-    # Find the source image file
     image_path = INPUT_DIR / source_file
     if not image_path.is_file():
-        # Try common extensions
         for ext in ["", ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
             candidate = INPUT_DIR / f"{source_file}{ext}"
             if candidate.is_file():
@@ -520,33 +563,24 @@ async def get_face_crop(name: str):
     if not image_path.is_file():
         raise HTTPException(status_code=404, detail=f"Source image not found: {source_file}")
 
-    # Detect faces in the source image
     faces = await asyncio.to_thread(detect_faces, str(image_path))
     if not faces:
         raise HTTPException(status_code=404, detail=f"No faces detected in source image for '{name}'")
 
-    # Determine which face to crop for this person
-    # Strategy: extract the person index from the name (e.g. "Person 1" -> index 0)
     face_index = 0
     import re
     match = re.search(r"(\d+)", name)
     if match:
-        face_index = int(match.group(1)) - 1  # Person 1 -> face 0
-
-    # Clamp to available faces
+        face_index = int(match.group(1)) - 1
     if face_index >= len(faces):
         face_index = 0
 
     face = faces[face_index]
     bbox = face.get("bbox", [])
-
     if len(bbox) != 4:
         raise HTTPException(status_code=500, detail=f"Invalid face bounding box for '{name}'")
 
-    # Crop the face from the image
     x1, y1, x2, y2 = bbox
-
-    # Add padding around the face (30% on each side)
     face_w = x2 - x1
     face_h = y2 - y1
     pad_x = int(face_w * 0.3)
@@ -555,29 +589,17 @@ async def get_face_crop(name: str):
     try:
         img = await asyncio.to_thread(Image.open, str(image_path))
         img_w, img_h = img.size
-
-        # Clamp to image bounds with padding
         cx1 = max(0, x1 - pad_x)
         cy1 = max(0, y1 - pad_y)
         cx2 = min(img_w, x2 + pad_x)
         cy2 = min(img_h, y2 + pad_y)
-
         cropped = img.crop((cx1, cy1, cx2, cy2))
-
-        # Resize to a consistent size for graph display
-        max_dim = 256
-        cropped.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-
-        # Save to cache
+        cropped.thumbnail((256, 256), Image.Resampling.LANCZOS)
         await asyncio.to_thread(cropped.save, str(cache_path), "JPEG", quality=85)
-
-        # Return the cropped image
         img_bytes = io.BytesIO()
         cropped.save(img_bytes, format="JPEG", quality=85)
         img_bytes.seek(0)
-
         return Response(content=img_bytes.getvalue(), media_type="image/jpeg")
-
     except Exception as exc:
         logger.error("Failed to crop face for '%s': %s", name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to crop face: {exc}")
