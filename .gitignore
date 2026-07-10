@@ -35,3 +35,6 @@ ui/bun.lock
 # Python virtual environments
 .venv/
 venv/
+
+# Face crop cache
+face_crops/
