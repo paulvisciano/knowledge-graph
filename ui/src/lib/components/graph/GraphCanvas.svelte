@@ -99,6 +99,14 @@
   // Animation frame ID for persistent opacity animation loop
   let opacityRafId = 0;
 
+  function isPhotoNode(node: { labels?: string[]; properties?: Record<string, unknown>; id?: string }): boolean {
+    return !!node.labels?.some(l => /^(Photo|Image)$/i.test(l))
+      || (node.properties?.entity_type as string) === 'Photo'
+      || (node.properties?.entity_type as string) === 'Image'
+      || (node.id ?? '').includes('(Photo)')
+      || (node.id ?? '').includes('(Image)');
+  }
+
   function hashColor(label: string): string {
     let hash = 0;
     for (let i = 0; i < label.length; i++) {
@@ -310,7 +318,9 @@
           orbitIndex.set(hubId, idx + 1);
           const totalSatellites = satellitesPerHub.get(hubId) ?? 1;
           const hubSize = getNodeSize(hubId);
-          const orbitRadius = hubSize + 8 + Math.sqrt(totalSatellites) * 10;
+          let orbitRadius = hubSize + 8 + Math.sqrt(totalSatellites) * 10;
+          // Photo nodes get extra initial distance
+          if (isPhotoNode(n)) orbitRadius += 25;
           const angle = (2 * Math.PI * idx) / totalSatellites;
           const jitter = 0.8;
           x = hubPos.x + orbitRadius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
@@ -359,13 +369,16 @@
 
     if (layout === 'force') {
       // Build a lookup map for hub positions (much faster than .find() per tick)
+      // Also build a photo node lookup for distance adjustments
       const hubPositionLookup = new Map<string, { x: number; y: number; z: number }>();
+      const photoNodeLookup = new Map<string, boolean>();
       const data = graph.graphData();
       for (const node of data.nodes as GraphNode[]) {
         const nodeId = String(node.id);
         if (hubSet.has(nodeId) && node.x !== undefined) {
           hubPositionLookup.set(nodeId, { x: node.x!, y: node.y!, z: node.z! });
         }
+        photoNodeLookup.set(nodeId, isPhotoNode(node));
       }
 
       // Strong force pulling satellites toward their hub
@@ -387,7 +400,14 @@
 
           // Desired orbit radius scales with hub visual size + connection count
           const hubSize = getNodeSize(hubId);
-          const orbitRadius = hubSize + 8 + Math.sqrt(degreeMap.get(hubId) ?? 1) * 6;
+          let orbitRadius = hubSize + 8 + Math.sqrt(degreeMap.get(hubId) ?? 1) * 6;
+
+          // Increase orbit radius when the hub or satellite is a photo node
+          const isSatellitePhoto = photoNodeLookup.get(nodeId) ?? false;
+          const isHubPhoto = photoNodeLookup.get(hubId) ?? false;
+          if (isSatellitePhoto || isHubPhoto) {
+            orbitRadius += 25; // extra distance for image nodes
+          }
 
           // Strong pull toward orbit radius around hub
           if (dist > orbitRadius) {
@@ -520,11 +540,7 @@
     const color = hashColor(node.labels?.[0] ?? 'default');
     const opacity = Math.max(nodeOpacity.get(nodeId) ?? 0, 0.01);
 
-    const isPhoto = node.labels?.some(l => /^(Photo|Image)$/i.test(l))
-      || node.properties?.entity_type === 'Photo'
-      || node.properties?.entity_type === 'Image'
-      || nodeId?.includes('(Photo)')
-      || nodeId?.includes('(Image)');
+    const isPhoto = isPhotoNode(node);
 
     if (isPhoto) {
       const photoTexture = loadPhotoTexture(nodeId);
@@ -852,8 +868,28 @@
 
     applyClusterForce();
 
-    fg.d3Force('link')?.distance(40);
-    fg.d3Force('charge')?.strength(-80);
+    // Increase link distance for edges connected to image nodes
+    // Build a photo-node lookup so the distance function can check efficiently
+    const graphData = fg.graphData();
+    const photoLookup = new Map<string, boolean>();
+    for (const n of (graphData?.nodes ?? []) as GraphNode[]) {
+      photoLookup.set(String(n.id), isPhotoNode(n));
+    }
+    fg.d3Force('link')?.distance((link: { source: GraphNode | string; target: GraphNode | string }) => {
+      const src = typeof link.source === 'object' ? link.source : null;
+      const tgt = typeof link.target === 'object' ? link.target : null;
+      // Check via lookup (handles both resolved node objects and string IDs)
+      const srcPhoto = src ? (photoLookup.get(String(src.id)) ?? isPhotoNode(src)) : false;
+      const tgtPhoto = tgt ? (photoLookup.get(String(tgt.id)) ?? isPhotoNode(tgt)) : false;
+      if (srcPhoto || tgtPhoto) return 120; // 3x base distance for image connections
+      return 40;
+    });
+
+    // Use built-in charge force with per-node strength — photo nodes repel much more strongly
+    fg.d3Force('charge')?.strength((nodeObj: NodeObject) => {
+      const n = nodeObj as GraphNode;
+      return isPhotoNode(n) ? -400 : -80;
+    });
 
     fg.d3Force('center', null);
     fg.d3Force('center', ((alpha: number) => {
@@ -875,7 +911,7 @@
     }) as never);
 
     setTimeout(() => {
-      fg.zoomToFit(500, 20);
+      fg.zoomToFit(500, 80);
     }, 1000);
   }
 
@@ -1116,7 +1152,7 @@
 
   export function fitView() {
     if (!graph) return;
-    graph.zoomToFit(500, 20);
+    graph.zoomToFit(500, 80);
   }
 
   export function getGraph() {
@@ -1131,7 +1167,7 @@
     const nx = node.x as number;
     const ny = (node.y ?? 0) as number;
     const nz = node.z as number;
-    const distance = 80;
+    const distance = 200;
     graph.cameraPosition(
       { x: nx, y: ny, z: nz },
       { x: nx, y: ny, z: nz + distance },

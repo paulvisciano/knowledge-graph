@@ -467,9 +467,9 @@
       }
     }
 
-    // Auto-focus on newly attached Photo nodes
+    // Auto-focus: zoom to fit the full cluster instead of zooming into the photo node
     if (newPhotoNodeId) {
-      setTimeout(() => graphCanvas?.focusNode(newPhotoNodeId), 300);
+      setTimeout(() => graphCanvas?.fitToView(), 300);
     }
   });
 
