@@ -19,6 +19,7 @@ from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
     describe_image_with_vlm, create_exif_relations,
     link_exif_to_visual_entities, wait_for_lightrag_processing,
+    delete_photo_entities,
 )
 
 logger = logging.getLogger(__name__)
@@ -421,3 +422,14 @@ async def get_photo(filename: str):
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid path")
     return FileResponse(str(file_path))
+
+
+@router.delete("/photo-entities")
+async def delete_photo_entities_endpoint(file_source: str):
+    """Delete the Photo node and EXIF entities for a file source.
+
+    Call this after deleting a document from LightRAG to clean up the
+    manually created Photo and EXIF entities that persist after deletion.
+    """
+    result = await delete_photo_entities(LIGHTRAG_URL, file_source)
+    return result
