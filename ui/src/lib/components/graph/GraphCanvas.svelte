@@ -460,7 +460,7 @@
   }
 
   const photoTextureCache = new Map<string, THREE.Texture>();
-  const photoTextureLoaded = new Map<string, boolean>();
+  const photoNodeMaterials = new Map<string, THREE.MeshBasicMaterial>();
 
   function loadPhotoTexture(nodeId: string): THREE.Texture | undefined {
     const dataUrl = graphStore.photoImages[nodeId];
@@ -470,15 +470,47 @@
     const img = new Image();
     img.crossOrigin = 'anonymous';
     const texture = new THREE.Texture(img);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = false;
     photoTextureCache.set(nodeId, texture);
-    photoTextureLoaded.set(nodeId, false);
     img.onload = () => {
       texture.needsUpdate = true;
-      photoTextureLoaded.set(nodeId, true);
+      // Apply texture to the material if the node was already created with a cyan fallback
+      const mat = photoNodeMaterials.get(nodeId);
+      if (mat && mat.map !== texture) {
+        mat.color.set(0xffffff);
+        mat.map = texture;
+        mat.opacity = 1;
+        mat.needsUpdate = true;
+      }
     };
     img.src = dataUrl;
+    // Data URLs may load synchronously
+    if (img.complete && img.naturalWidth > 0) {
+      texture.needsUpdate = true;
+    }
     return texture;
+  }
+
+  /** Apply photo textures to existing node meshes. Called when photoImages updates. */
+  export function applyPhotoTextures() {
+    if (!graph) return;
+    const data = graph.graphData();
+    const nodes = data?.nodes as GraphNode[] | undefined;
+    if (!nodes) return;
+    for (const node of nodes) {
+      const nodeId = String(node.id);
+      const mat = photoNodeMaterials.get(nodeId);
+      if (!mat) continue;
+      const dataUrl = graphStore.photoImages[nodeId];
+      if (!dataUrl) continue;
+      const texture = loadPhotoTexture(nodeId);
+      if (!texture) continue;
+      mat.color.set(0xffffff);
+      mat.map = texture;
+      mat.opacity = 1;
+      mat.needsUpdate = true;
+    }
   }
 
   function createNodeThreeObject(node: GraphNode): THREE.Object3D {
@@ -496,20 +528,18 @@
 
     if (isPhoto) {
       const photoTexture = loadPhotoTexture(nodeId);
-      const textureReady = photoTextureLoaded.get(nodeId) === true;
 
-      // Always render as a plane — use texture if ready, otherwise cyan fill
       const planeWidth = Math.max(size * 2.5, 8);
       const planeHeight = planeWidth * 0.75;
       const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
 
       let material: THREE.MeshBasicMaterial;
-      if (textureReady && photoTexture) {
+      if (photoTexture) {
         material = new THREE.MeshBasicMaterial({
           color: 0xffffff,
           map: photoTexture,
           transparent: true,
-          opacity,
+          opacity: 1,
           side: THREE.DoubleSide,
         });
       } else {
@@ -528,6 +558,7 @@
       const borderLine = new THREE.LineSegments(borderGeom, borderMat);
       group.add(borderLine);
 
+      photoNodeMaterials.set(nodeId, material);
       (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
       (group as unknown as Record<string, unknown>).__fadeSprite = borderLine;
     } else {
@@ -631,6 +662,8 @@
       const materials = rec.__fadeMaterials as THREE.Material[] | undefined;
       if (materials) {
         for (const mat of materials) {
+          // Photo node textures stay fully opaque — only fade non-textured nodes
+          if (mat instanceof THREE.MeshBasicMaterial && mat.map) continue;
           mat.opacity = next;
           // Highlighted nodes get a cyan emissive glow (only MeshLambertMaterial supports emissive)
           if (mat instanceof THREE.MeshLambertMaterial) {
@@ -922,6 +955,15 @@
     graph.graphData(buildGraphData());
     applyClusterForce();
     updateHighlight();
+  }
+
+  /** Re-register nodeThreeObject so photo nodes get recreated with up-to-date textures. */
+  export function refreshNodeObjects() {
+    if (!graph) return;
+    photoTextureCache.clear();
+    photoNodeMaterials.clear();
+    graph.nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode));
+    graph.graphData(buildGraphData());
   }
 
   // Only re-register nodeThreeObject when showLabels changes.

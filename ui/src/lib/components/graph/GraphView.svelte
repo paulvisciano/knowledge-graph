@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type KGNode, type KGEdge, type KGGraph } from '$lib/constants';
+  import { type KGNode, type KGEdge, type KGGraph, API } from '$lib/constants';
   import { LightragClient } from '$lib/services/lightrag-client';
   import { graphStore } from '$lib/stores/graph.svelte';
   import GraphCanvas from './GraphCanvas.svelte';
@@ -7,6 +7,8 @@
   import NodeDetail from './NodeDetail.svelte';
   import GraphSearch from './GraphSearch.svelte';
   import PhotoOverlay from './PhotoOverlay.svelte';
+
+  const KG_API_BASE = '/api/kg';
 
   const client = new LightragClient();
 
@@ -127,10 +129,50 @@
       allNodes = graph.nodes ?? [];
       allEdges = graph.edges ?? [];
       initVisibleNodes();
+      fetchPhotoImages(allNodes);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load graph';
     } finally {
       isLoading = false;
+    }
+  }
+
+  function isPhotoNode(node: KGNode): boolean {
+    return !!(
+      node.labels?.some((l) => /^(Photo|Image)$/i.test(l))
+      || node.properties?.entity_type === 'Photo'
+      || node.properties?.entity_type === 'Image'
+      || node.id?.includes('(Photo)')
+      || node.id?.includes('(Image)')
+    );
+  }
+
+  async function fetchPhotoImages(nodes: KGNode[]) {
+    const photoNodes = nodes.filter(isPhotoNode);
+    if (photoNodes.length === 0) return;
+    const updates: Record<string, string> = {};
+    await Promise.all(
+      photoNodes.map(async (node) => {
+        if (graphStore.photoImages[node.id]) return;
+        const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+        if (!sourceId || sourceId === 'manual_creation') return;
+        try {
+          const url = `${KG_API_BASE}${API.kg.photoImage(String(sourceId))}`;
+          const resp = await fetch(url);
+          if (!resp.ok) return;
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          updates[node.id] = dataUrl;
+        } catch {
+        }
+      })
+    );
+    if (Object.keys(updates).length > 0) {
+      graphStore.photoImages = { ...graphStore.photoImages, ...updates };
     }
   }
 
@@ -431,11 +473,11 @@
     }
   });
 
-  // When photo images arrive, refresh graph so 3D textures update
+  // When photo images arrive, apply textures to existing photo node meshes
   $effect(() => {
     const photos = graphStore.photoImages;
     if (Object.keys(photos).length > 0 && graphCanvas) {
-      graphCanvas.refreshGraph();
+      graphCanvas.applyPhotoTextures();
     }
   });
 
