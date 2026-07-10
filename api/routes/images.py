@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
 from api.services.processor import (
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/images", tags=["images"])
 
 LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve().parent.parent.parent / "known_faces"))
+INPUT_DIR = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
 
 
 def _parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -401,3 +404,20 @@ async def link_exif_entities(
         "exif_relations": exif_result,
         "visual_links": visual_result,
     }
+
+
+@router.get("/photo/{filename:path}")
+async def get_photo(filename: str):
+    """Serve a photo image file from the inputs directory.
+
+    Used by the UI to display photo textures in the 3D graph on page reload.
+    """
+    file_path = INPUT_DIR / filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Photo not found: {filename}")
+    # Prevent path traversal
+    try:
+        file_path.resolve().relative_to(INPUT_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid path")
+    return FileResponse(str(file_path))
