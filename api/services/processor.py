@@ -777,6 +777,7 @@ async def link_exif_to_visual_entities(
                 return json.loads(resp.read().decode("utf-8"))
 
         all_labels = await asyncio.to_thread(_get_labels)
+        logger.info("[EXIF Links] Found %d labels for %s", len(all_labels), file_source)
     except Exception as exc:
         logger.warning("[EXIF Links] Failed to get graph labels: %s", exc)
         return results
@@ -806,13 +807,16 @@ async def link_exif_to_visual_entities(
             if node.get("id") != label:
                 continue
             props = node.get("properties", {})
-            if props.get("file_path") != file_source:
+            file_path = props.get("file_path", "")
+            logger.info("[EXIF Links] Checking '%s': file_path='%s' vs file_source='%s'", label, file_path, file_source)
+            if file_path != file_source:
                 continue
 
             link_result = await _create_relation_verified(
                 base_url, label, photo_name,
                 {"description": f"{label} appears in {file_source}", "keywords": "appears_in", "weight": 1.0},
             )
+            logger.info("[EXIF Links] Linked '%s' -> '%s': status=%s", label, photo_name, link_result.get("status", "?"))
             link_result["source"] = label
             link_result["target"] = photo_name
             results["visual_links_created"].append(link_result)
@@ -841,6 +845,32 @@ async def wait_for_lightrag_processing(
     """
     base_url = lightrag_url.rstrip("/")
     start = time.monotonic()
+
+    # Phase 0: wait for pipeline to become busy (document picked up)
+    saw_busy = False
+    while not saw_busy:
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout:
+            logger.warning("[LightRAG Wait] Pipeline never became busy after %.1fs; assuming processed", elapsed)
+            return "processed"
+        try:
+            def _poll_pipeline() -> dict:
+                req = Request(
+                    f"{base_url}/documents/pipeline_status",
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            pipeline_status = await asyncio.to_thread(_poll_pipeline)
+            busy = pipeline_status.get("busy", False)
+            if busy:
+                saw_busy = True
+                logger.info("[LightRAG Wait] Pipeline is now busy, waiting for completion")
+        except Exception as exc:
+            logger.warning("[LightRAG Wait] Pipeline status poll failed: %s", exc)
+        if not saw_busy:
+            await asyncio.sleep(poll_interval)
 
     # Phase 1: wait for pipeline to become idle
     while True:

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import time
+import asyncio
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -14,7 +15,7 @@ from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
 from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
-    describe_image_with_vlm, inject_exif_relations, create_exif_relations,
+    describe_image_with_vlm, create_exif_relations,
     link_exif_to_visual_entities, wait_for_lightrag_processing,
 )
 
@@ -66,69 +67,54 @@ async def _process_and_stream(
         )
         return
 
-    # Phase 2: Create Photo + EXIF entities immediately (before LightRAG)
-    # so they appear in the graph right away.
+    # Phase 2: Build EXIF dimensions, emit SSE events for frontend,
+    # and create entities in LightRAG BEFORE uploading the document
+    # (when the pipeline is idle and won't return 409).
     photo_name = f"{file_source} (Photo)"
     exif_dimensions: list[dict[str, Any]] = []
 
     if exif_data:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}),
-        )
-        try:
-            injection_result = await inject_exif_relations(LIGHTRAG_URL, file_source, exif_data)
-            exif_dimensions = injection_result.get("exif_dimensions", []) if isinstance(injection_result, dict) else []
-            photo_name = injection_result.get("photo_name", photo_name) if isinstance(injection_result, dict) else photo_name
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "exif_dimensions_ready", "data": injection_result, "timestamp": time.time()}),
-            )
-        except Exception as exc:
-            logger.exception("EXIF dimension computation failed for %s", file_source)
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "exif_dimensions_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
-            )
+        photo_name = f"{file_source} (Photo)"
+        exif_dimensions: list[dict[str, Any]] = []
 
-    if exif_dimensions:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}),
-        )
-        try:
-            exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
-            for entity in exif_result.get("entities_created", []):
-                if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                    entity["entity_name"] = entity["data"].get("entity_name", "")
-                if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                    entity["entity_type"] = entity["data"].get("entity_type", "")
-                event_name = "photo_node_created" if entity.get("entity_name", "").endswith("(Photo)") else "exif_node_created"
-                yield ServerSentEvent(
-                    event="message",
-                    data=json.dumps({"event": event_name, "data": entity, "timestamp": time.time()}),
-                )
-            exif_dim_names = {dim["name"] for dim in exif_dimensions}
-            for relation in exif_result.get("relations_created", []):
-                src = relation.get("source") or relation.get("source_entity") or relation.get("src") or ""
-                tgt = relation.get("target") or relation.get("target_entity") or relation.get("tgt") or ""
-                relation["source"] = src
-                relation["target"] = tgt
-                is_cross = src in exif_dim_names and tgt in exif_dim_names
-                yield ServerSentEvent(
-                    event="message",
-                    data=json.dumps({"event": "exif_cross_relation_created" if is_cross else "exif_relation_created", "data": relation, "timestamp": time.time()}),
-                )
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "exif_entities_complete", "data": exif_result, "timestamp": time.time()}),
-            )
-        except Exception as exc:
-            logger.exception("EXIF entity creation failed for %s", file_source)
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
-            )
+        date_taken_friendly = exif_data.get("date_taken_friendly")
+        if date_taken_friendly:
+            date_only = date_taken_friendly.split(" at ")[0].split(" ")[0]
+            exif_dimensions.append({"name": f"{date_only} (Date)", "entity_type": "Date", "description": f"Calendar date {date_taken_friendly}", "edge_keyword": "taken_on", "edge_description": f"Photo taken on {date_taken_friendly}"})
+
+        location = exif_data.get("location")
+        if location:
+            loc_str = location if isinstance(location, str) else str(location)
+            if loc_str:
+                exif_dimensions.append({"name": f"{loc_str} (Location)", "entity_type": "Location", "description": f"Location in {loc_str}", "edge_keyword": "taken_at", "edge_description": f"Photo taken at {loc_str}"})
+
+        camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
+        if camera:
+            exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
+
+        yield ServerSentEvent(event="message", data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}))
+        yield ServerSentEvent(event="message", data=json.dumps({"event": "photo_node_created", "data": {"entity_name": photo_name, "entity_type": "Photo", "labels": ["Photo"], "source_id": file_source}, "timestamp": time.time()}))
+        for dim in exif_dimensions:
+            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_node_created", "data": {"entity_name": dim["name"], "entity_type": dim.get("entity_type", "ExifEntity"), "labels": [dim.get("entity_type", "ExifEntity")]}}))
+
+        # Create entities in LightRAG now — pipeline is idle, no 409 conflict
+        if exif_dimensions:
+            yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
+            try:
+                exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
+                for entity in exif_result.get("entities_created", []):
+                    if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                        entity["entity_name"] = entity["data"].get("entity_name", "")
+                    if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                        entity["entity_type"] = entity["data"].get("entity_type", "")
+                for relation in exif_result.get("relations_created", []):
+                    src = relation.get("source") or relation.get("source_entity") or ""
+                    tgt = relation.get("target") or relation.get("target_entity") or ""
+                    yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_relation_created", "data": {"source": src, "target": tgt, "relation_type": relation.get("keywords", "has_exif")}, "timestamp": time.time()}))
+                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_complete", "data": {"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}, "timestamp": time.time()}))
+            except Exception as exc:
+                logger.exception("EXIF entity creation failed for %s", file_source)
+                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}))
 
     # Phase 3: Upload to LightRAG (VLM description + insert)
     yield ServerSentEvent(
@@ -182,6 +168,23 @@ async def _process_and_stream(
         )
 
     # Phase 5: Link LLM-extracted visual entities to the photo node
+    # Poll until LightRAG has finished processing and visual entities appear
+    initial_label_count = len(exif_dimensions) + 1 if exif_dimensions else 0
+    for _poll in range(30):
+        await asyncio.sleep(3.0)
+        try:
+            import urllib.request as _urllib_request
+            def _count_labels() -> int:
+                req = _urllib_request.Request(f"{LIGHTRAG_URL}/graph/label/list", headers={"Content-Type": "application/json"})
+                with _urllib_request.urlopen(req, timeout=10) as resp:
+                    return len(json.loads(resp.read().decode("utf-8")))
+            label_count = await asyncio.to_thread(_count_labels)
+            if label_count > initial_label_count:
+                await asyncio.sleep(2.0)
+                break
+        except Exception:
+            pass
+
     try:
         visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
         for link in visual_result.get("visual_links_created", []):
@@ -283,43 +286,42 @@ async def process_image_json(
             events.append(ProcessingEvent(event="pipeline_complete", data={"file_source": file_source, "status": "no_insert"}))
             return {"events": [asdict(e) for e in events]}
 
-        # Phase 2: Create Photo + EXIF entities immediately
+        # Phase 2: Build EXIF dimensions and create entities in LightRAG
+        # before uploading the document (pipeline is idle, no 409 conflict).
         photo_name = f"{file_source} (Photo)"
         exif_dimensions: list[dict[str, Any]] = []
 
         if exif_data:
-            try:
-                injection_result = await inject_exif_relations(LIGHTRAG_URL, file_source, exif_data)
-                exif_dimensions = injection_result.get("exif_dimensions", []) if isinstance(injection_result, dict) else []
-                photo_name = injection_result.get("photo_name", photo_name) if isinstance(injection_result, dict) else photo_name
-                events.append(ProcessingEvent(event="exif_dimensions_ready", data=injection_result))
-            except Exception as exc:
-                logger.exception("EXIF dimension computation failed for %s", file_source)
-                events.append(ProcessingEvent(event="exif_dimensions_failed", data={"error": str(exc)}))
+            date_taken_friendly = exif_data.get("date_taken_friendly")
+            if date_taken_friendly:
+                date_only = date_taken_friendly.split(" at ")[0].split(" ")[0]
+                exif_dimensions.append({"name": f"{date_only} (Date)", "entity_type": "Date", "description": f"Calendar date {date_taken_friendly}", "edge_keyword": "taken_on", "edge_description": f"Photo taken on {date_taken_friendly}"})
+            location = exif_data.get("location")
+            if location:
+                loc_str = location if isinstance(location, str) else str(location)
+                if loc_str:
+                    exif_dimensions.append({"name": f"{loc_str} (Location)", "entity_type": "Location", "description": f"Location in {loc_str}", "edge_keyword": "taken_at", "edge_description": f"Photo taken at {loc_str}"})
+            camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
+            if camera:
+                exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
 
-        if exif_dimensions:
-            events.append(ProcessingEvent(event="creating_exif_entities", data={"file_source": file_source, "dimensions_count": len(exif_dimensions)}))
-            try:
-                exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
-                exif_dim_names = {dim["name"] for dim in exif_dimensions}
-                for entity in exif_result.get("entities_created", []):
-                    if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                        entity["entity_name"] = entity["data"].get("entity_name", "")
-                    if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                        entity["entity_type"] = entity["data"].get("entity_type", "")
-                    event_name = "photo_node_created" if entity.get("entity_name", "").endswith("(Photo)") else "exif_node_created"
-                    events.append(ProcessingEvent(event=event_name, data=entity))
-                for relation in exif_result.get("relations_created", []):
-                    src = relation.get("source") or relation.get("source_entity") or relation.get("src") or ""
-                    tgt = relation.get("target") or relation.get("target_entity") or relation.get("tgt") or ""
-                    relation["source"] = src
-                    relation["target"] = tgt
-                    is_cross = src in exif_dim_names and tgt in exif_dim_names
-                    events.append(ProcessingEvent(event="exif_cross_relation_created" if is_cross else "exif_relation_created", data=relation))
-                events.append(ProcessingEvent(event="exif_entities_complete", data=exif_result))
-            except Exception as exc:
-                logger.exception("EXIF entity creation failed for %s", file_source)
-                events.append(ProcessingEvent(event="exif_entities_failed", data={"error": str(exc)}))
+            if exif_dimensions:
+                try:
+                    exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
+                    for entity in exif_result.get("entities_created", []):
+                        if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                            entity["entity_name"] = entity["data"].get("entity_name", "")
+                        if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                            entity["entity_type"] = entity["data"].get("entity_type", "")
+                    for relation in exif_result.get("relations_created", []):
+                        src = relation.get("source") or relation.get("source_entity") or ""
+                        tgt = relation.get("target") or relation.get("target_entity") or ""
+                        relation["source"] = src
+                        relation["target"] = tgt
+                    events.append(ProcessingEvent(event="exif_entities_complete", data={"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}))
+                except Exception as exc:
+                    logger.exception("EXIF entity creation failed for %s", file_source)
+                    events.append(ProcessingEvent(event="exif_entities_failed", data={"error": str(exc)}))
 
         # Phase 3: Upload to LightRAG
         upload_result = None
@@ -384,6 +386,7 @@ async def link_exif_entities(
     1. Creates relation edges between EXIF entities and the Photo node (if exif_dimensions provided)
     2. Finds LLM-extracted visual entities with matching file_path and creates appears_in edges
     """
+    photo_name = photo_name.replace("+", " ")
     exif_result = None
     if exif_dimensions:
         import json as _json
