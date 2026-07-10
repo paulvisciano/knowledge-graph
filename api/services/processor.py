@@ -390,6 +390,72 @@ def _process_exif(image_path: str) -> dict[str, Any] | None:
         return None
 
 
+async def _run_face_detection_subprocess(image_path: str, known_faces_path: str) -> dict[str, Any] | None:
+    import subprocess
+    import tempfile
+
+    script = (
+        "import json, sys, os\n"
+        "os.environ.setdefault('FACE_DETECTOR_BACKEND', 'opencv')\n"
+        "from processors.face_recognizer import analyze_attributes, identify_person\n"
+        "from pathlib import Path\n"
+        f"image_path = {json.dumps(image_path)}\n"
+        f"known_faces_path = {json.dumps(known_faces_path)}\n"
+        "face_attributes = os.environ.get('FACE_ATTRIBUTES', 'age,gender,emotion,race').split(',')\n"
+        "face_detector = os.environ.get('FACE_DETECTOR_BACKEND', 'opencv')\n"
+        "try:\n"
+        "    attributes = analyze_attributes(image_path, actions=face_attributes, detector_backend=face_detector)\n"
+        "    if not isinstance(attributes, list) or not attributes:\n"
+        "        print(json.dumps({'status': 'ok', 'data': {'faces': []}}))\n"
+        "        sys.exit(0)\n"
+        "    identifications = []\n"
+        "    db_path = Path(known_faces_path)\n"
+        "    if db_path.exists() and any(db_path.iterdir()):\n"
+        "        id_result = identify_person(image_path, known_faces_path)\n"
+        "        if isinstance(id_result, list):\n"
+        "            identifications = id_result\n"
+        "    combined = []\n"
+        "    for idx, face_attrs in enumerate(attributes):\n"
+        "        name = 'Unknown'\n"
+        "        if idx < len(identifications) and isinstance(identifications[idx], dict):\n"
+        "            identity = identifications[idx].get('identity', 'Unknown')\n"
+        "            if identity and identity != 'Unknown':\n"
+        "                name = identity\n"
+        "        combined.append({'name': name, 'age': face_attrs.get('age'), 'gender': face_attrs.get('gender'), 'emotion': face_attrs.get('emotion'), 'race': face_attrs.get('race')})\n"
+        "    print(json.dumps({'status': 'ok', 'data': {'faces': combined}}))\n"
+        "except Exception as exc:\n"
+        "    print(json.dumps({'status': 'error', 'data': str(exc)}))\n"
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+
+        if proc.returncode != 0:
+            logger.warning("Face recognition subprocess failed (rc=%d): %s", proc.returncode, stderr.decode()[:500])
+            return None
+
+        result = json.loads(stdout.decode().strip().split("\n")[-1])
+        if result.get("status") == "ok":
+            return result.get("data")
+        logger.warning("Face recognition subprocess error: %s", result.get("data"))
+        return None
+    except asyncio.TimeoutError:
+        logger.warning("Face recognition subprocess timed out for %s", image_path)
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return None
+    except Exception as exc:
+        logger.warning("Face recognition subprocess failed for %s: %s", image_path, exc)
+        return None
+
+
 def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | None:
     """Detect faces and analyze attributes, optionally identifying known persons.
 
@@ -453,7 +519,12 @@ async def process_image(
 
     if not skip_faces:
         yield ProcessingEvent(event="detecting_faces", data={"image_path": image_path})
-        face_data = await asyncio.to_thread(_process_faces, image_path, known_faces_path)
+        try:
+            face_data = await _run_face_detection_subprocess(image_path, known_faces_path)
+            logger.info("Face detection completed for %s: %s", image_path, "ok" if face_data else "none")
+        except Exception as exc:
+            logger.warning("Face recognition subprocess error for %s: %s", image_path, exc)
+            face_data = None
         yield ProcessingEvent(event="faces_complete", data={"faces": face_data or {}})
 
     captions = _build_captions(exif_data, face_data, image_path)

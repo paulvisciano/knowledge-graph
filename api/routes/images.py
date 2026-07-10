@@ -21,6 +21,12 @@ from api.services.processor import (
     link_exif_to_visual_entities, wait_for_lightrag_processing,
     delete_photo_entities,
 )
+from api.services import db as db_module
+from api.services.job_manager import (
+    create_job, get_job, list_jobs, delete_job,
+    persist_uploaded_file, start_processing, subscribe_events,
+    unsubscribe_events, get_events, update_job_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,52 @@ def _parse_bool(value: Optional[str], default: bool = False) -> bool:
     return value.lower() in ("true", "1", "yes")
 
 
+async def _emit_exif_entities(
+    file_source: str,
+    exif_data: dict,
+) -> AsyncGenerator[ServerSentEvent, None]:
+    photo_name = f"{file_source} (Photo)"
+    exif_dimensions: list[dict[str, Any]] = []
+
+    date_taken_friendly = exif_data.get("date_taken_friendly")
+    if date_taken_friendly:
+        date_only = date_taken_friendly.split(" at ")[0].split(" ")[0]
+        exif_dimensions.append({"name": f"{date_only} (Date)", "entity_type": "Date", "description": f"Calendar date {date_taken_friendly}", "edge_keyword": "taken_on", "edge_description": f"Photo taken on {date_taken_friendly}"})
+
+    location = exif_data.get("location")
+    if location:
+        loc_str = location if isinstance(location, str) else str(location)
+        if loc_str:
+            exif_dimensions.append({"name": f"{loc_str} (Location)", "entity_type": "Location", "description": f"Location in {loc_str}", "edge_keyword": "taken_at", "edge_description": f"Photo taken at {loc_str}"})
+
+    camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
+    if camera:
+        exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
+
+    yield ServerSentEvent(event="message", data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}))
+    yield ServerSentEvent(event="message", data=json.dumps({"event": "photo_node_created", "data": {"entity_name": photo_name, "entity_type": "Photo", "labels": ["Photo"], "source_id": file_source}, "timestamp": time.time()}))
+    for dim in exif_dimensions:
+        yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_node_created", "data": {"entity_name": dim["name"], "entity_type": dim.get("entity_type", "ExifEntity"), "labels": [dim.get("entity_type", "ExifEntity")]}}))
+
+    if exif_dimensions:
+        yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
+        try:
+            exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
+            for entity in exif_result.get("entities_created", []):
+                if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                    entity["entity_name"] = entity["data"].get("entity_name", "")
+                if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
+                    entity["entity_type"] = entity["data"].get("entity_type", "")
+            for relation in exif_result.get("relations_created", []):
+                src = relation.get("source") or relation.get("source_entity") or ""
+                tgt = relation.get("target") or relation.get("target_entity") or ""
+                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_relation_created", "data": {"source": src, "target": tgt, "relation_type": relation.get("keywords", "has_exif")}, "timestamp": time.time()}))
+            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_complete", "data": {"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}, "timestamp": time.time()}))
+        except Exception as exc:
+            logger.exception("EXIF entity creation failed for %s", file_source)
+            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}))
+
+
 async def _process_and_stream(
     file_path: str,
     file_source: str,
@@ -47,8 +99,8 @@ async def _process_and_stream(
     content_list: list[dict] | None = None
     metadata_text: str | None = None
     exif_data: dict | None = None
+    exif_entities_emitted = False
 
-    # Phase 1: Extract metadata (EXIF, faces, VLM captions)
     async for event in process_image(
         file_path,
         known_faces_path=KNOWN_FACES_PATH,
@@ -59,10 +111,21 @@ async def _process_and_stream(
             content_list = event.data.get("content_list")
             metadata_text = event.data.get("metadata_text")
             exif_data = event.data.get("exif_data")
+
+        if event.event == "exif_complete":
+            exif_data = event.data.get("exif") or event.data.get("exif_data")
+
         yield ServerSentEvent(
             event="message",
             data=json.dumps(asdict(event)),
         )
+
+        # Emit Photo/EXIF node events immediately after EXIF data is available,
+        # before face recognition (which is slow and can OOM the container).
+        if event.event == "exif_complete" and insert and not exif_entities_emitted:
+            exif_entities_emitted = True
+            async for sse_event in _emit_exif_entities(file_source, exif_data):
+                yield sse_event
 
     if not insert:
         yield ServerSentEvent(
@@ -71,54 +134,10 @@ async def _process_and_stream(
         )
         return
 
-    # Phase 2: Build EXIF dimensions, emit SSE events for frontend,
-    # and create entities in LightRAG BEFORE uploading the document
-    # (when the pipeline is idle and won't return 409).
-    photo_name = f"{file_source} (Photo)"
-    exif_dimensions: list[dict[str, Any]] = []
-
-    if exif_data:
-        photo_name = f"{file_source} (Photo)"
-        exif_dimensions: list[dict[str, Any]] = []
-
-        date_taken_friendly = exif_data.get("date_taken_friendly")
-        if date_taken_friendly:
-            date_only = date_taken_friendly.split(" at ")[0].split(" ")[0]
-            exif_dimensions.append({"name": f"{date_only} (Date)", "entity_type": "Date", "description": f"Calendar date {date_taken_friendly}", "edge_keyword": "taken_on", "edge_description": f"Photo taken on {date_taken_friendly}"})
-
-        location = exif_data.get("location")
-        if location:
-            loc_str = location if isinstance(location, str) else str(location)
-            if loc_str:
-                exif_dimensions.append({"name": f"{loc_str} (Location)", "entity_type": "Location", "description": f"Location in {loc_str}", "edge_keyword": "taken_at", "edge_description": f"Photo taken at {loc_str}"})
-
-        camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
-        if camera:
-            exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
-
-        yield ServerSentEvent(event="message", data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}))
-        yield ServerSentEvent(event="message", data=json.dumps({"event": "photo_node_created", "data": {"entity_name": photo_name, "entity_type": "Photo", "labels": ["Photo"], "source_id": file_source}, "timestamp": time.time()}))
-        for dim in exif_dimensions:
-            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_node_created", "data": {"entity_name": dim["name"], "entity_type": dim.get("entity_type", "ExifEntity"), "labels": [dim.get("entity_type", "ExifEntity")]}}))
-
-        # Create entities in LightRAG now — pipeline is idle, no 409 conflict
-        if exif_dimensions:
-            yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
-            try:
-                exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
-                for entity in exif_result.get("entities_created", []):
-                    if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                        entity["entity_name"] = entity["data"].get("entity_name", "")
-                    if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                        entity["entity_type"] = entity["data"].get("entity_type", "")
-                for relation in exif_result.get("relations_created", []):
-                    src = relation.get("source") or relation.get("source_entity") or ""
-                    tgt = relation.get("target") or relation.get("target_entity") or ""
-                    yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_relation_created", "data": {"source": src, "target": tgt, "relation_type": relation.get("keywords", "has_exif")}, "timestamp": time.time()}))
-                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_complete", "data": {"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}, "timestamp": time.time()}))
-            except Exception as exc:
-                logger.exception("EXIF entity creation failed for %s", file_source)
-                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}))
+    # Fallback: if EXIF extraction was skipped but captions_built still has exif_data
+    if not exif_entities_emitted and exif_data:
+        async for sse_event in _emit_exif_entities(file_source, exif_data):
+            yield sse_event
 
     # Phase 3: Upload to LightRAG (VLM description + insert)
     yield ServerSentEvent(
@@ -173,7 +192,16 @@ async def _process_and_stream(
 
     # Phase 5: Link LLM-extracted visual entities to the photo node
     # Poll until LightRAG has finished processing and visual entities appear
-    initial_label_count = len(exif_dimensions) + 1 if exif_dimensions else 0
+    photo_name = f"{file_source} (Photo)"
+    exif_dim_count = 0
+    if exif_data:
+        if exif_data.get("date_taken_friendly"):
+            exif_dim_count += 1
+        if exif_data.get("location"):
+            exif_dim_count += 1
+        if exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model"):
+            exif_dim_count += 1
+    initial_label_count = exif_dim_count + 1 if exif_dim_count > 0 else 0
     for _poll in range(30):
         await asyncio.sleep(3.0)
         try:
@@ -433,3 +461,134 @@ async def delete_photo_entities_endpoint(file_source: str):
     """
     result = await delete_photo_entities(LIGHTRAG_URL, file_source)
     return result
+
+
+@router.post("/jobs")
+async def create_image_job(
+    file: UploadFile = File(...),
+    skip_exif: Optional[str] = Form(None),
+    skip_faces: Optional[str] = Form(None),
+    insert: Optional[str] = Form(None),
+):
+    skip_exif_bool = _parse_bool(skip_exif)
+    skip_faces_bool = _parse_bool(skip_faces)
+    insert_bool = _parse_bool(insert, default=True)
+
+    file_source = file.filename or "uploaded_image"
+    suffix = os.path.splitext(file_source)[1] or ".jpg"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        tmp.write(await file.read())
+        tmp.close()
+        persisted_path = await persist_uploaded_file(tmp.name, file_source)
+    except Exception:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+        raise
+
+    job = await create_job(
+        file_source=file_source,
+        file_path=persisted_path,
+        skip_exif=skip_exif_bool,
+        skip_faces=skip_faces_bool,
+        insert=insert_bool,
+    )
+    await start_processing(job)
+    return {"job_id": job.id, "status": job.status, "file_source": job.file_source}
+
+
+@router.get("/jobs")
+async def list_image_jobs(status: Optional[str] = None):
+    jobs = await list_jobs(status)
+    return [
+        {
+            "job_id": j.id,
+            "file_source": j.file_source,
+            "status": j.status,
+            "stage": j.stage,
+            "error": j.error if j.error else None,
+            "created_at": j.created_at,
+            "updated_at": j.updated_at,
+        }
+        for j in jobs
+    ]
+
+
+@router.get("/jobs/{job_id}")
+async def get_image_job(job_id: str):
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.id,
+        "file_source": job.file_source,
+        "status": job.status,
+        "stage": job.stage,
+        "error": job.error if job.error else None,
+        "skip_exif": job.skip_exif,
+        "skip_faces": job.skip_faces,
+        "insert": job.insert,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
+
+
+@router.get("/jobs/{job_id}/events")
+async def stream_job_events(job_id: str, after: int = 0):
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    async def event_stream():
+        queue = subscribe_events(job_id)
+        try:
+            past_events = await get_events(job_id, after_event_id=after)
+            for evt in past_events:
+                yield ServerSentEvent(
+                    event="message",
+                    data=json.dumps({
+                        "event": evt["event_type"],
+                        "data": evt["event_data"],
+                        "event_id": evt["id"],
+                        "timestamp": evt["created_at"],
+                    }),
+                )
+
+            if job.status in ("complete", "failed", "cancelled"):
+                unsubscribe_events(job_id)
+                return
+
+            while True:
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    current = await get_job(job_id)
+                    if current and current.status in ("complete", "failed", "cancelled"):
+                        yield ServerSentEvent(
+                            event="message",
+                            data=json.dumps({
+                                "event": "pipeline_complete" if current.status == "complete" else "pipeline_failed",
+                                "data": {"file_source": current.file_source, "status": current.status, "error": current.error},
+                                "timestamp": time.time(),
+                            }),
+                        )
+                        break
+                    yield ServerSentEvent(event="heartbeat", data="")
+                    continue
+
+                yield ServerSentEvent(
+                    event="message",
+                    data=json.dumps({
+                        "event": evt["event_type"],
+                        "data": evt["event_data"],
+                        "timestamp": time.time(),
+                    }),
+                )
+
+                current = await get_job(job_id)
+                if current and current.status in ("complete", "failed", "cancelled"):
+                    break
+        finally:
+            unsubscribe_events(job_id)
+
+    return EventSourceResponse(event_stream())

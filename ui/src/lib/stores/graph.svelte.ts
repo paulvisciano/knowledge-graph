@@ -35,8 +35,12 @@ class GraphStore {
     this.isLoading = true;
     try {
       const graph = await lightragClient.getGraph(label, nodeId, depth);
-      this.nodes = graph.nodes;
-      this.edges = graph.edges;
+      const lightragNodeIds = new Set(graph.nodes.map((n: KGNode) => n.id));
+      const lightragEdgeIds = new Set(graph.edges.map((e: KGEdge) => e.id));
+      const preservedNodes = this.nodes.filter((n) => !lightragNodeIds.has(n.id));
+      const preservedEdges = this.edges.filter((e) => !lightragEdgeIds.has(e.id));
+      this.nodes = [...graph.nodes, ...preservedNodes];
+      this.edges = [...graph.edges, ...preservedEdges];
       eventBus.pushEvent({
         id: crypto.randomUUID(),
         type: 'graph_update',
