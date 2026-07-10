@@ -6,6 +6,8 @@ import {
   type KGGraph,
   type DocStatus,
   type PipelineStatus,
+  type OllamaMessage,
+  type OllamaChatChunk,
 } from '$lib/constants';
 
 const PROXY_PREFIX = '/api/lightrag';
@@ -121,6 +123,82 @@ export class LightragClient {
         yield trimmed;
       }
     }
+  }
+
+  /** Stream a KG-augmented chat response via LightRAG's Ollama-compatible /api/chat endpoint.
+   *  Yields OllamaChatChunk objects in real-time. The final chunk has done=true with timing stats.
+   *  Supports query mode prefixes in the last user message: /local, /global, /hybrid, /naive, /mix, /bypass
+   */
+  async *chatStream(
+    messages: OllamaMessage[],
+    options?: { model?: string; system?: string },
+  ): AsyncGenerator<OllamaChatChunk> {
+    const url = this.proxyUrl(API.lightrag.chat);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({
+        model: options?.model ?? 'lightrag',
+        messages,
+        stream: true,
+        ...(options?.system ? { system: options.system } : {}),
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`LightRAG chat ${res.status} ${res.statusText}: ${body}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body for chat stream');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const chunk: OllamaChatChunk = JSON.parse(trimmed);
+          yield chunk;
+        } catch {
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      try {
+        const chunk: OllamaChatChunk = JSON.parse(buffer.trim());
+        yield chunk;
+      } catch {
+        // skip
+      }
+    }
+  }
+
+  async chat(
+    messages: OllamaMessage[],
+    options?: { model?: string; system?: string },
+  ): Promise<string> {
+    const res = await this.request<{ message: { content: string }; done: boolean }>(API.lightrag.chat, {
+      method: 'POST',
+      body: JSON.stringify({
+        model: options?.model ?? 'lightrag',
+        messages,
+        stream: false,
+        ...(options?.system ? { system: options.system } : {}),
+      }),
+    });
+    return res.message?.content ?? '';
   }
 
   async getGraph(label?: string, nodeId?: string, depth?: number): Promise<KGGraph> {

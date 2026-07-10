@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChatMessage, MCPToolCall } from '$lib/constants';
+  import type { ChatMessage, MCPToolCall, ChatMode, OllamaMessage } from '$lib/constants';
   import { API } from '$lib/constants';
   import { eventBus } from '$lib/stores/event-bus.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
@@ -36,12 +36,19 @@
   }
 
   let conversations = $state<Conversation[]>([]);
+
+  // Expose stores on window for E2E testing (stripped in production builds)
+  if (typeof window !== 'undefined') {
+    (window as any).__graphStore = graphStore;
+    (window as any).__imageProcessingStore = imageProcessingStore;
+  }
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
   let isStreaming = $state(false);
   let chatInput = $state('');
   let panelChatInput = $state('');
   let chatExpanded = $state(false);
+  let chatMode = $state<ChatMode>('kg-direct');
   let availableModels = $state<string[]>([]);
   let selectedModel = $state('');
   let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -334,6 +341,139 @@
       conv.messages = [...messages];
       conv.updatedAt = Date.now();
       syncClient.saveConversation(conv);
+    }
+  }
+
+  /**
+   * Stream a KG-augmented chat response directly through LightRAG's /api/chat endpoint.
+   * This bypasses the LLM+MCP loop entirely — LightRAG handles retrieval and generation.
+   */
+  async function streamKGChatResponse() {
+    streamingConversationId = activeConversationId;
+    streamAbortController = new AbortController();
+
+    const assistantId = generateId();
+    const assistantMsg: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
+      mcpToolCalls: [],
+    };
+    pushStreamMessage(assistantMsg);
+    isStreaming = true;
+    isProcessing = true;
+    processingLabel = 'Searching knowledge graph...';
+
+    try {
+      const ollamaMessages: OllamaMessage[] = messages
+        .filter((m) => !m.isStreaming)
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        }));
+
+      let accumulatedContent = '';
+      let gotFirstToken = false;
+
+      function scheduleFlush() {
+        if (streamingRafId !== null) return;
+        streamingRafId = requestAnimationFrame(() => {
+          streamingRafId = null;
+          if (streamingBuffer) {
+            const buf = streamingBuffer;
+            if (streamingConversationId === activeConversationId) {
+              messages = messages.map((m) =>
+                m.id === assistantId
+                  ? { ...m, content: buf.content, isStreaming: true }
+                  : m
+              );
+            }
+            streamingBuffer = null;
+          }
+        });
+      }
+
+      for await (const chunk of lightragClient.chatStream(ollamaMessages)) {
+        if (!streamAbortController) break;
+
+        if (!gotFirstToken && chunk.message?.content) {
+          gotFirstToken = true;
+          if (streamingConversationId === activeConversationId) {
+            processingLabel = 'Generating...';
+          }
+        }
+
+        if (chunk.message?.content) {
+          accumulatedContent += chunk.message.content;
+          streamingBuffer = { content: accumulatedContent, thinking: '', assistantId };
+          scheduleFlush();
+        }
+
+        if (chunk.done) {
+          if (chunk.eval_count && chunk.prompt_eval_count) {
+            const totalMs = (chunk.total_duration ?? 0) / 1_000_000;
+            const evalMs = totalMs;
+            const tokensPerSec = chunk.eval_count > 0 && evalMs > 0
+              ? Math.round(chunk.eval_count / (evalMs / 1000))
+              : null;
+            tokensPerSecond = tokensPerSec;
+            promptTokens = chunk.prompt_eval_count;
+          }
+        }
+      }
+
+      if (streamingRafId !== null) {
+        cancelAnimationFrame(streamingRafId);
+        streamingRafId = null;
+      }
+      streamingBuffer = null;
+
+      updateStreamMessage(assistantId, (m) => ({
+        ...m,
+        content: accumulatedContent || '',
+        isStreaming: false,
+        model: 'lightrag',
+      }));
+
+      saveMessagesToConversation();
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      updateStreamMessage(assistantId, (m) => ({
+        ...m,
+        content: m.content || `Error: ${errMsg}`,
+        isStreaming: false,
+      }));
+    } finally {
+      isStreaming = false;
+      isProcessing = false;
+      processingLabel = '';
+      thinkingContent = '';
+      tokensPerSecond = null;
+      promptTokens = null;
+
+      if (streamingConversationId) {
+        const conv = conversations.find((c) => c.id === streamingConversationId);
+        if (conv) {
+          if (streamingConversationId !== activeConversationId) {
+            conv.messages = conv.messages.map((m) =>
+              m.isStreaming ? { ...m, isStreaming: false } : m
+            );
+          } else {
+            conv.messages = [...messages];
+          }
+          conv.updatedAt = Date.now();
+          syncClient.saveConversation(conv);
+        }
+        if (streamingConversationId !== activeConversationId) {
+          unreadConversations = new Set([...unreadConversations, streamingConversationId]);
+        }
+      }
+      streamingConversationId = null;
+      requestAnimationFrame(scrollToBottom);
     }
   }
 
@@ -812,7 +952,11 @@
 
     // Images are now processed immediately on attach via processSingleImage
 
-    await streamAssistantResponse(sentAttachments);
+    if (chatMode === 'kg-direct') {
+      await streamKGChatResponse();
+    } else {
+      await streamAssistantResponse(sentAttachments);
+    }
   }
 
   /** Process a single image through the KG pipeline with real-time SSE progress. */
@@ -931,7 +1075,11 @@
     processingLabel = 'Regenerating...';
 
     // Stream a new assistant response using the existing conversation history
-    streamAssistantResponse();
+    if (chatMode === 'kg-direct') {
+      streamKGChatResponse();
+    } else {
+      streamAssistantResponse();
+    }
   }
 
   function deleteConversation(id: string) {
@@ -1224,12 +1372,21 @@
             onPickImage={openImagePicker}
             onPickDocument={openDocumentPicker}
           />
+          <button
+            onclick={() => { chatMode = chatMode === 'kg-direct' ? 'llm-mcp' : 'kg-direct'; }}
+            class="flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium uppercase tracking-wide transition-all duration-200 {chatMode === 'kg-direct' ? 'bg-cyber-cyan/15 text-cyber-cyan ring-1 ring-cyber-cyan/30' : 'bg-cyber-surface-2/50 text-cyber-text-dim/60 hover:bg-cyber-cyan/10 hover:text-cyber-cyan'}"
+            title={chatMode === 'kg-direct' ? 'Direct KG chat — LightRAG handles retrieval and generation' : 'LLM + MCP — LLM calls KG tools via MCP'}
+            disabled={isActiveConversationStreaming}
+          >
+            <Icon name={chatMode === 'kg-direct' ? 'database' : 'cpu'} size={14} />
+            <span class="hidden sm:inline">{chatMode === 'kg-direct' ? 'KG' : 'LLM'}</span>
+          </button>
           <textarea
             bind:this={textareaEl}
             bind:value={chatInput}
             oninput={autoResize}
             onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, true); } }}
-            placeholder="Ask me anything..."
+            placeholder={chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
             rows="1"
             data-testid="chat-input"
             class="max-h-[144px] min-h-[24px] flex-1 resize-none bg-transparent text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40"

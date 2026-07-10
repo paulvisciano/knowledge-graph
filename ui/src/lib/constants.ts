@@ -4,6 +4,8 @@ export const KG_API = '';
 export const MCP_API = '';
 export const SYNC_URL = '';
 
+export type ChatMode = 'llm-mcp' | 'kg-direct';
+
 export const API = {
   kg: {
     health: '/health',
@@ -16,6 +18,8 @@ export const API = {
     status: '/status',
     query: '/query',
     queryStream: '/query/stream',
+    chat: '/api/chat',
+    chatModels: '/api/show',
     graph: {
       labels: '/graph/label/list',
       popularLabels: '/graph/label/popular',
@@ -173,6 +177,35 @@ export interface MCPToolInfo {
   description: string;
   enabled: boolean;
   definition: OpenAIToolDefinition;
+}
+
+export interface OllamaChatRequest {
+  model: string;
+  messages: OllamaMessage[];
+  stream?: boolean;
+  system?: string;
+  options?: Record<string, unknown>;
+}
+
+export interface OllamaMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+}
+
+export interface OllamaChatChunk {
+  model: string;
+  created_at: string;
+  message: {
+    role: string;
+    content: string;
+    images: string[] | null;
+  };
+  done: boolean;
+  done_reason?: string;
+  total_duration?: number;
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 export interface ActivityEvent {
