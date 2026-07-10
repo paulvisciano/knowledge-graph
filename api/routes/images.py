@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -7,12 +8,13 @@ import time
 import asyncio
 import tempfile
 from dataclasses import asdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
 from api.services.processor import (
@@ -35,6 +37,8 @@ router = APIRouter(prefix="/images", tags=["images"])
 LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve().parent.parent.parent / "known_faces"))
 INPUT_DIR = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
+FACES_CACHE_DIR = Path(os.environ.get("FACES_CACHE_DIR", str(Path(__file__).resolve().parent.parent.parent / "face_crops")))
+FACES_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -452,6 +456,133 @@ async def get_photo(filename: str):
     return FileResponse(str(file_path))
 
 
+@router.get("/faces/crops/{name:path}")
+async def get_face_crop(name: str):
+    """Detect and crop a face from a source image for a person entity.
+
+    Given a person name (e.g. "Person 1"), queries LightRAG for the entity,
+    finds the source image, detects faces, and returns a cropped face image.
+
+    Crops are cached on disk in FACES_CACHE_DIR to avoid re-processing.
+    """
+    import httpx
+    from PIL import Image
+    from processors.face_recognizer import detect_faces
+
+    # Sanitize name for cache
+    safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
+    cache_path = FACES_CACHE_DIR / f"{safe_name}.jpg"
+
+    # Return cached crop if available
+    if cache_path.is_file():
+        return FileResponse(str(cache_path), media_type="image/jpeg")
+
+    # Query LightRAG for the person node to find the source image
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{LIGHTRAG_URL}/graphs",
+                params={"label": name},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=404, detail=f"Person entity '{name}' not found")
+            graph_data = resp.json()
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to query LightRAG: {exc}")
+
+    # Find the person node and its source image
+    person_node = None
+    source_file = None
+    for node in graph_data.get("nodes", []):
+        if node.get("id") == name or name.lower() in str(node.get("id", "")).lower():
+            props = node.get("properties", {})
+            if props.get("entity_type", "").lower() == "person":
+                person_node = node
+                source_file = props.get("file_path") or props.get("source_id")
+                break
+
+    if not person_node:
+        raise HTTPException(status_code=404, detail=f"Person entity '{name}' not found")
+
+    if not source_file:
+        raise HTTPException(status_code=404, detail=f"No source image found for '{name}'")
+
+    # Find the source image file
+    image_path = INPUT_DIR / source_file
+    if not image_path.is_file():
+        # Try common extensions
+        for ext in ["", ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
+            candidate = INPUT_DIR / f"{source_file}{ext}"
+            if candidate.is_file():
+                image_path = candidate
+                break
+
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Source image not found: {source_file}")
+
+    # Detect faces in the source image
+    faces = await asyncio.to_thread(detect_faces, str(image_path))
+    if not faces:
+        raise HTTPException(status_code=404, detail=f"No faces detected in source image for '{name}'")
+
+    # Determine which face to crop for this person
+    # Strategy: extract the person index from the name (e.g. "Person 1" -> index 0)
+    face_index = 0
+    import re
+    match = re.search(r"(\d+)", name)
+    if match:
+        face_index = int(match.group(1)) - 1  # Person 1 -> face 0
+
+    # Clamp to available faces
+    if face_index >= len(faces):
+        face_index = 0
+
+    face = faces[face_index]
+    bbox = face.get("bbox", [])
+
+    if len(bbox) != 4:
+        raise HTTPException(status_code=500, detail=f"Invalid face bounding box for '{name}'")
+
+    # Crop the face from the image
+    x1, y1, x2, y2 = bbox
+
+    # Add padding around the face (30% on each side)
+    face_w = x2 - x1
+    face_h = y2 - y1
+    pad_x = int(face_w * 0.3)
+    pad_y = int(face_h * 0.3)
+
+    try:
+        img = await asyncio.to_thread(Image.open, str(image_path))
+        img_w, img_h = img.size
+
+        # Clamp to image bounds with padding
+        cx1 = max(0, x1 - pad_x)
+        cy1 = max(0, y1 - pad_y)
+        cx2 = min(img_w, x2 + pad_x)
+        cy2 = min(img_h, y2 + pad_y)
+
+        cropped = img.crop((cx1, cy1, cx2, cy2))
+
+        # Resize to a consistent size for graph display
+        max_dim = 256
+        cropped.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+        # Save to cache
+        await asyncio.to_thread(cropped.save, str(cache_path), "JPEG", quality=85)
+
+        # Return the cropped image
+        img_bytes = io.BytesIO()
+        cropped.save(img_bytes, format="JPEG", quality=85)
+        img_bytes.seek(0)
+
+        return Response(content=img_bytes.getvalue(), media_type="image/jpeg")
+
+    except Exception as exc:
+        logger.error("Failed to crop face for '%s': %s", name, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to crop face: {exc}")
+
+
 @router.delete("/photo-entities")
 async def delete_photo_entities_endpoint(file_source: str):
     """Delete the Photo node and EXIF entities for a file source.
@@ -544,11 +675,17 @@ async def stream_job_events(job_id: str, after: int = 0):
         try:
             past_events = await get_events(job_id, after_event_id=after)
             for evt in past_events:
+                event_data = evt["event_data"]
+                if isinstance(event_data, str):
+                    try:
+                        event_data = json.loads(event_data)
+                    except (json.JSONDecodeError, TypeError):
+                        event_data = {"raw": event_data}
                 yield ServerSentEvent(
                     event="message",
                     data=json.dumps({
                         "event": evt["event_type"],
-                        "data": evt["event_data"],
+                        "data": event_data,
                         "event_id": evt["id"],
                         "timestamp": evt["created_at"],
                     }),
@@ -580,7 +717,7 @@ async def stream_job_events(job_id: str, after: int = 0):
                     event="message",
                     data=json.dumps({
                         "event": evt["event_type"],
-                        "data": evt["event_data"],
+                        "data": evt["event_data"] if isinstance(evt["event_data"], dict) else json.loads(evt["event_data"]) if isinstance(evt["event_data"], str) else {"raw": evt["event_data"]},
                         "timestamp": time.time(),
                     }),
                 )
