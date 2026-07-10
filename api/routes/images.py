@@ -567,6 +567,14 @@ async def get_face_crop(name: str):
     if not faces:
         raise HTTPException(status_code=404, detail=f"No faces detected in source image for '{name}'")
 
+    # Sort by face area descending to match VLM salience-based person numbering
+    for f in faces:
+        bx1, by1, bx2, by2 = f.get("bbox", [0, 0, 0, 0])
+        f["_area"] = max(0, (bx2 - bx1)) * max(0, (by2 - by1))
+    faces.sort(key=lambda f: f.get("_area", 0), reverse=True)
+    for f in faces:
+        f.pop("_area", None)
+
     face_index = 0
     import re
     match = re.search(r"(\d+)", name)

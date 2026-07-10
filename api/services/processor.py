@@ -457,10 +457,13 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
 
 
 def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[str], source_id: str) -> None:
-    """Detect face bounding boxes and save cropped face images with a person-to-crop mapping.
+    """Save cropped face images with a person-to-crop mapping.
 
     Crops are saved to FACES_CACHE_DIR as JPEG files named by the person name.
     A mapping file (face_mapping.json) records the person→filename association.
+
+    Faces are sorted by area (largest first) to match the VLM's salience-based
+    ordering: Person 1 = most prominent face, Person 2 = second, etc.
     """
     from PIL import Image
 
@@ -471,6 +474,15 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
     if not bboxes:
         logger.info("No face bounding boxes for crop saving in %s", image_path)
         return
+
+    # Sort bboxes by face area descending (most prominent first)
+    # This matches the VLM's salience-based person numbering
+    for b in bboxes:
+        bx1, by1, bx2, by2 = b.get("bbox", [0, 0, 0, 0])
+        b["_area"] = max(0, (bx2 - bx1)) * max(0, (by2 - by1))
+    bboxes.sort(key=lambda b: b.get("_area", 0), reverse=True)
+    for b in bboxes:
+        b.pop("_area", None)
 
     try:
         img = Image.open(image_path)
