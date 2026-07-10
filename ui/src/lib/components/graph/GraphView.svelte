@@ -130,6 +130,7 @@
       allEdges = graph.edges ?? [];
       initVisibleNodes();
       fetchPhotoImages(allNodes);
+      fetchPersonImages(allNodes);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load graph';
     } finally {
@@ -145,6 +146,12 @@
       || node.id?.includes('(Photo)')
       || node.id?.includes('(Image)')
     );
+  }
+
+  function isPersonNode(node: KGNode): boolean {
+    const et = node.properties?.entity_type;
+    if (typeof et === 'string' && et.toLowerCase() === 'person') return true;
+    return !!node.labels?.some((l) => l.toLowerCase() === 'person');
   }
 
   async function fetchPhotoImages(nodes: KGNode[]) {
@@ -173,6 +180,32 @@
     );
     if (Object.keys(updates).length > 0) {
       graphStore.photoImages = { ...graphStore.photoImages, ...updates };
+    }
+  }
+
+  async function fetchPersonImages(nodes: KGNode[]) {
+    const personNodes = nodes.filter(isPersonNode);
+    if (personNodes.length === 0) return;
+    const updates: Record<string, string> = {};
+    await Promise.all(
+      personNodes.map(async (node) => {
+        if (graphStore.personImages[node.id]) return;
+        try {
+          const url = client.personPhotoUrl(node.id);
+          const resp = await fetch(url);
+          if (!resp.ok) return;
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          updates[node.id] = dataUrl;
+        } catch {}
+      })
+    );
+    if (Object.keys(updates).length > 0) {
+      graphStore.personImages = { ...graphStore.personImages, ...updates };
     }
   }
 
@@ -478,6 +511,14 @@
     const photos = graphStore.photoImages;
     if (Object.keys(photos).length > 0 && graphCanvas) {
       graphCanvas.applyPhotoTextures();
+    }
+  });
+
+  // When person face images arrive, apply textures to existing person node meshes
+  $effect(() => {
+    const persons = graphStore.personImages;
+    if (Object.keys(persons).length > 0 && graphCanvas) {
+      graphCanvas.applyPersonTextures();
     }
   });
 

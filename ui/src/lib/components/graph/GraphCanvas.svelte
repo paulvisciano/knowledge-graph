@@ -107,6 +107,12 @@
       || (node.id ?? '').includes('(Image)');
   }
 
+  function isPersonNode(node: { labels?: string[]; properties?: Record<string, unknown>; id?: string }): boolean {
+    const et = node.properties?.entity_type;
+    if (typeof et === 'string' && et.toLowerCase() === 'person') return true;
+    return !!node.labels?.some(l => l.toLowerCase() === 'person');
+  }
+
   function hashColor(label: string): string {
     let hash = 0;
     for (let i = 0; i < label.length; i++) {
@@ -321,6 +327,7 @@
           let orbitRadius = hubSize + 8 + Math.sqrt(totalSatellites) * 10;
           // Photo nodes get extra initial distance
           if (isPhotoNode(n)) orbitRadius += 25;
+          if (isPersonNode(n)) orbitRadius += 10;
           const angle = (2 * Math.PI * idx) / totalSatellites;
           const jitter = 0.8;
           x = hubPos.x + orbitRadius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
@@ -372,6 +379,7 @@
       // Also build a photo node lookup for distance adjustments
       const hubPositionLookup = new Map<string, { x: number; y: number; z: number }>();
       const photoNodeLookup = new Map<string, boolean>();
+      const personNodeLookup = new Map<string, boolean>();
       const data = graph.graphData();
       for (const node of data.nodes as GraphNode[]) {
         const nodeId = String(node.id);
@@ -379,6 +387,7 @@
           hubPositionLookup.set(nodeId, { x: node.x!, y: node.y!, z: node.z! });
         }
         photoNodeLookup.set(nodeId, isPhotoNode(node));
+        personNodeLookup.set(nodeId, isPersonNode(node));
       }
 
       // Strong force pulling satellites toward their hub
@@ -407,6 +416,11 @@
           const isHubPhoto = photoNodeLookup.get(hubId) ?? false;
           if (isSatellitePhoto || isHubPhoto) {
             orbitRadius += 25; // extra distance for image nodes
+          }
+          const isSatellitePerson = personNodeLookup.get(nodeId) ?? false;
+          const isHubPerson = personNodeLookup.get(hubId) ?? false;
+          if (isSatellitePerson || isHubPerson) {
+            orbitRadius += 10;
           }
 
           // Strong pull toward orbit radius around hub
@@ -481,6 +495,8 @@
 
   const photoTextureCache = new Map<string, THREE.Texture>();
   const photoNodeMaterials = new Map<string, THREE.MeshBasicMaterial>();
+  const personTextureCache = new Map<string, THREE.Texture>();
+  const personNodeMaterials = new Map<string, THREE.MeshBasicMaterial>();
 
   function loadPhotoTexture(nodeId: string): THREE.Texture | undefined {
     const dataUrl = graphStore.photoImages[nodeId];
@@ -533,6 +549,61 @@
     }
   }
 
+  function loadPersonTexture(nodeId: string): THREE.Texture | undefined {
+    const dataUrl = graphStore.personImages[nodeId];
+    if (!dataUrl) return undefined;
+    const cached = personTextureCache.get(nodeId);
+    if (cached) return cached;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const texture = new THREE.Texture(img);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = false;
+    personTextureCache.set(nodeId, texture);
+    img.onload = () => {
+      texture.needsUpdate = true;
+      redrawPersonOval(nodeId, img);
+    };
+    img.src = dataUrl;
+    if (img.complete && img.naturalWidth > 0) {
+      texture.needsUpdate = true;
+      redrawPersonOval(nodeId, img);
+    }
+    return texture;
+  }
+
+  function redrawPersonOval(nodeId: string, img: HTMLImageElement) {
+    const mat = personNodeMaterials.get(nodeId);
+    if (!mat) return;
+    const drawFn = (mat as any).__drawOvalCanvas as ((img: HTMLImageElement | null) => void) | undefined;
+    const canvasTex = (mat as any).__canvasTexture as THREE.CanvasTexture | undefined;
+    if (drawFn && canvasTex) {
+      drawFn(img);
+      canvasTex.needsUpdate = true;
+      mat.needsUpdate = true;
+    }
+  }
+
+  export function applyPersonTextures() {
+    if (!graph) return;
+    const data = graph.graphData();
+    const nodes = data?.nodes as GraphNode[] | undefined;
+    if (!nodes) return;
+    for (const node of nodes) {
+      const nodeId = String(node.id);
+      const mat = personNodeMaterials.get(nodeId);
+      if (!mat) continue;
+      const dataUrl = graphStore.personImages[nodeId];
+      if (!dataUrl) continue;
+      const texture = loadPersonTexture(nodeId);
+      if (!texture) continue;
+      const img = texture.image as HTMLImageElement;
+      if (img && img.complete && img.naturalWidth > 0) {
+        redrawPersonOval(nodeId, img);
+      }
+    }
+  }
+
   function createNodeThreeObject(node: GraphNode): THREE.Object3D {
     const group = new THREE.Group();
     const nodeId = String(node.id);
@@ -577,6 +648,81 @@
       photoNodeMaterials.set(nodeId, material);
       (group as unknown as Record<string, unknown>).__fadeMaterials = [material];
       (group as unknown as Record<string, unknown>).__fadeSprite = borderLine;
+    } else if (isPersonNode(node)) {
+      const personTexture = loadPersonTexture(nodeId);
+      const personColor = getNodeColor(node);
+      const ovalRadius = Math.max(size * 1.2, 5);
+      const ovalWidthRadius = ovalRadius;
+      const ovalHeightRadius = ovalRadius * 1.25;
+
+      const canvasSize = 128;
+      const canvas2d = document.createElement('canvas');
+      canvas2d.width = canvasSize;
+      canvas2d.height = canvasSize;
+
+      function drawOvalCanvas(img: HTMLImageElement | null) {
+        const ctx = canvas2d.getContext('2d')!;
+        ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+        // Oval clip path
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(canvasSize / 2, canvasSize / 2, canvasSize / 2 - 2, canvasSize / 2 - 2, 0, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+
+        if (img && img.complete && img.naturalWidth > 0) {
+          ctx.drawImage(img, 0, 0, canvasSize, canvasSize);
+        } else {
+          ctx.fillStyle = personColor;
+          ctx.fill();
+          // Draw initials on fallback
+          const name = getNodeLabel(node);
+          const initials = name.split(/[\s_]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `bold ${canvasSize * 0.35}px Inter, system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(initials, canvasSize / 2, canvasSize / 2);
+        }
+        ctx.restore();
+
+        // Oval border
+        ctx.beginPath();
+        ctx.ellipse(canvasSize / 2, canvasSize / 2, canvasSize / 2 - 2, canvasSize / 2 - 2, 0, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      drawOvalCanvas(personTexture?.image as HTMLImageElement | null ?? null);
+
+      const canvasTexture = new THREE.CanvasTexture(canvas2d);
+      canvasTexture.colorSpace = THREE.SRGBColorSpace;
+      canvasTexture.needsUpdate = true;
+
+      const planeGeom = new THREE.PlaneGeometry(ovalWidthRadius * 2, ovalHeightRadius * 2);
+      const planeMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        map: canvasTexture,
+        transparent: true,
+        opacity: Math.max(opacity, 0.01),
+        side: THREE.DoubleSide,
+      });
+      const planeMesh = new THREE.Mesh(planeGeom, planeMat);
+      group.add(planeMesh);
+
+      // Store canvas refs on the material for later redraw when face image loads
+      personNodeMaterials.set(nodeId, planeMat);
+      (planeMat as any).__drawOvalCanvas = drawOvalCanvas;
+      (planeMat as any).__canvasTexture = canvasTexture;
+      (planeMat as any).__canvas2d = canvas2d;
+
+      (group as unknown as Record<string, unknown>).__fadeMaterials = [planeMat];
+
+      if (showLabels) addLabel(group, node, personColor, size, opacity);
+      (group as unknown as Record<string, unknown>).__fadeSprite = group.children.find(c => c instanceof THREE.Sprite);
     } else {
       const nodeColor = color;
       const geometry = new THREE.SphereGeometry(size, 16, 16);
@@ -868,27 +1014,32 @@
 
     applyClusterForce();
 
-    // Increase link distance for edges connected to image nodes
-    // Build a photo-node lookup so the distance function can check efficiently
+    // Increase link distance for edges connected to image nodes or person nodes
     const graphData = fg.graphData();
     const photoLookup = new Map<string, boolean>();
+    const personLookup = new Map<string, boolean>();
     for (const n of (graphData?.nodes ?? []) as GraphNode[]) {
       photoLookup.set(String(n.id), isPhotoNode(n));
+      personLookup.set(String(n.id), isPersonNode(n));
     }
     fg.d3Force('link')?.distance((link: { source: GraphNode | string; target: GraphNode | string }) => {
       const src = typeof link.source === 'object' ? link.source : null;
       const tgt = typeof link.target === 'object' ? link.target : null;
-      // Check via lookup (handles both resolved node objects and string IDs)
       const srcPhoto = src ? (photoLookup.get(String(src.id)) ?? isPhotoNode(src)) : false;
       const tgtPhoto = tgt ? (photoLookup.get(String(tgt.id)) ?? isPhotoNode(tgt)) : false;
-      if (srcPhoto || tgtPhoto) return 120; // 3x base distance for image connections
+      const srcPerson = src ? (personLookup.get(String(src.id)) ?? isPersonNode(src)) : false;
+      const tgtPerson = tgt ? (personLookup.get(String(tgt.id)) ?? isPersonNode(tgt)) : false;
+      if (srcPhoto || tgtPhoto) return 120;
+      if (srcPerson || tgtPerson) return 60;
       return 40;
     });
 
     // Use built-in charge force with per-node strength — photo nodes repel much more strongly
     fg.d3Force('charge')?.strength((nodeObj: NodeObject) => {
       const n = nodeObj as GraphNode;
-      return isPhotoNode(n) ? -400 : -80;
+      if (isPhotoNode(n)) return -400;
+      if (isPersonNode(n)) return -150;
+      return -80;
     });
 
     fg.d3Force('center', null);
@@ -998,6 +1149,8 @@
     if (!graph) return;
     photoTextureCache.clear();
     photoNodeMaterials.clear();
+    personTextureCache.clear();
+    personNodeMaterials.clear();
     graph.nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode));
     graph.graphData(buildGraphData());
   }

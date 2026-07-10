@@ -14,6 +14,8 @@ class GraphStore {
   isLoading = $state(false);
   /** nodeId → dataUrl for Photo node images */
   photoImages = $state<Record<string, string>>({});
+  /** nodeId → dataUrl for Person face-crop images */
+  personImages = $state<Record<string, string>>({});
 
   filteredNodes = $derived.by(() => {
     if (!this.searchQuery.trim()) return this.nodes;
@@ -51,6 +53,7 @@ class GraphStore {
         meta: { nodeCount: graph.nodes.length, edgeCount: graph.edges.length },
       });
       this.fetchPhotoImages(graph.nodes);
+      this.fetchPersonImages(graph.nodes);
     } catch (err) {
       eventBus.pushEvent({
         id: crypto.randomUUID(),
@@ -145,6 +148,41 @@ class GraphStore {
 
   setPhotoImage(nodeId: string, dataUrl: string) {
     this.photoImages = { ...this.photoImages, [nodeId]: dataUrl };
+  }
+
+  setPersonImage(nodeId: string, dataUrl: string) {
+    this.personImages = { ...this.personImages, [nodeId]: dataUrl };
+  }
+
+  private async fetchPersonImages(nodes: KGNode[]) {
+    const personNodes = nodes.filter((n) => {
+      const et = n.properties?.entity_type;
+      if (typeof et === 'string') return et.toLowerCase() === 'person';
+      return n.labels?.some((l) => l.toLowerCase() === 'person') ?? false;
+    });
+    if (personNodes.length === 0) return;
+
+    const updates: Record<string, string> = {};
+    await Promise.all(
+      personNodes.map(async (node) => {
+        if (this.personImages[node.id]) return;
+        try {
+          const url = lightragClient.personPhotoUrl(node.id);
+          const resp = await fetch(url);
+          if (!resp.ok) return;
+          const blob = await resp.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          updates[node.id] = dataUrl;
+        } catch {}
+      })
+    );
+    if (Object.keys(updates).length > 0) {
+      this.personImages = { ...this.personImages, ...updates };
+    }
   }
 
   reset() {
