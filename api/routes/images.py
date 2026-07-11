@@ -19,7 +19,7 @@ from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 
 from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
-    describe_image_with_vlm, create_exif_relations,
+    describe_image_with_vlm, describe_face_crop, create_exif_relations,
     link_exif_to_visual_entities, wait_for_lightrag_processing,
     delete_photo_entities,
 )
@@ -523,7 +523,7 @@ async def get_face_crop(name: str):
                         except Exception as exc:
                             logger.error("Failed to crop face for '%s': %s", name, exc)
 
-    # Fallback: query LightRAG for the person node and detect faces on-the-fly
+    # Fallback: query LightRAG for the person node, detect faces, use VLM to match
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
@@ -538,13 +538,14 @@ async def get_face_crop(name: str):
 
     person_node = None
     source_file = None
+    all_person_nodes = []
     for node in graph_data.get("nodes", []):
-        if node.get("id") == name or name.lower() in str(node.get("id", "")).lower():
-            props = node.get("properties", {})
-            if props.get("entity_type", "").lower() == "person":
+        props = node.get("properties", {})
+        if props.get("entity_type", "").lower() == "person":
+            all_person_nodes.append(node)
+            if node.get("id") == name or name.lower() in str(node.get("id", "")).lower():
                 person_node = node
                 source_file = props.get("file_path") or props.get("source_id")
-                break
 
     if not person_node:
         raise HTTPException(status_code=404, detail=f"Person entity '{name}' not found")
@@ -567,7 +568,7 @@ async def get_face_crop(name: str):
     if not faces:
         raise HTTPException(status_code=404, detail=f"No faces detected in source image for '{name}'")
 
-    # Sort by face area descending to match VLM salience-based person numbering
+    # Sort by face area descending (most prominent first)
     for f in faces:
         bx1, by1, bx2, by2 = f.get("bbox", [0, 0, 0, 0])
         f["_area"] = max(0, (bx2 - bx1)) * max(0, (by2 - by1))
@@ -575,13 +576,90 @@ async def get_face_crop(name: str):
     for f in faces:
         f.pop("_area", None)
 
-    face_index = 0
-    import re
-    match = re.search(r"(\d+)", name)
-    if match:
-        face_index = int(match.group(1)) - 1
-    if face_index >= len(faces):
+    # If only one person or one face, use direct area-based mapping
+    if len(all_person_nodes) <= 1 or len(faces) <= 1:
         face_index = 0
+        import re
+        match = re.search(r"(\d+)", name)
+        if match:
+            face_index = min(int(match.group(1)) - 1, len(faces) - 1)
+    else:
+        # Use VLM to match face crops to person descriptions
+        person_desc = (person_node.get("properties", {}).get("description") or "").lower()
+
+        # Crop each face to a temp file for VLM description
+        try:
+            img = await asyncio.to_thread(Image.open, str(image_path))
+            img_w, img_h = img.size
+        except Exception:
+            img = None
+
+        best_face_idx = 0
+        best_score = -1
+
+        if img and person_desc:
+            face_descriptions = []
+            for idx, face in enumerate(faces):
+                bbox = face.get("bbox", [])
+                if len(bbox) != 4:
+                    face_descriptions.append("")
+                    continue
+                x1, y1, x2, y2 = bbox
+                fw, fh = x2 - x1, y2 - y1
+                px, py = int(fw * 0.3), int(fh * 0.3)
+                cx1, cy1 = max(0, x1 - px), max(0, y1 - py)
+                cx2, cy2 = min(img_w, x2 + px), min(img_h, y2 + py)
+
+                tmp_path = FACES_CACHE_DIR / f"_tmp_{name}_{idx}.jpg"
+                try:
+                    cropped = img.crop((cx1, cy1, cx2, cy2))
+                    cropped.thumbnail((256, 256), Image.Resampling.LANCZOS)
+                    await asyncio.to_thread(cropped.save, str(tmp_path), "JPEG", quality=85)
+                    desc = await describe_face_crop(str(tmp_path))
+                    face_descriptions.append(desc.lower())
+                except Exception as exc:
+                    logger.warning("VLM face crop failed for face %d: %s", idx, exc)
+                    face_descriptions.append("")
+                finally:
+                    if tmp_path.is_file():
+                        tmp_path.unlink()
+
+            # Match by attribute overlap between VLM face desc and person description
+            desc_lower = person_desc
+            _HAIR_MAP = {"bald": {"bald", "shaved", "hairless"}, "blonde": {"blonde", "blond", "light-haired"}, "brown": {"brown-haired", "brown"}, "black": {"black-haired", "dark-haired", "dark hair"}, "red": {"red-haired", "redhead", "ginger"}}
+            _BUILD_MAP = {"muscular": {"muscular", "muscular", "athletic", "fit", "toned"}, "slim": {"slim", "thin", "lean", "skinny"}, "heavy": {"heavy", "large", "big", "overweight", "stocky"}}
+            _CLOTHING_MAP = {"shirtless": {"shirtless", "no shirt", "bare-chested", "topless"}, "t-shirt": {"t-shirt", "tshirt", "tee shirt"}, "shorts": {"shorts"}, "dress": {"dress", "gown"}, "suit": {"suit", "jacket", "blazer"}, "hat": {"hat", "cap", "beanie"}}
+
+            def extract_attrs(text: str) -> set[str]:
+                attrs = set()
+                t = text.lower()
+                for attr, words in {**_HAIR_MAP, **_BUILD_MAP, **_CLOTHING_MAP}.items():
+                    for w in words:
+                        if w in t:
+                            attrs.add(attr)
+                            break
+                # Direct word matches for common attributes
+                for word in ["bald", "beard", "mustache", "glasses", "hat"]:
+                    if word in t:
+                        attrs.add(word)
+                # Color words
+                for color in ["white", "black", "grey", "gray", "blue", "red", "dark", "light"]:
+                    if color in t:
+                        attrs.add(f"color_{color}")
+                return attrs
+
+            person_attrs = extract_attrs(desc_lower)
+            for idx, fdesc in enumerate(face_descriptions):
+                if not fdesc:
+                    continue
+                face_attrs = extract_attrs(fdesc)
+                overlap = len(person_attrs & face_attrs)
+                logger.info("Face %d match: desc='%s' attrs=%s overlap=%d (person_attrs=%s)", idx, fdesc[:60], face_attrs, overlap, person_attrs)
+                if overlap > best_score:
+                    best_score = overlap
+                    best_face_idx = idx
+
+        face_index = best_face_idx
 
     face = faces[face_index]
     bbox = face.get("bbox", [])

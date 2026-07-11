@@ -701,6 +701,62 @@ async def describe_image_with_vlm(
     return description
 
 
+async def describe_face_crop(
+    crop_path: str,
+    vlm_url: str | None = None,
+    vlm_model: str | None = None,
+) -> str:
+    """Send a face crop to the VLM and return a brief physical description.
+
+    Uses the same OpenAI-compatible endpoint as describe_image_with_vlm but
+    with a focused prompt for describing a single person's appearance.
+    """
+    import httpx
+
+    url = (vlm_url or VLM_URL).rstrip("/")
+    model = vlm_model or VLM_MODEL
+
+    with open(crop_path, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode("ascii")
+
+    prompt = (
+        "Describe this person's physical appearance in one short sentence. "
+        "Focus on: hair (color, length, baldness), facial hair, build, and clothing. "
+        "Example: 'A male with brown hair, muscular build, wearing no shirt and grey shorts.'"
+    )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                ],
+            }
+        ],
+        "max_tokens": 256,
+        "temperature": 0.2,
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if VLM_API_KEY:
+        headers["Authorization"] = f"Bearer {VLM_API_KEY}"
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
+
+    if resp.status_code != 200:
+        logger.error("VLM face description failed: %d %s", resp.status_code, resp.text[:500])
+        return ""
+
+    result = resp.json()
+    description = result["choices"][0]["message"]["content"].strip()
+    logger.info("VLM face description for %s: %s", crop_path, description[:100])
+    return description
+
+
 async def upload_image_to_lightrag(
     lightrag_url: str,
     image_path: str,
