@@ -99,6 +99,17 @@
   // Animation frame ID for persistent opacity animation loop
   let opacityRafId = 0;
 
+  // Dirty flags so the RAF loop can skip scene.traverse() entirely when
+  // nothing has changed. Traversing the full scene every frame was a major
+  // source of frame drops on initial load (competing with the WebGL render
+  // and the zoomToFit camera animation).
+  let opacityDirty = false;   // set when opacity targets change
+  let highlightsDirty = false; // set when highlightedIds / selection changes
+
+  // Cached THREE.Color instances to avoid per-frame allocation (GC pressure).
+  const emissiveCyanColor = new THREE.Color(CYAN);
+  const emissiveBlackColor = new THREE.Color(0x000000);
+
   function isPhotoNode(node: { labels?: string[]; properties?: Record<string, unknown>; id?: string }): boolean {
     return !!node.labels?.some(l => /^(Photo|Image)$/i.test(l))
       || (node.properties?.entity_type as string) === 'Photo'
@@ -781,9 +792,28 @@
   /** Animate per-node opacity each frame */
   function tickOpacity() {
     if (!graph) return;
+
+    // Fast path: if nothing changed and no opacity is mid-transition, skip
+    // the scene traversal entirely. This keeps the RAF loop O(1) at steady
+    // state so it never competes with the WebGL render loop for frame budget.
+    if (!opacityDirty && !highlightsDirty) {
+      let animating = false;
+      for (const [id, current] of nodeOpacity) {
+        const target = nodeTargetOpacity.get(id) ?? 0;
+        if (current !== target) {
+          animating = true;
+          break;
+        }
+      }
+      if (!animating) return;
+    }
+
     const scene = graph.scene();
-    const now = performance.now();
     const hasHighlights = highlightedIds.size > 0;
+
+    // Clear flags before traversal — any change during this frame is applied now.
+    opacityDirty = false;
+    highlightsDirty = false;
 
     scene.traverse((obj: THREE.Object3D) => {
       const rec = obj as unknown as Record<string, unknown>;
@@ -806,10 +836,10 @@
           for (const mat of materials) {
             if (mat instanceof THREE.MeshLambertMaterial) {
               if (hasHighlights && highlightedIds.has(nodeId)) {
-                mat.emissive = new THREE.Color(CYAN);
+                mat.emissive = emissiveCyanColor;
                 mat.emissiveIntensity = 0.8;
               } else {
-                mat.emissive = new THREE.Color(0x000000);
+                mat.emissive = emissiveBlackColor;
                 mat.emissiveIntensity = 0;
               }
             }
@@ -830,10 +860,10 @@
           // Highlighted nodes get a cyan emissive glow (only MeshLambertMaterial supports emissive)
           if (mat instanceof THREE.MeshLambertMaterial) {
             if (hasHighlights && highlightedIds.has(nodeId)) {
-              mat.emissive = new THREE.Color(CYAN);
+              mat.emissive = emissiveCyanColor;
               mat.emissiveIntensity = 0.8;
             } else {
-              mat.emissive = new THREE.Color(0x000000);
+              mat.emissive = emissiveBlackColor;
               mat.emissiveIntensity = 0;
             }
           }
@@ -880,6 +910,9 @@
       }
       activeHoverId = activeId;
     }
+
+    // Mark highlights dirty so the next tickOpacity frame re-applies emissive.
+    highlightsDirty = true;
   }
 
   function updateSelectionRing() {
@@ -986,6 +1019,11 @@
         fg.d3AlphaDecay(1);
         fg.d3VelocityDecay(1);
         fg.d3AlphaMin(0.5);
+        // Fit the camera to the settled layout. Doing this here (instead of
+        // a setTimeout race against the still-running force simulation)
+        // eliminates the initial-load jitter: the camera no longer animates
+        // while node positions are simultaneously converging.
+        fg.zoomToFit(500, 80);
       })
       .onNodeClick((node: NodeObject) => {
         const gn = node as GraphNode;
@@ -1061,9 +1099,9 @@
       }
     }) as never);
 
-    setTimeout(() => {
-      fg.zoomToFit(500, 80);
-    }, 200);
+    // Initial zoom-to-fit is handled in onEngineStop above, after the force
+    // layout has fully settled. This avoids animating the camera while node
+    // positions are still converging (the primary cause of initial-load jitter).
 
     // Override default TrackballControls scroll zoom with cursor-centered zoom
     const controls = fg.controls();
@@ -1151,6 +1189,7 @@
     graph.graphData(buildGraphData());
     applyClusterForce();
     updateHighlight();
+    opacityDirty = true;
   }
 
   /** Re-register nodeThreeObject so photo nodes get recreated with up-to-date textures. */
@@ -1162,6 +1201,7 @@
     personNodeMaterials.clear();
     graph.nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode));
     graph.graphData(buildGraphData());
+    opacityDirty = true;
   }
 
   // Only re-register nodeThreeObject when showLabels changes.
@@ -1249,6 +1289,10 @@
     // just changed.
     graph.refresh();
 
+    // Wake the opacity RAF loop — targets and/or highlights changed.
+    opacityDirty = true;
+    highlightsDirty = true;
+
     // Links are hidden — clustering layout only
   });
 
@@ -1283,8 +1327,9 @@
     return () => cancelAnimationFrame(rafId);
   });
 
-  // Persistent opacity animation loop — runs every frame so highlights
-  // and visibility changes animate even after the force simulation stops.
+  // Persistent opacity animation loop. Runs every frame but is O(1) when idle
+  // (dirty flags gate the scene.traverse). When opacity targets or highlights
+  // change, the relevant effect sets the dirty flags, waking this loop.
   $effect(() => {
     const _ = nodes; // depend on nodes so rebuild re-triggers
     if (!graph) return;
