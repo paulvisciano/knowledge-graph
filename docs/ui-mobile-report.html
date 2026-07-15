@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus UI — Mobile-Friendliness Audit & Recommendations</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --text: #c8d6e5;
+    --text-dim: #5a6b80;
+    --cyan: #00d4ff;
+    --purple: #a855f7;
+    --green: #00ff88;
+    --orange: #ff8c00;
+    --red: #ff3366;
+    --yellow: #ffd600;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 5rem;
+  }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 2.5rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  .hero h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    color: var(--cyan);
+    text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+    letter-spacing: -0.02em;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .hero .meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    font-size: 0.8rem;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.3em 0.75em;
+    border-radius: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  }
+
+  /* Summary cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+  }
+  .summary-card .num {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 0.35rem;
+  }
+  .summary-card .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+  .summary-card.cyan { border-left: 3px solid var(--cyan); }
+  .summary-card.cyan .num { color: var(--cyan); }
+  .summary-card.yellow { border-left: 3px solid var(--yellow); }
+  .summary-card.yellow .num { color: var(--yellow); }
+  .summary-card.orange { border-left: 3px solid var(--orange); }
+  .summary-card.orange .num { color: var(--orange); }
+  .summary-card.red { border-left: 3px solid var(--red); }
+  .summary-card.red .num { color: var(--red); }
+  .summary-card.green { border-left: 3px solid var(--green); }
+  .summary-card.green .num { color: var(--green); }
+
+  /* Score bar */
+  .score-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .score-bar-container {
+    width: 100%;
+    height: 24px;
+    background: var(--surface2);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 0.75rem 0 0.5rem;
+    position: relative;
+  }
+  .score-bar {
+    height: 100%;
+    border-radius: 12px;
+    background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 50%, var(--green) 100%);
+    transition: width 1s ease;
+  }
+  .score-bar-fill { width: 74%; }
+  .score-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* Sections */
+  h2 {
+    font-size: 1.3rem;
+    margin: 2.5rem 0 1rem;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  h2 .icon { font-size: 1.1rem; }
+  h3 {
+    font-size: 1rem;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--cyan);
+  }
+
+  /* Existing strengths */
+  .strengths-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  .strength-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+  }
+  .strength-card .title {
+    font-weight: 600;
+    color: var(--green);
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
+  }
+  .strength-card .desc {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+  .strength-card code {
+    background: var(--surface2);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.78em;
+    color: var(--cyan);
+  }
+
+  /* Issue cards */
+  .issue {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0;
+    margin: 1rem 0;
+    overflow: hidden;
+  }
+  .issue-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .issue-severity {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 0.5rem;
+  }
+  .severity-critical { background: var(--red); box-shadow: 0 0 8px rgba(255, 51, 102, 0.5); }
+  .severity-high { background: var(--orange); box-shadow: 0 0 8px rgba(255, 140, 0, 0.4); }
+  .severity-medium { background: var(--yellow); box-shadow: 0 0 8px rgba(255, 214, 0, 0.4); }
+  .severity-low { background: var(--cyan); box-shadow: 0 0 8px rgba(0, 212, 255, 0.3); }
+  .issue-title {
+    flex: 1;
+  }
+  .issue-title h3 {
+    margin: 0 0 0.25rem;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  .issue-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+  }
+  .tag {
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-weight: 500;
+  }
+  .tag.critical { background: rgba(255, 51, 102, 0.12); color: var(--red); }
+  .tag.high { background: rgba(255, 140, 0, 0.12); color: var(--orange); }
+  .tag.medium { background: rgba(255, 214, 0, 0.12); color: var(--yellow); }
+  .tag.low { background: rgba(0, 212, 255, 0.12); color: var(--cyan); }
+  .tag.effort { background: var(--surface2); color: var(--text-dim); }
+  .tag.file { background: var(--surface2); color: var(--purple); }
+
+  .issue-body {
+    padding: 1rem 1.5rem 1.25rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  @media (max-width: 640px) {
+    .issue-body { grid-template-columns: 1fr; gap: 1rem; }
+  }
+  .issue-section h4 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+  .issue-section.problem h4 { color: var(--red); }
+  .issue-section.solution h4 { color: var(--green); }
+  .issue-section p {
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+  }
+  .issue-section ul {
+    list-style: none;
+    padding: 0;
+  }
+  .issue-section li {
+    font-size: 0.82rem;
+    color: var(--text);
+    padding: 0.25rem 0 0.25rem 1.1rem;
+    position: relative;
+  }
+  .issue-section li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: var(--cyan);
+  }
+  .issue-section.solution li::before {
+    content: '✓';
+    color: var(--green);
+  }
+  pre {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    margin: 0.5rem 0;
+    font-family: 'SF Mono', 'JetBrains Mono', Consolas, monospace;
+    color: var(--text);
+  }
+  pre .comment { color: var(--text-dim); }
+  pre .keyword { color: var(--purple); }
+  pre .string { color: var(--green); }
+  pre .highlight { background: rgba(255, 214, 0, 0.1); display: block; margin: 0 -1rem; padding: 0.1rem 1rem; }
+
+  /* Priority table */
+  .priority-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 2rem;
+    font-size: 0.82rem;
+  }
+  .priority-table th {
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 2px solid var(--border);
+  }
+  .priority-table td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .priority-table tr:hover td {
+    background: var(--surface);
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+  .footer code {
+    background: var(--surface2);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    color: var(--cyan);
+    font-size: 0.85em;
+  }
+
+  /* TOC */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .toc h3 {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+  .toc ol {
+    padding-left: 1.5rem;
+  }
+  .toc li {
+    font-size: 0.85rem;
+    padding: 0.2rem 0;
+  }
+  .toc a {
+    color: var(--cyan);
+    text-decoration: none;
+  }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- ========== HERO ========== -->
+<div class="hero">
+  <h1>📱 Nexus UI — Mobile-Friendliness Audit</h1>
+  <p class="subtitle">
+    A targeted review of the Svelte knowledge-graph UI's mobile experience, with concrete,
+    file-level recommendations for improvement.
+  </p>
+  <div class="meta">
+    <span class="badge">Svelte 5 + SvelteKit</span>
+    <span class="badge">Tailwind CSS v4</span>
+    <span class="badge">3d-force-graph</span>
+    <span class="badge">Framework7</span>
+    <span class="badge">31 Svelte components</span>
+  </div>
+</div>
+
+<!-- ========== SCORE ========== -->
+<div class="score-section">
+  <h3 style="margin-top:0; color: var(--cyan);">Overall Mobile-Friendliness Score</h3>
+  <div class="score-bar-container">
+    <div class="score-bar score-bar-fill"></div>
+  </div>
+  <div class="score-label">
+    <span style="color: var(--green); font-weight: 700;">74 / 100 — Good foundation, critical issues resolved</span>
+    <span>Updated from audit of <code style="color:var(--cyan);">ui/src/</code></span>
+  </div>
+  <p style="font-size:0.82rem; color: var(--text-dim); margin-top: 0.75rem;">
+    The app already has a dedicated mobile shell, breakpoint system, bottom tab bar, and
+    bottom-sheet drawers. The viewport accessibility violation has been resolved. Remaining gaps
+    are in touch interactions for the 3D graph, chat discoverability on mobile, sub-44px tap targets,
+    and swipe-to-dismiss wiring.
+  </p>
+</div>
+
+<!-- ========== SUMMARY ========== -->
+<div class="summary-grid">
+  <div class="summary-card green">
+    <div class="num">9</div>
+    <div class="label">Existing Strengths</div>
+  </div>
+  <div class="summary-card red">
+    <div class="num">0</div>
+    <div class="label">Critical Issues</div>
+  </div>
+  <div class="summary-card orange">
+    <div class="num">4</div>
+    <div class="label">High Priority</div>
+  </div>
+  <div class="summary-card yellow">
+    <div class="num">4</div>
+    <div class="label">Medium Priority</div>
+  </div>
+  <div class="summary-card cyan">
+    <div class="num">2</div>
+    <div class="label">Low Priority</div>
+  </div>
+</div>
+
+<!-- ========== TOC ========== -->
+<div class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#strengths">Existing Mobile Strengths</a></li>
+    <li><a href="#critical">Critical Issues (0 remaining — 1 resolved)</a></li>
+    <li><a href="#high">High-Priority Issues (4)</a></li>
+    <li><a href="#medium">Medium-Priority Issues (4)</a></li>
+    <li><a href="#low">Low-Priority Issues (2)</a></li>
+    <li><a href="#priority">Recommended Implementation Priority</a></li>
+  </ol>
+</div>
+
+<!-- ========== STRENGTHS ========== -->
+<h2 id="strengths"><span class="icon">✅</span> Existing Mobile Strengths</h2>
+<p style="color: var(--text-dim); font-size: 0.88rem; margin-bottom: 1.25rem;">
+  The app has a surprisingly strong mobile foundation. These patterns should be preserved and built upon:
+</p>
+<div class="strengths-grid">
+  <div class="strength-card">
+    <div class="title">Separate Mobile Shell</div>
+    <div class="desc">
+      <code>+layout.svelte</code> branches on <code>$isMobile</code> to render a completely
+      separate top-bar + content + tab-bar layout instead of the desktop sidebar shell.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Breakpoint System</div>
+    <div class="desc">
+      <code>use-breakpoint.ts</code> provides reactive <code>isMobile</code>,
+      <code>isTablet</code>, <code>isDesktop</code> stores with resize + orientationchange listeners.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Bottom Tab Bar</div>
+    <div class="desc">
+      <code>MobileTabBar.svelte</code> has a fixed bottom bar with Graph / Ingest / Activity tabs,
+      safe-area padding, blur background, and active-state glow indicator.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Bottom-Sheet Drawers</div>
+    <div class="desc">
+      NavDrawer, HistoryPanel, and SettingsDrawer all render as bottom sheets on mobile
+      (<code>mobile-sheet-bottom</code>) with drag handles and backdrop dismiss.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Swipe Gesture Handler</div>
+    <div class="desc">
+      <code>use-swipe.ts</code> implements touch-based swipe detection with velocity thresholding
+      — ready to wire up to drawer dismiss gestures.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Safe-Area Insets</div>
+    <div class="desc">
+      <code>env(safe-area-inset-*)</code> used in MobileTabBar, mobile topbar, and viewport
+      meta has <code>viewport-fit=cover</code> for notched devices.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Responsive Node Detail</div>
+    <div class="desc">
+      <code>node-detail-overlay</code> repositions from right-side panel (desktop) to
+      bottom-positioned card with <code>max-height: 50dvh</code> on mobile.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Full-Screen Chat Overlay</div>
+    <div class="desc">
+      Chat overlay panel expands to <code>inset: 0</code> on mobile via <code>@media (max-width: 768px)</code>,
+      taking the full screen.
+    </div>
+  </div>
+  <div class="strength-card">
+    <div class="title">Touch Optimizations</div>
+    <div class="desc">
+      <code>-webkit-tap-highlight-color: transparent</code>, <code>touch-action: manipulation</code>,
+      <code>overscroll-behavior: none</code> all set globally to reduce mobile jank.
+    </div>
+  </div>
+</div>
+
+<!-- ========== CRITICAL ========== -->
+<h2 id="critical"><span class="icon">🔴</span> Critical Issues — <span style="font-size:0.85rem; color:var(--green);">All Resolved</span></h2>
+
+<!-- Issue 1 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-critical"></div>
+    <div class="issue-title">
+      <h3>1. Chat Not Surfaced in Mobile Tab Bar (Discoverability)</h3>
+      <div class="issue-meta">
+        <span class="tag medium">Medium</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">MobileTabBar.svelte</span>
+        <span class="tag file">+page.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        Chat is accessible on mobile — the floating chat input bar at the bottom of the graph view
+        (<code>chat-input-bar</code> in <code>+page.svelte</code> line 1456) expands into a full-screen
+        chat overlay panel (<code>chatExpanded</code> state) when the user interacts with it. However:
+      </p>
+      <ul>
+        <li><code>MobileTabBar.svelte</code> only exposes <strong>Graph</strong>, <strong>Ingest</strong>, and <strong>Activity</strong> — no Chat tab</li>
+        <li>Chat is only discoverable by visiting the Graph tab and finding the floating input bar</li>
+        <li>Users on the Ingest or Activity tabs have no visible path to chat</li>
+        <li>The mobile top bar has History and Settings buttons but no Chat shortcut</li>
+      </ul>
+      <p>This is a discoverability issue, not an access issue.</p>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Add a <strong>Chat</strong> tab to <code>MobileTabBar.svelte</code> with icon <code>message</code> or <code>chat</code></li>
+        <li>Map the chat tab to the existing chat overlay panel (set <code>chatExpanded = true</code> and switch to graph view if needed)</li>
+        <li>Alternatively, add a Chat button to the mobile top bar next to History and Settings</li>
+        <li>Ensure the <code>activeTab</code> store and <code>TabId</code> type in <code>stores/ui</code> support a <code>'chat'</code> value</li>
+      </ul>
+<pre><span class="comment">// MobileTabBar.svelte — add chat tab</span>
+const tabs = [
+  { id: <span class="string">'graph'</span>, icon: <span class="string">'graph'</span>, label: <span class="string">'Graph'</span> },
+  { id: <span class="string">'chat'</span>, icon: <span class="string">'message'</span>, label: <span class="string">'Chat'</span> },  <span class="comment">// NEW</span>
+  { id: <span class="string">'ingestion'</span>, icon: <span class="string">'upload'</span>, label: <span class="string">'Ingest'</span> },
+  { id: <span class="string">'activity'</span>, icon: <span class="string">'activity'</span>, label: <span class="string">'Activity'</span> },
+];</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 2 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-critical"></div>
+    <div class="issue-title">
+      <h3>2. Viewport Meta Disables Pinch-to-Zoom (Accessibility Violation) — ✅ RESOLVED</h3>
+      <div class="issue-meta">
+        <span class="tag" style="background: rgba(0, 255, 136, 0.12); color: var(--green);">Resolved</span>
+        <span class="tag effort">Effort: S</span>
+        <span class="tag file">app.html</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        The viewport meta tag in <code>app.html</code> previously set <code>maximum-scale=1, user-scalable=no</code>,
+        which prevented users from pinch-to-zoom. This violated WCAG 2.1 Success Criterion 1.4.4
+        (Resize Text) and was considered an accessibility blocker.
+      </p>
+<pre><span class="comment">// app.html line 5 — before (fixed):</span>
+<span class="highlight">&lt;meta name="viewport" content="width=device-width, initial-scale=1, <span style="color:var(--red);">maximum-scale=1, user-scalable=no</span>, viewport-fit=cover" /&gt;</span></pre>
+    </div>
+    <div class="issue-section solution">
+      <h4>Applied Changes</h4>
+      <ul>
+        <li>Removed <code>maximum-scale=1</code> and <code>user-scalable=no</code> from the viewport meta tag</li>
+        <li>Kept <code>viewport-fit=cover</code> for safe-area support</li>
+        <li>The existing <code>touch-action: manipulation</code> in <code>app.css</code> already prevents double-tap zoom jank</li>
+      </ul>
+<pre><span class="comment">// app.html — now:</span>
+&lt;meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" /&gt;</pre>
+      <p style="font-size:0.78rem; color: var(--green);">✅ Fixed in <code>ui/src/app.html</code>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ========== HIGH ========== -->
+<h2 id="high"><span class="icon">🟠</span> High-Priority Issues</h2>
+
+<!-- Issue 3 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-high"></div>
+    <div class="issue-title">
+      <h3>3. 3D Force Graph Lacks Touch Interaction Controls</h3>
+      <div class="issue-meta">
+        <span class="tag high">High</span>
+        <span class="tag effort">Effort: L</span>
+        <span class="tag file">GraphCanvas.svelte</span>
+        <span class="tag file">GraphControls.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        <code>GraphCanvas.svelte</code> uses <code>3d-force-graph</code> (Three.js-based 3D visualization).
+        While the library supports touch gestures natively, the mobile experience has issues:
+      </p>
+      <ul>
+        <li>Node tooltip (<code>max-width: 250px</code>) could overflow narrow screens</li>
+        <li>The zoom controls (<code>GraphControls.svelte</code>) are repositioned to <code>bottom: 140px</code> on mobile — but this may overlap with the node detail card (<code>bottom: 120px</code>)</li>
+        <li>No pinch-to-zoom hint or gesture guidance for first-time mobile users</li>
+        <li>3D rendering is GPU-intensive — no fallback to a 2D graph layout on low-end mobile devices</li>
+        <li>Node label text sizes aren't scaled for mobile readability at zoom-out levels</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Add <code>$isMobile</code> detection to <code>GraphCanvas.svelte</code> and reduce node/label density on mobile</li>
+        <li>Constrain tooltip <code>max-width</code> to <code>min(250px, 80vw)</code> to prevent overflow</li>
+        <li>Add a 2D force-directed layout fallback for mobile (e.g. <code>d3-force</code> with SVG/Canvas rendering)</li>
+        <li>Move zoom controls to <code>top: 60px</code> on mobile to avoid overlap with node detail card</li>
+        <li>Increase touch hit area for node selection — use <code>nodeRelSize</code> to boost tap target size on mobile</li>
+        <li>Add a one-time "Pinch to zoom · Drag to rotate" tooltip overlay on first mobile visit</li>
+      </ul>
+<pre><span class="comment">// GraphCanvas.svelte — mobile-aware node sizing</span>
+const nodeRelSize = $isMobile ? <span class="highlight">12</span> : <span class="highlight">6</span>;
+graph.nodeRelSize(nodeRelSize)
+     .nodeLabel(node =&gt; `
+       &lt;div style="max-width: min(250px, 80vw); ..."&gt;${node.labels[0]}&lt;/div&gt;
+     `);</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 4 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-high"></div>
+    <div class="issue-title">
+      <h3>4. Sub-44px Tap Targets on Multiple Components</h3>
+      <div class="issue-meta">
+        <span class="tag high">High</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">NavDrawer.svelte</span>
+        <span class="tag file">ChatSidebar.svelte</span>
+        <span class="tag file">+page.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        Apple's Human Interface Guidelines and Material Design both recommend a minimum
+        <strong>44×44px</strong> tap target for touch interfaces. Many interactive elements
+        in the app are smaller:
+      </p>
+      <ul>
+        <li><code>ChatSidebar.svelte</code>: <code>h-7 w-7</code> (28px) buttons for new conversation and collapse toggle</li>
+        <li><code>+page.svelte</code>: <code>h-9 w-9</code> (36px) chat history button and attachment buttons</li>
+        <li><code>NavDrawer.svelte</code>: close button and nav-icon-btn are small</li>
+        <li><code>HistoryPanel.svelte</code>: close button is <code>h-7 w-7</code> (28px)</li>
+        <li>Chat message timestamps and action buttons use <code>text-[10px]</code> with <code>h-3 w-3</code> (12px) icons</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Use Tailwind responsive prefixes: <code>h-7 w-7 md:h-7 md:w-7 h-11 w-11</code> pattern — larger on mobile, compact on desktop</li>
+        <li>Or use a utility class: <code>.min-tap-target { min-width: 44px; min-height: 44px; }</code></li>
+        <li>Add invisible padding around small buttons to expand the hit area without changing visual size</li>
+        <li>Increase icon-only buttons to <code>h-11 w-11</code> (44px) on mobile, keep <code>h-7/h-8/h-9</code> on desktop</li>
+      </ul>
+<pre><span class="comment">// Pattern: larger on mobile, compact on desktop</span>
+class="flex h-11 w-11 md:h-7 md:w-7 items-center justify-center rounded-lg ..."
+
+<span class="comment">// Or via CSS in app.css</span>
+@media (max-width: 768px) {
+  button:not(.no-grow) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 5 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-high"></div>
+    <div class="issue-title">
+      <h3>5. Swipe-to-Dismiss Not Wired to Mobile Drawers</h3>
+      <div class="issue-meta">
+        <span class="tag high">High</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">use-swipe.ts</span>
+        <span class="tag file">NavDrawer.svelte</span>
+        <span class="tag file">HistoryPanel.svelte</span>
+        <span class="tag file">SettingsDrawer.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        <code>use-swipe.ts</code> implements a full swipe gesture handler with directional callbacks
+        and velocity thresholding — but it doesn't appear to be used by any of the mobile bottom
+        sheets. Mobile users can only dismiss drawers by tapping the backdrop or pressing the
+        close button or Escape key (which doesn't exist on mobile keyboards).
+      </p>
+      <p>Bottom sheets should support <strong>swipe-down-to-dismiss</strong> — a standard mobile
+        interaction pattern that users expect.</p>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Import and use <code>createSwipeHandler</code> in NavDrawer, HistoryPanel, and SettingsDrawer</li>
+        <li>Attach <code>onSwipeDown</code> to the bottom-sheet panel element to call <code>close()</code></li>
+        <li>Add visual feedback during swipe — translateY the sheet following the finger (requires <code>onTouchMove</code> tracking, currently a no-op)</li>
+        <li>Consider adding <code>onSwipeRight</code> to NavDrawer for right-edge swipe-to-open when closed</li>
+      </ul>
+<pre><span class="comment">// NavDrawer.svelte — wire up swipe-to-dismiss</span>
+import { createSwipeHandler } from '$lib/composables/use-swipe';
+
+let panelEl: HTMLDivElement;
+
+$effect(() => {
+  if (!$isMobile || !$navDrawerOpen || !panelEl) return;
+  const handler = createSwipeHandler({
+    element: panelEl,
+    onSwipeDown: () =&gt; close(),
+    threshold: 60,
+  });
+  return () =&gt; handler.destroy();
+});</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 6 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-high"></div>
+    <div class="issue-title">
+      <h3>6. Tablet Layout Falls Through to Desktop Shell</h3>
+      <div class="issue-meta">
+        <span class="tag high">High</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">+layout.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        <code>+layout.svelte</code> only branches on <code>$isMobile</code>. Tablets (768px–1023px)
+        fall through to the desktop <code>nexus-shell</code> layout, which uses a fixed floating menu
+        trigger and a sidebar drawer. On a tablet in portrait orientation, this results in:
+      </p>
+      <ul>
+        <li>No mobile tab bar — the tablet gets the desktop floating menu button instead</li>
+        <li>No bottom-sheet drawers — the tablet gets the desktop side-panel drawers</li>
+        <li>No safe-area handling (tablets in landscape with notches)</li>
+        <li>The <code>isTablet</code> and <code>isMobileOrTablet</code> stores exist in
+            <code>use-breakpoint.ts</code> but are never used in the layout</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Branch the layout on <code>$isMobileOrTablet</code> instead of just <code>$isMobile</code></li>
+        <li>Or add a three-way branch: mobile (<code>&lt;768px</code>) → mobile shell, tablet (<code>768–1023px</code>) → adaptive shell, desktop (<code>≥1024px</code>) → desktop shell</li>
+        <li>For tablet: use the mobile tab bar but allow side-by-side panels in landscape</li>
+        <li>Consider lowering the mobile breakpoint to <code>640px</code> if tablet portrait should use desktop layout</li>
+      </ul>
+<pre><span class="comment">// +layout.svelte — three-way branch</span>
+{#if $isMobile}
+  &lt;div class="nexus-mobile-shell"&gt; ... &lt;/div&gt;
+{:else if $isTablet}
+  &lt;div class="nexus-tablet-shell"&gt; ... &lt;/div&gt;
+{:else}
+  &lt;div class="nexus-shell"&gt; ... &lt;/div&gt;
+{/if}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ========== MEDIUM ========== -->
+<h2 id="medium"><span class="icon">🟡</span> Medium-Priority Issues</h2>
+
+<!-- Issue 7 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-medium"></div>
+    <div class="issue-title">
+      <h3>7. Ingestion Panel Document Table Overflow Risk</h3>
+      <div class="issue-meta">
+        <span class="tag medium">Medium</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">IngestionPanel.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        <code>IngestionPanel.svelte</code> renders a document list with file paths, status badges,
+        timestamps, and action buttons. On narrow mobile screens, these multi-column rows can
+        overflow horizontally or compress to unreadable widths. The component has no mobile-specific
+        styles or responsive breakpoints.
+      </p>
+      <ul>
+        <li>File paths (potentially long) have no truncation or wrapping strategy</li>
+        <li>Status badges + action buttons compete for horizontal space</li>
+        <li>No pagination controls visible at <code>pageSize = 20</code> — could be a long scroll on mobile</li>
+        <li>The drag-and-drop upload zone ("dragging" state) has no mobile equivalent — mobile users can't drag files</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Truncate file paths with <code>truncate</code> / <code>overflow-hidden text-ellipsis whitespace-nowrap</code></li>
+        <li>Stack status and actions vertically on mobile using <code>flex-col md:flex-row</code></li>
+        <li>Increase row padding on mobile for easier tapping: <code>py-3 md:py-2</code></li>
+        <li>Replace drag-and-drop zone with a prominent "Tap to Upload" button on mobile (use <code>$isMobile</code>)</li>
+        <li>Reduce <code>pageSize</code> to 10 on mobile to reduce scroll fatigue</li>
+        <li>Use a card-based layout on mobile instead of a row-based table</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 8 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-medium"></div>
+    <div class="issue-title">
+      <h3>8. Chat Input Bar Overlap with Mobile Tab Bar</h3>
+      <div class="issue-meta">
+        <span class="tag medium">Medium</span>
+        <span class="tag effort">Effort: S</span>
+        <span class="tag file">+page.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        The chat input bar is positioned at <code>bottom: 64px</code> on mobile to clear the 56px
+        tab bar + safe area. However:
+      </p>
+      <ul>
+        <li>The 64px offset doesn't account for <code>env(safe-area-inset-bottom)</code> which varies by device</li>
+        <li>When the keyboard opens on iOS, <code>100dvh</code> shrinks but the input bar's fixed <code>bottom: 64px</code> may leave it hidden behind the keyboard</li>
+        <li>The attachment menu and model dropdown open upward from the input bar — on mobile these could be clipped by the top of the screen</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Use <code>bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px)</code> instead of fixed <code>64px</code></li>
+        <li>Use the Visual Viewport API to handle keyboard: <code>window.visualViewport.addEventListener('resize')</code></li>
+        <li>Or use <code>position: sticky</code> within a scrolling container instead of <code>position: absolute</code></li>
+        <li>Ensure attachment menu and model dropdown use <code>placement: top</code> with max-height constraints on mobile</li>
+      </ul>
+<pre><span class="comment">// +page.svelte — safe-area-aware positioning</span>
+@media (max-width: 768px) {
+  .chat-input-bar {
+    bottom: calc(<span class="highlight">56px + env(safe-area-inset-bottom, 0px) + 8px</span>);
+    max-width: 100%;
+    padding: 0 8px;
+  }
+}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 9 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-medium"></div>
+    <div class="issue-title">
+      <h3>9. Graph Search Results Not Mobile-Optimized</h3>
+      <div class="issue-meta">
+        <span class="tag medium">Medium</span>
+        <span class="tag effort">Effort: M</span>
+        <span class="tag file">GraphSearch.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        <code>GraphSearch.svelte</code> renders search results with entity type badges, descriptions,
+        and related entity lists. On mobile:
+      </p>
+      <ul>
+        <li>Result cards may be too compact for touch interaction</li>
+        <li>No mobile-specific layout — the same desktop rendering is used</li>
+        <li>Search input may be too small (<code>pageSize = 50</code> results could create a very long scroll)</li>
+        <li>Entity type color badges use small font sizes that are hard to read on mobile</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Add mobile-specific card layout: larger padding, single-column, bigger fonts</li>
+        <li>Reduce <code>PAGE_SIZE</code> to 20 on mobile</li>
+        <li>Increase result card tap target — make the entire card clickable, not just the label</li>
+        <li>Use <code>$isMobile</code> to switch from multi-column to single-column result grid</li>
+        <li>Add a sticky search input at the top with blur-backdrop on mobile scroll</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ========== LOW ========== -->
+<h2 id="low"><span class="icon">🔵</span> Low-Priority Issues</h2>
+
+<!-- Issue 10 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-low"></div>
+    <div class="issue-title">
+      <h3>10. Small Font Sizes Below Mobile Readability Threshold</h3>
+      <div class="issue-meta">
+        <span class="tag low">Low</span>
+        <span class="tag effort">Effort: S</span>
+        <span class="tag file">+page.svelte</span>
+        <span class="tag file">app.css</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        Several text elements use font sizes at or below 10px, which is below the recommended
+        minimum of 12px for mobile readability:
+      </p>
+      <ul>
+        <li>Chat timestamps: <code>text-[10px]</code></li>
+        <li>Thinking indicator: <code>text-[10px]</code>, <code>text-[11px]</code></li>
+        <li>Mobile tab bar labels: <code>font-size: 10px</code></li>
+        <li>Various status badges and meta text: <code>text-xs</code> (12px)</li>
+      </ul>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Increase mobile tab bar labels to <code>font-size: 11px</code> minimum</li>
+        <li>Use <code>text-[11px] md:text-[10px]</code> pattern for timestamps — larger on mobile</li>
+        <li>Ensure body text is never below 14px on mobile for main content areas</li>
+        <li>Add a CSS custom property for minimum mobile font size and enforce via linter</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Issue 11 -->
+<div class="issue">
+  <div class="issue-header">
+    <div class="issue-severity severity-low"></div>
+    <div class="issue-title">
+      <h3>11. Missing Haptic Feedback for Touch Interactions</h3>
+      <div class="issue-meta">
+        <span class="tag low">Low</span>
+        <span class="tag effort">Effort: S</span>
+        <span class="tag file">MobileTabBar.svelte</span>
+        <span class="tag file">NavDrawer.svelte</span>
+      </div>
+    </div>
+  </div>
+  <div class="issue-body">
+    <div class="issue-section problem">
+      <h4>Problem</h4>
+      <p>
+        The mobile UI relies on visual feedback (active states, color changes) but provides no
+        haptic feedback for key touch interactions. Mobile users expect subtle haptic confirmation
+        when tapping tab bar items, opening drawers, or selecting graph nodes.
+      </p>
+    </div>
+    <div class="issue-section solution">
+      <h4>Recommended Changes</h4>
+      <ul>
+        <li>Add <code>navigator.vibrate(10)</code> on tab bar item taps (guarded by <code>'vibrate' in navigator</code>)</li>
+        <li>Add haptic feedback when opening/closing NavDrawer, HistoryPanel, SettingsDrawer</li>
+        <li>Add a light vibration when a graph node is selected on mobile</li>
+        <li>Create a shared <code>haptic.ts</code> utility to centralize the logic</li>
+      </ul>
+<pre><span class="comment">// lib/utils/haptic.ts</span>
+export function haptic(pattern: number | number[] = 10) {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    navigator.vibrate(pattern);
+  }
+}
+
+<span class="comment">// Usage in MobileTabBar.svelte</span>
+onclick={() =&gt; { haptic(10); activeTab.set(tab.id); }}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ========== PRIORITY TABLE ========== -->
+<h2 id="priority"><span class="icon">📋</span> Recommended Implementation Priority</h2>
+<p style="color: var(--text-dim); font-size: 0.88rem; margin-bottom: 1rem;">
+  Ordered by impact and effort. Tackle critical issues first — they affect core functionality.
+</p>
+<table class="priority-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Issue</th>
+      <th>Severity</th>
+      <th>Effort</th>
+      <th>Files</th>
+      <th>Sprint</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2</td>
+      <td>Viewport meta disables pinch-to-zoom</td>
+      <td><span class="tag" style="background: rgba(0, 255, 136, 0.12); color: var(--green);">Resolved</span></td>
+      <td><span class="tag effort">S</span></td>
+      <td><code>app.html</code></td>
+      <td>✅ Done</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>Chat not surfaced in mobile tab bar (discoverability)</td>
+      <td><span class="tag medium">Medium</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td><code>MobileTabBar.svelte</code>, <code>+page.svelte</code>, <code>stores/ui</code></td>
+      <td>2 — Next</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Sub-44px tap targets</td>
+      <td><span class="tag high">High</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td>Multiple components</td>
+      <td>2 — Next</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>Chat input bar overlap / keyboard handling</td>
+      <td><span class="tag medium">Medium</span></td>
+      <td><span class="tag effort">S</span></td>
+      <td><code>+page.svelte</code></td>
+      <td>2 — Next</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Swipe-to-dismiss not wired to drawers</td>
+      <td><span class="tag high">High</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td><code>NavDrawer</code>, <code>HistoryPanel</code>, <code>SettingsDrawer</code></td>
+      <td>2 — Next</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>Tablet falls through to desktop layout</td>
+      <td><span class="tag high">High</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td><code>+layout.svelte</code></td>
+      <td>3 — Soon</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Ingestion panel table overflow</td>
+      <td><span class="tag medium">Medium</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td><code>IngestionPanel.svelte</code></td>
+      <td>3 — Soon</td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Graph search not mobile-optimized</td>
+      <td><span class="tag medium">Medium</span></td>
+      <td><span class="tag effort">M</span></td>
+      <td><code>GraphSearch.svelte</code></td>
+      <td>3 — Soon</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>3D graph touch interaction controls</td>
+      <td><span class="tag high">High</span></td>
+      <td><span class="tag effort">L</span></td>
+      <td><code>GraphCanvas.svelte</code>, <code>GraphControls.svelte</code></td>
+      <td>4 — Later</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Small font sizes below mobile threshold</td>
+      <td><span class="tag low">Low</span></td>
+      <td><span class="tag effort">S</span></td>
+      <td>Multiple components</td>
+      <td>4 — Later</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>Missing haptic feedback</td>
+      <td><span class="tag low">Low</span></td>
+      <td><span class="tag effort">S</span></td>
+      <td><code>MobileTabBar</code>, <code>NavDrawer</code></td>
+      <td>4 — Later</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ========== FOOTER ========== -->
+<div class="footer">
+  <p>
+    Generated by auditing <code>ui/src/</code> — 31 Svelte components, global CSS, breakpoint
+    system, and layout files.<br>
+    Report file: <code>ui-mobile-report.html</code> · Open in any browser to view.
+  </p>
+</div>
+
+</body>
+</html>
