@@ -3,6 +3,9 @@
   import { conversationStore } from '$lib/stores/conversation.svelte';
   import Icon from '$lib/components/ui/Icon.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
+  import { createSwipeHandler } from '$lib/composables/use-swipe';
+
+  let panelEl: HTMLDivElement | undefined = $state();
 
   function close() {
     historyPanelOpen.set(false);
@@ -34,6 +37,16 @@
     conversationStore.switchConversation(id);
     close();
   }
+
+  $effect(() => {
+    if (!$isMobile || !$historyPanelOpen || !panelEl) return;
+    const handler = createSwipeHandler({
+      element: panelEl,
+      onSwipeDown: () => close(),
+      threshold: 60,
+    });
+    return () => handler.destroy();
+  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -43,7 +56,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="mobile-sheet-backdrop" onclick={handleBackdropClick} role="presentation">
-      <div class="mobile-sheet mobile-sheet-bottom">
+      <div bind:this={panelEl} class="mobile-sheet mobile-sheet-bottom">
         <div class="mobile-sheet-handle"><div class="mobile-sheet-handle-bar"></div></div>
         <div class="flex items-center justify-between border-b border-cyber-border/50 px-4 py-3">
           <div class="flex items-center gap-2">
@@ -54,10 +67,10 @@
           </div>
           <button
             onclick={close}
-            class="flex h-7 w-7 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 active:bg-cyber-cyan/10 active:text-cyber-cyan"
+            class="flex h-11 w-11 md:h-7 md:w-7 shrink-0 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 active:bg-cyber-cyan/10 active:text-cyber-cyan"
             aria-label="Close history"
           >
-            <Icon name="x" size={14} color="currentColor" />
+            <Icon name="x" size={20} color="currentColor" />
           </button>
         </div>
 

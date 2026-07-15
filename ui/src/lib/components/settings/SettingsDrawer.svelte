@@ -3,6 +3,9 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import SystemPromptEditor from '$lib/components/settings/SystemPromptEditor.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
+  import { createSwipeHandler } from '$lib/composables/use-swipe';
+
+  let panelEl: HTMLDivElement | undefined = $state();
 
   function close() {
     settingsDrawerOpen.set(false);
@@ -19,6 +22,16 @@
       close();
     }
   }
+
+  $effect(() => {
+    if (!$isMobile || !$settingsDrawerOpen || !panelEl) return;
+    const handler = createSwipeHandler({
+      element: panelEl,
+      onSwipeDown: () => close(),
+      threshold: 60,
+    });
+    return () => handler.destroy();
+  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -28,7 +41,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="mobile-sheet-backdrop" onclick={handleBackdropClick} role="presentation">
-      <div class="mobile-sheet mobile-sheet-bottom">
+      <div bind:this={panelEl} class="mobile-sheet mobile-sheet-bottom">
         <div class="mobile-sheet-handle"><div class="mobile-sheet-handle-bar"></div></div>
         <div class="flex items-center justify-between border-b border-cyber-border/50 px-4 py-3">
           <div class="flex items-center gap-2">
@@ -39,7 +52,7 @@
           </div>
           <button
             onclick={close}
-            class="flex h-7 w-7 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 active:bg-cyber-cyan/10 active:text-cyber-cyan"
+            class="flex h-11 w-11 md:h-7 md:w-7 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 active:bg-cyber-cyan/10 active:text-cyber-cyan"
             aria-label="Close settings"
           >
             <Icon name="x" size={14} color="currentColor" />
@@ -73,7 +86,7 @@
           </div>
           <button
             onclick={close}
-            class="flex h-7 w-7 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 hover:border-cyber-border/60 hover:text-cyber-text hover:bg-cyber-surface-2"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-cyber-border/30 bg-cyber-surface-2/50 text-cyber-text-dim transition-all duration-200 hover:border-cyber-border/60 hover:text-cyber-text hover:bg-cyber-surface-2"
             aria-label="Close settings"
           >
             <Icon name="x" size={14} color="currentColor" />

@@ -3,6 +3,9 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
+  import { createSwipeHandler } from '$lib/composables/use-swipe';
+
+  let panelEl: HTMLElement | undefined = $state();
 
   function close() {
     navDrawerOpen.set(false);
@@ -25,6 +28,16 @@
     close();
   }
 
+  $effect(() => {
+    if (!$isMobile || !$navDrawerOpen || !panelEl) return;
+    const handler = createSwipeHandler({
+      element: panelEl,
+      onSwipeDown: () => close(),
+      threshold: 60,
+    });
+    return () => handler.destroy();
+  });
+
   const tabs: { id: TabId; icon: string; label: string }[] = [
     { id: 'graph', icon: 'graph', label: 'Graph' },
     { id: 'ingestion', icon: 'upload', label: 'Ingest' },
@@ -42,7 +55,7 @@
     onclick={handleBackdropClick}
     role="presentation"
   >
-    <aside class="nav-drawer-panel {$isMobile ? 'nav-drawer-bottom' : ''}">
+    <aside bind:this={panelEl} class="nav-drawer-panel {$isMobile ? 'nav-drawer-bottom' : ''}">
       <div class="nav-drawer-header">
         <div class="flex items-center gap-2.5">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg border border-cyber-cyan/20 bg-cyber-cyan/10">
@@ -178,6 +191,13 @@
   .nav-icon-btn:active {
     background: rgba(0, 212, 255, 0.1);
     transform: scale(0.92);
+  }
+
+  @media (max-width: 768px) {
+    .nav-icon-btn {
+      width: 44px;
+      height: 44px;
+    }
   }
 
   .nav-item {

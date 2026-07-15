@@ -40,7 +40,8 @@
 <style>
   @media (max-width: 768px) {
     .graph-controls {
-      bottom: 140px;
+      bottom: auto;
+      top: 60px;
       right: 8px;
     }
     .zoom-btn {

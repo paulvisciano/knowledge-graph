@@ -5,6 +5,7 @@
   import * as THREE from 'three';
   import { onMount } from 'svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
+  import { isMobile } from '$lib/composables/use-breakpoint';
 
   const FALLBACK_COLORS = ['#5a6b80', '#7c8da5', '#4a6fa5', '#6b8f71', '#8b7ec8', '#c77d5a'];
   const TYPE_COLORS: Record<string, string> = {
@@ -1048,6 +1049,7 @@
       .nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode))
       .nodeThreeObjectExtend(false)
       .nodeVal((node: NodeObject) => getNodeSize(String(node.id)))
+      .nodeRelSize($isMobile ? 12 : 6)
       .graphData(buildGraphData());
 
     applyClusterForce();
@@ -1493,7 +1495,7 @@
 <div bind:this={container} data-testid="graph-canvas" class="w-full h-full relative overflow-hidden">
   <div
     bind:this={tooltipEl}
-    style="display:none; position:absolute; z-index:50; pointer-events:none; background:rgba(17,24,39,0.95); border:1px solid #1e2d45; border-radius:8px; padding:8px 12px; font-size:12px; color:#c8d6e5; max-width:250px; backdrop-filter:blur(8px); box-shadow:0 4px 20px rgba(0,0,0,0.5);"
+    style="display:none; position:absolute; z-index:50; pointer-events:none; background:rgba(17,24,39,0.95); border:1px solid #1e2d45; border-radius:8px; padding:8px 12px; font-size:12px; color:#c8d6e5; max-width:min(250px, 80vw); backdrop-filter:blur(8px); box-shadow:0 4px 20px rgba(0,0,0,0.5);"
   ></div>
 </div>
 

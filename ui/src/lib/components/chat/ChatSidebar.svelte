@@ -43,25 +43,25 @@
     {#if !collapsed}
       <h2 class="text-sm font-semibold uppercase tracking-wider text-cyber-text-dim">Conversations</h2>
     {/if}
-    <div class="flex gap-1">
+    <div class="flex gap-2">
       {#if !collapsed}
         <button
           onclick={onNewConversation}
-          class="flex h-7 w-7 items-center justify-center rounded border border-cyber-border text-cyber-text-dim transition-all duration-200 hover:border-cyber-cyan/50 hover:text-cyber-cyan hover:glow-cyan"
+          class="flex h-11 w-11 md:h-7 md:w-7 shrink-0 items-center justify-center rounded-lg border border-cyber-border text-cyber-text-dim transition-all duration-200 hover:border-cyber-cyan/50 hover:text-cyber-cyan hover:glow-cyan"
           title="New conversation"
         >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="h-5 w-5 md:h-4 md:w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
         </button>
       {/if}
       <button
         onclick={onToggleCollapse}
-        class="flex h-7 w-7 items-center justify-center rounded border border-cyber-border text-cyber-text-dim transition-all duration-200 hover:border-cyber-purple/50 hover:text-cyber-purple"
+        class="flex h-11 w-11 md:h-7 md:w-7 shrink-0 items-center justify-center rounded-lg border border-cyber-border text-cyber-text-dim transition-all duration-200 hover:border-cyber-purple/50 hover:text-cyber-purple"
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <svg
-          class="h-4 w-4 transition-transform duration-200 {collapsed ? 'rotate-180' : ''}"
+          class="h-5 w-5 md:h-4 md:w-4 transition-transform duration-200 {collapsed ? 'rotate-180' : ''}"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

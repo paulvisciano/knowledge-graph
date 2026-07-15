@@ -1474,11 +1474,11 @@
         <div class="flex items-center gap-2 px-4 py-3">
           <button
             onclick={() => { historyPanelOpen.update((v) => !v); }}
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
             title="Chat history"
             aria-label="Open chat history"
           >
-            <Icon name="clock" size={16} />
+            <Icon name="clock" size={18} />
           </button>
           <input
             bind:this={imageFileInput}
@@ -1506,11 +1506,11 @@
           />
           <button
             onclick={() => { chatMode = chatMode === 'kg-direct' ? 'llm-mcp' : 'kg-direct'; }}
-            class="flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium uppercase tracking-wide transition-all duration-200 {chatMode === 'kg-direct' ? 'bg-cyber-cyan/15 text-cyber-cyan ring-1 ring-cyber-cyan/30' : 'bg-cyber-surface-2/50 text-cyber-text-dim/60 hover:bg-cyber-cyan/10 hover:text-cyber-cyan'}"
+            class="flex h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium uppercase tracking-wide transition-all duration-200 {chatMode === 'kg-direct' ? 'bg-cyber-cyan/15 text-cyber-cyan ring-1 ring-cyber-cyan/30' : 'bg-cyber-surface-2/50 text-cyber-text-dim/60 hover:bg-cyber-cyan/10 hover:text-cyber-cyan'}"
             title={chatMode === 'kg-direct' ? 'Direct KG chat — LightRAG handles retrieval and generation' : 'LLM + MCP — LLM calls KG tools via MCP'}
             disabled={isActiveConversationStreaming}
           >
-            <Icon name={chatMode === 'kg-direct' ? 'database' : 'cpu'} size={14} />
+            <Icon name={chatMode === 'kg-direct' ? 'database' : 'cpu'} size={16} />
             <span class="hidden sm:inline">{chatMode === 'kg-direct' ? 'KG' : 'LLM'}</span>
           </button>
           <textarea
@@ -1819,11 +1819,11 @@
           <div class="flex items-center gap-2">
             <button
               onclick={() => { historyPanelOpen.update((v) => !v); }}
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
               title="Chat history"
               aria-label="Open chat history"
             >
-              <Icon name="clock" size={16} />
+              <Icon name="clock" size={18} />
             </button>
             <AttachmentMenu
               disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
