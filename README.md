@@ -2,38 +2,26 @@
 
 Personal knowledge graph stack: LightRAG + local LLMs + custom UI.
 
-## Structure
-
-```
-knowledge-graph/
-├── lightrag/          # LightRAG source (git submodule)
-├── models/            # symlink → ~/models (GGUF model files)
-├── scripts/           # llama-server start/stop scripts
-├── ui/                # Custom frontend (TODO)
-├── secrets/           # SSL certs, API keys (not committed)
-├── docker-compose.yml # Orchestrates all Docker services
-├── .env.example       # Environment template
-└── .env               # Local config (not committed)
-```
-
 ## Quick Start
 
-1. Copy and customize environment:
-   ```sh
-   cp .env.example .env
-   ```
+```sh
+# 1. Clone with submodules
+git clone --recurse-submodules https://github.com/paulvisciano/knowledge-graph.git
+cd knowledge-graph
 
-2. Start llama-servers on host:
-   ```sh
-   ./scripts/start-llama-servers.sh
-   ```
+# 2. Configure
+cp .env.example .env
+cp lightrag/env.example lightrag/.env
 
-3. Start LightRAG:
-   ```sh
-   docker compose up -d
-   ```
+# 3. Start llama-servers on host (Metal GPU)
+./scripts/start-llama-servers.sh
 
-4. Open http://localhost:9621
+# 4. Start Docker services
+docker compose up -d --build
+
+# 5. Open Nexus UI
+open http://localhost:3000
+```
 
 ## Stop Everything
 

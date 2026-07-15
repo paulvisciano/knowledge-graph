@@ -144,7 +144,134 @@
 <body>
 
 <h1>Knowledge Graph</h1>
-<p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + image processing + custom UI</p>
+<p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + real-time image processing + 3D graph UI</p>
+
+<!-- ─── Getting Started ──────────────────────────────────────────────────── -->
+<h2>Getting Started</h2>
+
+<div class="card accent" style="margin-bottom:1rem">
+  <p>Set up the full stack on a new machine. <strong>Prerequisites:</strong> macOS with Apple Silicon, <a href="https://docs.docker.com/desktop/install/mac-install/" target="_blank" rel="noopener">Docker Desktop</a>, <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a>, and ~8 GB free disk space for model files.</p>
+</div>
+
+<h3>1. Clone &amp; Configure</h3>
+<div class="card">
+<pre><span class="muted"># Clone with submodules (includes patched LightRAG fork)</span>
+git clone --recurse-submodules https://github.com/paulvisciano/knowledge-graph.git
+cd knowledge-graph
+
+<span class="muted"># If you already cloned without --recurse-submodules:</span>
+git submodule update --init --recursive
+
+<span class="muted"># Copy the environment template (edit paths/ports if needed)</span>
+cp .env.example .env
+
+<span class="muted"># Copy the LightRAG config template</span>
+cp lightrag/env.example lightrag/.env</pre>
+</div>
+
+<h3>2. Download Model Files</h3>
+<div class="card">
+  <p>You need three GGUF model files. Place them under <code>~/models/</code> (or set <code>MODEL_DIR</code> in <code>.env</code>):</p>
+  <table>
+    <tr><th>Model</th><th>File</th><th>Size</th><th>Source</th></tr>
+    <tr><td>LLM (Gemma 4 12B)</td><td><code>Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</code></td><td>~6.9 GB</td><td>HuggingFace / ggml-org</td></tr>
+    <tr><td>Embedding (nomic-embed-v2)</td><td><code>nomic-embed-text-v2-moe.Q6_K.gguf</code></td><td>~379 MB</td><td>HuggingFace / ggml-org</td></tr>
+    <tr><td>Reranker (bge-reranker-v2-m3)</td><td><code>bge-reranker-v2-m3-Q4_K_M.gguf</code></td><td>~418 MB</td><td>HuggingFace / ggml-org</td></tr>
+  </table>
+  <p style="margin-top:0.5rem">Expected directory layout:</p>
+<pre><span class="muted">~/models/</span>
+<span class="muted">├── gemma4-12b-obliterated/</span>
+<span class="muted">│   └── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</span>
+<span class="muted">├── nomic-embed-v2/</span>
+<span class="muted">│   └── nomic-embed-text-v2-moe.Q6_K.gguf</span>
+<span class="muted">└── bge-reranker-v2-m3/</span>
+<span class="muted">    └── bge-reranker-v2-m3-Q4_K_M.gguf</span></pre>
+  <p style="margin-top:0.5rem"><strong>Optional:</strong> For VLM (vision) support, also download the multimodal projection file:</p>
+<pre><span class="muted">~/models/gemma4-12b-qat/</span>
+<span class="muted">└── mmproj-BF16.gguf</span></pre>
+  <p class="muted" style="margin-top:0.5rem">The <code>models/</code> directory in the repo is gitignored. The start scripts expect <code>~/models/</code> by default — adjust <code>MODEL_DIR</code> in <code>.env</code> if your models live elsewhere.</p>
+</div>
+
+<h3>3. Install llama.cpp (Host)</h3>
+<div class="card">
+<pre><span class="muted"># Install llama.cpp via Homebrew (provides llama-server)</span>
+brew install llama.cpp
+
+<span class="muted"># Verify</span>
+llama-server --version</pre>
+</div>
+
+<h3>4. Start the LLM Servers (Host — Metal GPU)</h3>
+<div class="card">
+<p>The LLM, embedding, and reranker servers run <strong>natively on macOS</strong> for Metal GPU acceleration. Docker containers connect to them via <code>host.docker.internal</code>.</p>
+<pre><span class="muted"># Starts LLM (:8080), embedding (:8081), reranker (:8082)</span>
+./scripts/start-llama-servers.sh</pre>
+  <p class="muted" style="margin-top:0.5rem">Wait for all three ports to report healthy (the script auto-checks). First startup loads model weights and takes ~30s.</p>
+</div>
+
+<h3>5. Start Docker Services</h3>
+<div class="card">
+<pre><span class="muted"># Build and start everything (LightRAG, PostgreSQL, API, Nexus UI)</span>
+docker compose up -d --build
+
+<span class="muted"># Watch logs</span>
+docker compose logs -f
+
+<span class="muted"># Check service health</span>
+docker compose ps</pre>
+  <p style="margin-top:0.5rem">Services start in dependency order: PostgreSQL → LightRAG → API → Nexus. First build takes a few minutes for the LightRAG image (Python + Rust deps).</p>
+</div>
+
+<h3>6. Verify Everything Works</h3>
+<div class="card">
+<pre><span class="muted"># LightRAG health</span>
+curl -sf http://localhost:9621/health | python3 -m json.tool
+
+<span class="muted"># API backend health</span>
+curl -sf http://localhost:8000/health | python3 -m json.tool
+
+<span class="muted"># LLM (should return model info)</span>
+curl -sf http://localhost:8080/health | python3 -m json.tool
+
+<span class="muted"># Open Nexus UI (port 3000 in Docker, 5180 in dev mode)</span>
+open http://localhost:3000
+
+<span class="muted"># Or open LightRAG's built-in WebUI</span>
+open http://localhost:9621</pre>
+</div>
+
+<h3>7. Process Your First Image</h3>
+<div class="card">
+<pre><span class="muted"># Via the API (SSE stream — watch real-time progress)</span>
+curl -N -X POST http://localhost:8000/images/process \
+  -F "file=@photo.jpg"
+
+<span class="muted"># Or via the Nexus UI — drag &amp; drop onto the chat input</span></pre>
+</div>
+
+<h3>Stopping Everything</h3>
+<div class="card warning">
+<pre><span class="muted"># Stops llama-servers + Docker containers</span>
+./scripts/stop-all.sh
+
+<span class="muted"># Or just Docker</span>
+docker compose down</pre>
+</div>
+
+<h3>Troubleshooting</h3>
+<div class="card">
+  <table>
+    <tr><th>Problem</th><th>Solution</th></tr>
+    <tr><td><code>llama-server not found</code></td><td>Run <code>brew install llama.cpp</code></td></tr>
+    <tr><td><code>Model file not found</code></td><td>Check <code>MODEL_DIR</code> in <code>.env</code> matches your model path</td></tr>
+    <tr><td>LightRAG container unhealthy</td><td><code>docker compose logs lightrag</code> — usually a PostgreSQL connection issue. Ensure postgres is healthy first.</td></tr>
+    <tr><td>API container unhealthy</td><td><code>docker compose logs api</code> — check that <code>host.docker.internal:8080</code> is reachable (llama-servers must be running on host)</td></tr>
+    <tr><td>Nexus UI shows blank/errors</td><td><code>docker compose logs nexus</code> — nginx proxy needs both lightrag and api services healthy</td></tr>
+    <tr><td>Port already in use</td><td>Change the port in <code>.env</code> (<code>LIGHTRAG_PORT</code>, <code>API_PORT</code>, <code>NEXUS_PORT</code>, <code>LLM_PORT</code>, etc.)</td></tr>
+    <tr><td>PostgreSQL connection refused</td><td><code>docker compose restart postgres</code> — check <code>POSTGRES_*</code> vars in <code>.env</code></td></tr>
+    <tr><td>DeepFace weights download fails</td><td>First face recognition run downloads ~200 MB of model weights. Ensure internet access on first run. Weights are cached in a Docker volume.</td></tr>
+  </table>
+</div>
 
 <!-- ─── Status Dashboard ────────────────────────────────────────────────── -->
 <h2>Current Status</h2>
@@ -170,16 +297,15 @@
     <span class="badge green">Phase 3 — Complete</span>
     <strong>Nexus UI + Docker Integration</strong>
   </div>
-  <p style="margin-top:0.5rem">Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization, image ingestion with real-time SSE, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+  <p style="margin-top:0.5rem">Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization with photo textures, image ingestion with real-time SSE pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
 </div>
 
 <div class="card accent" style="margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:0.75rem">
-    <span class="badge blue">Phase 4 — In Progress</span>
-    <strong>Connected Knowledge Graph</strong>
+    <span class="badge green">Phase 4 — Complete</span>
+    <strong>Connected Knowledge Graph + Real-Time UI</strong>
   </div>
-  <p style="margin-top:0.5rem">Photo node as central hub. EXIF entities (Date, Location, Camera) linked via <code>taken_on</code>/<code>taken_at</code>/<code>taken_with</code> edges. Visual entities linked via <code>appears_in</code> edges. Combined VLM+metadata document. Context-aware VLM prompt. Day-level Date nodes. Deduplication against existing labels. 18 connected nodes, 0 isolated, no duplicates.</p>
-  <p class="muted" style="margin-top:0.25rem"><strong>Blocked:</strong> 409 stale index after DELETE (clean-slate only). <strong>Remaining:</strong> Automate post-processing linking, real-time progressive UI.</p>
+  <p style="margin-top:0.5rem">Photo nodes rendered as 3D textured planes in the graph. Person nodes rendered as oval face crops. Real-time SSE pipeline streams processing progress (EXIF extraction → entity creation → VLM description → face recognition) to the UI with live graph updates. Photo images served from the API and displayed as in-graph textures. Persistent job queue for reliable image processing. Document deletion cleans up orphaned Photo/EXIF entities. Image nodes spaced apart with per-type force repulsion. Cursor-centered 3D graph zoom.</p>
 </div>
 
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
@@ -215,19 +341,28 @@
     <span class="badge green">Phase 3 ✓</span>
     <strong style="font-size:1.1rem">Nexus UI + Docker Integration</strong>
   </div>
-  <p>Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization (3d-force-graph + Three.js), image ingestion with real-time SSE, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> — chat + graph exploration + image ingestion + MCP tool calls.</p>
+  <p>Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization (3d-force-graph + Three.js) with real-time SSE image processing pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:5180</code> — chat + graph exploration + image ingestion + job tracking + MCP tool calls.</p>
+</div>
+
+  <div class="card success" style="margin-bottom:0.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
+    <span class="badge green">Phase 4 ✓</span>
+    <strong style="font-size:1.1rem">Enhanced Image Intelligence + Real-Time UI</strong>
+  </div>
+  <p>Connected knowledge graph with Photo node as central hub. EXIF metadata (Date, Location, Camera) and VLM-extracted visual entities (people, objects, scenes) all link to a single <code>filename (Photo)</code> node via typed edges (<code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code>, <code>appears_in</code>). Photo nodes rendered as 3D textured planes. Person nodes rendered as oval face crops with VLM face descriptions for accurate person-to-face mapping. Real-time SSE pipeline streams every processing stage to the UI with live graph updates. Persistent job queue for reliable image processing. Document deletion cleans up orphaned Photo/EXIF entities. Image nodes spaced apart with per-type force repulsion. Cursor-centered 3D graph zoom.</p>
+  <p style="margin-top:0.5rem"><strong>Done:</strong> Combined VLM+metadata document ✓ — Context-aware VLM prompt (EXIF metadata prepended) ✓ — EXIF entity injection (<code>inject_exif_relations()</code>) ✓ — Visual entity linking (<code>link_exif_to_visual_entities()</code>) ✓ — Day-level Date nodes ✓ — Deduplication (fuzzy matching against existing labels) ✓ — URL encoding fix for labels with spaces ✓ — 400/409 duplicate handling ✓ — <code>POST /images/link-exif-entities</code> endpoint ✓ — SSE real-time pipeline with progressive graph updates ✓ — Photo image serving endpoint ✓ — Photo textures in 3D graph ✓ — PhotoOverlay with EXIF details ✓ — Persistent job queue ✓ — Document deletion cleanup ✓ — Photo node spacing (charge/link/cluster force tuning) ✓ — Face crop endpoint ✓ — Face mapping (<code>face_mapping.json</code>) ✓ — Person nodes as oval face crops in 3D graph ✓ — VLM face descriptions for person-to-face matching ✓ — Cursor-centered zoom ✓</p>
+  <p style="margin-top:0.5rem"><strong>Remaining:</strong> Object detection — OCR — Scene classification — Multi-photo queries ("find all photos with Paul near the beach")</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Real-time graph UI that shows entities appearing as they're processed. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
 </div>
 
   <div class="card" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
-    <span class="badge blue">Phase 4 — In Progress</span>
-    <strong style="font-size:1.1rem">Enhanced Image Intelligence</strong>
+    <span class="badge blue">Phase 5 — Planned</span>
+    <strong style="font-size:1.1rem">Advanced Image Intelligence</strong>
   </div>
-  <p>Connected knowledge graph with Photo node as central hub. EXIF metadata (Date, Location, Camera) and VLM-extracted visual entities (people, objects, scenes) all link to a single <code>filename (Photo)</code> node via typed edges (<code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code>, <code>appears_in</code>). Date nodes use day-level granularity so same-day photos link together. Deduplication prevents "Saint Petersburg" vs "Saint Petersburg, Florida, US (Location)" duplicates.</p>
-  <p style="margin-top:0.5rem"><strong>Done:</strong> Combined VLM+metadata document ✓ — Context-aware VLM prompt (EXIF metadata prepended) ✓ — EXIF entity injection (<code>inject_exif_relations()</code>) ✓ — Visual entity linking (<code>link_exif_to_visual_entities()</code>) ✓ — Day-level Date nodes ✓ — Deduplication (fuzzy matching against existing labels) ✓ — URL encoding fix for labels with spaces ✓ — 400/409 duplicate handling ✓ — <code>POST /images/link-exif-entities</code> endpoint ✓</p>
-  <p style="margin-top:0.5rem"><strong>Remaining:</strong> Automate <code>link_exif_to_visual_entities</code> call after LightRAG processing completes (currently manual endpoint) — Fix 409 stale index issue after <code>DELETE /documents</code> (EXIF entities not created on clean slate) — Real-time progressive UI (image → EXIF nodes → visual entities) — Face clustering (batch face_index.py) — Object detection, OCR, scene classification</p>
-  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Real-time graph UI that shows entities appearing as they're processed. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
+  <p>Object detection, OCR, scene classification, and multi-photo graph queries. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Cross-photo entity resolution, multi-modal search, and richer visual understanding.</p>
 </div>
 
 <!-- ─── Architecture ────────────────────────────────────────────────────── -->
@@ -236,20 +371,25 @@
 <div class="card accent">
 <pre>
 <span class="muted">Browser</span>
-  <span class="arrow">→</span> <span class="badge blue">Nexus :3000</span> <span class="muted">SvelteKit behind nginx</span>
+  <span class="arrow">→</span> <span class="badge blue">Nexus :5180</span> <span class="muted">SvelteKit behind nginx</span>
   <span class="muted">  ├─ /api/kg/    → API Backend</span>
   <span class="muted">  ├─ /api/lightrag/ → LightRAG</span>
   <span class="muted">  ├─ /v1/, /health, /slots → llama-server</span>
   <span class="muted">  ├─ /mcp          → API Backend (MCP)</span>
   <span class="muted">  └─ /api/sync/    → API Backend (WebSocket)</span>
         <span class="arrow">↓</span>
-  <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE</span>
-  <span class="muted">  ├─ EXIF extraction → reverse geocode</span>
+  <span class="badge green">API Backend :8000</span> <span class="muted">FastAPI + SSE + Job Queue</span>
+  <span class="muted">  ├─ Job queue (SQLite) with persistent status tracking</span>
+  <span class="muted">  ├─ SSE progress streaming (EXIF → entities → VLM → faces)</span>
+   <span class="muted">  ├─ Photo image serving (GET /images/photo/:filename)</span>
+   <span class="muted">  ├─ Face crop serving (GET /images/face-crop/:person)</span>
+   <span class="muted">  ├─ Face mapping (face_mapping.json → person-to-face matching)</span>
+   <span class="muted">  ├─ EXIF extraction → reverse geocode</span>
   <span class="muted">  ├─ Face recognition (DeepFace)</span>
   <span class="muted">  ├─ VLM describe image (with EXIF context) → combined text insert</span>
   <span class="muted">  ├─ EXIF entity injection (Date, Location, Camera nodes + edges)</span>
   <span class="muted">  ├─ Visual entity linking (appears_in edges to Photo node)</span>
-  <span class="muted">  └─ SSE progress streaming</span>
+  <span class="muted">  └─ Document deletion cleanup (orphaned Photo/EXIF entities)</span>
         <span class="arrow">↓</span> <span class="muted">(single combined document + graph entity injection)</span>
   <span class="badge green">LightRAG API + WebUI</span> <span class="muted">(localhost:9621)</span>
   <span class="muted">  ├─ Combined VLM+metadata text → entity extraction</span>
@@ -282,7 +422,7 @@
   <tr>
     <td><span class="badge blue">Nexus UI</span></td>
     <td>Docker</td>
-    <td><code>3000</code></td>
+    <td><code>5180</code></td>
     <td>SvelteKit + nginx</td>
     <td>~200 MB image</td>
   </tr>
@@ -290,7 +430,7 @@
     <td><span class="badge blue">API Backend</span></td>
     <td>Docker</td>
     <td><code>8000</code> (internal)</td>
-    <td>FastAPI + processors</td>
+    <td>FastAPI + SSE + Job Queue</td>
     <td>~50 MB deps</td>
   </tr>
   <tr>
@@ -372,10 +512,11 @@ knowledge-graph/
 │   ├── requirements.txt    <span class="muted"># Python dependencies</span>
 │   ├── routes/
 │   │   ├── health.py       <span class="muted"># GET /health</span>
-│   │   └── images.py        <span class="muted"># POST /images/process (SSE), /process-json, /link-exif-entities</span>
+│   │   └── images.py        <span class="muted"># POST /images/process (SSE), /process-json, /link-exif-entities, /photo/:filename, /face-crop/:person, /jobs, DELETE /photo-entities</span>
 │   └── services/
-│       └── processor.py     <span class="muted"># EXIF → faces → VLM (context-aware) → combined doc insert → EXIF entity injection → visual entity linking</span>
-├── lightrag/               <span class="muted"># LightRAG source (local build, git repo)</span>
+│       ├── processor.py     <span class="muted"># EXIF → faces → VLM (context-aware) → combined doc insert → EXIF entity injection → visual entity linking</span>
+│       └── job_manager.py   <span class="muted"># SQLite-backed persistent job queue with status tracking and event streaming</span>
+├── lightrag/               <span class="muted"># LightRAG source (git submodule — fork with patches)</span>
 │   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
 │   ├── lightrag/            <span class="muted"># Python package source</span>
@@ -389,6 +530,7 @@ knowledge-graph/
 │   ├── stop-all.sh              <span class="muted"># stop everything</span>
 │   └── process_image.py        <span class="muted"># CLI: EXIF → faces → LightRAG upload + metadata</span>
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
+├── face_crops/              <span class="muted"># extracted face crops for person nodes (gitignored)</span>
 ├── inputs/                  <span class="muted"># images to process</span>
 ├── ui/                     <span class="muted"># Nexus SvelteKit frontend</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build (bun → vite → nginx)</span>
@@ -396,8 +538,8 @@ knowledge-graph/
 │   ├── src/
 │   │   ├── routes/          <span class="muted"># SvelteKit pages</span>
 │   │   └── lib/
-│   │       ├── components/   <span class="muted"># chat, graph, ingestion, settings, MCP</span>
-│   │       ├── services/    <span class="muted"># lightrag, llama, kg-api, mcp, sync clients</span>
+│   │       ├── components/   <span class="muted"># chat, graph (3D photo planes, face crops, cluster forces, PhotoOverlay), ingestion, settings, MCP</span>
+│   │       ├── services/    <span class="muted"># lightrag, llama, kg-api (job queue + SSE + face crops), mcp, sync clients</span>
 │   │       └── constants.ts <span class="muted"># API routes & types</span>
 │   └── static/
 ├── docker/                  <span class="muted"># nginx config for production reverse proxy</span>
@@ -438,7 +580,7 @@ curl -X POST http://localhost:8000/images/process-json \
   -F "file=@photo.jpg"
 
 <span class="muted"># 9. Open Nexus UI</span>
-open http://localhost:3000
+open http://localhost:5180
 
 <span class="muted"># Or open LightRAG built-in WebUI</span>
 open http://localhost:9621
@@ -488,8 +630,12 @@ open http://localhost:9621
     <p>macOS ships Python 3.9 which has a TensorFlow mutex crash. The project uses a <code>.venv/</code> with Python 3.11 (installed via Homebrew) where TensorFlow 2.21 + DeepFace work correctly. <code>start-api.sh</code> auto-detects the venv.</p>
   </div>
   <div class="card">
+    <h3>Why a persistent job queue?</h3>
+    <p>Image processing involves multiple stages (EXIF extraction → entity creation → VLM description → face recognition) that can take 30+ seconds. A SQLite-backed job queue ensures processing state survives server restarts, prevents duplicate processing, and provides a clean API for tracking progress via SSE. Jobs are created on upload and their status and events are persisted, so clients can reconnect and resume monitoring.</p>
+  </div>
+  <div class="card">
     <h3>Why nginx reverse proxy?</h3>
-    <p>In production, nginx serves the static SvelteKit build and proxies all API calls — LightRAG, KG API, llama-server, MCP, and WebSocket sync — through a single port (<code>:3000</code>). No CORS issues, no mixed content, clean routing. In dev, Vite's proxy handles the same routes.</p>
+    <p>In production, nginx serves the static SvelteKit build and proxies all API calls — LightRAG, KG API, llama-server, MCP, and WebSocket sync — through a single port (<code>:5180</code>). No CORS issues, no mixed content, clean routing. In dev, Vite's proxy handles the same routes.</p>
   </div>
 </div>
 
@@ -497,15 +643,18 @@ open http://localhost:9621
 <h2>Endpoints</h2>
 <table>
   <tr><th>Service</th><th>URL</th><th>Notes</th></tr>
-  <tr><td>Nexus UI</td><td><a href="http://localhost:3000">http://localhost:3000</a></td><td>Custom SvelteKit frontend (chat, graph, ingestion)</td></tr>
+  <tr><td>Nexus UI</td><td><a href="http://localhost:5180">http://localhost:5180</a></td><td>Custom SvelteKit frontend (chat, 3D graph with photo textures & face crops, drag-drop ingestion, job tracking & resumption, MCP)</td></tr>
   <tr><td>LightRAG WebUI</td><td><a href="http://localhost:9621">http://localhost:9621</a></td><td>Built-in React UI</td></tr>
   <tr><td>LightRAG API Docs</td><td><a href="http://localhost:9621/docs">http://localhost:9621/docs</a></td><td>Swagger UI</td></tr>
   <tr><td>LightRAG Health</td><td><a href="http://localhost:9621/health">http://localhost:9621/health</a></td><td>JSON status</td></tr>
   <tr><td>LLM</td><td><code>http://localhost:8080</code></td><td>OpenAI-compatible</td></tr>
   <tr><td>Embedding</td><td><code>http://localhost:8081</code></td><td>OpenAI-compatible</td></tr>
   <tr><td>Reranker</td><td><code>http://localhost:8082/v1/rerank</code></td><td>Jina-compatible</td></tr>
-  <tr><td>API Backend (SSE)</td><td><a href="http://localhost:8000/images/health">http://localhost:8000</a></td><td>Image processing + real-time SSE</td></tr>
+  <tr><td>API Backend (SSE)</td><td><a href="http://localhost:8000/images/health">http://localhost:8000</a></td><td>Image processing + real-time SSE + job queue</td></tr>
   <tr><td>API Backend Docs</td><td><a href="http://localhost:8000/docs">http://localhost:8000/docs</a></td><td>Swagger UI</td></tr>
+  <tr><td>Photo Images</td><td><code>GET /images/photo/:filename</code></td><td>Serve processed photo images</td></tr>
+  <tr><td>Face Crops</td><td><code>GET /images/face-crop/:person</code></td><td>Serve face crop images for person nodes</td></tr>
+  <tr><td>Job Queue</td><td><code>GET /images/jobs</code>, <code>GET /images/jobs/:id</code></td><td>Persistent job status tracking</td></tr>
 </table>
 
 <!-- ─── Changelog ────────────────────────────────────────────────────────── -->
@@ -534,6 +683,26 @@ open http://localhost:9621
     <tr><td>2025-07-08</td><td>Fixed 400 Bad Request handling: LightRAG returns 400 (not just 409) for duplicate entity/relation creation. Updated all URLError handlers to treat both 400 and 409 as "already exists" and continue.</td></tr>
     <tr><td>2025-07-08</td><td>Added <code>POST /images/link-exif-entities</code> endpoint: triggers <code>link_exif_to_visual_entities()</code> after LightRAG finishes processing a document. Required because LightRAG entity extraction is asynchronous.</td></tr>
     <tr><td>2025-07-08</td><td>Known issue: 409 stale index after <code>DELETE /documents</code>. LightRAG's entity index returns 409 Conflict for entities that don't actually exist after a graph clear. EXIF entities must be re-created after processing completes or via the <code>/link-exif-entities</code> endpoint. Only affects clean-slate testing; production (no clears) works fine.</td></tr>
+    <tr><td>2025-07-08</td><td>Fixed stale LightRAG index bug causing orphan nodes in knowledge graph after document deletion.</td></tr>
+    <tr><td>2025-07-09</td><td>Built complete SSE pipeline for real-time image processing: client uploads image → API creates job → streams EXIF extraction, entity creation, VLM description, and face recognition stages via SSE → UI updates graph in real-time as entities appear. Added graph store upsert methods, image processing status store, and PhotoOverlay component with scanning UI.</td></tr>
+    <tr><td>2025-07-09</td><td>Redesigned PhotoOverlay as centered dark-themed card with EXIF details (camera, location, date, file info). Replaced per-photo RAF-based overlay with single hover/select info card.</td></tr>
+    <tr><td>2025-07-09</td><td>Added photo cluster isolation: selecting a Photo node shows only its connected entities. Camera focus on new photos. EXIF data capture from SSE events tracked in store.</td></tr>
+    <tr><td>2025-07-09</td><td>Rendered photo nodes as 3D textured planes (never spheres) in the graph. Photo images loaded from API and mapped to node materials with correct sRGB color space.</td></tr>
+    <tr><td>2025-07-09</td><td>Wired SSE image processing pipeline into chat UI with real-time graph updates. New nodes and edges appear progressively as processing stages complete.</td></tr>
+    <tr><td>2025-07-10</td><td>Added persistent job queue (SQLite-backed) for image processing. Jobs survive server restarts. Endpoints: <code>POST /images/jobs</code>, <code>GET /images/jobs</code>, <code>GET /images/jobs/:id</code>, <code>GET /images/jobs/:id/events</code>.</td></tr>
+    <tr><td>2025-07-10</td><td>Fixed SSE pipeline crash: entities now emitted before face recognition starts, preventing JSON serialization errors. Event data properly serialized as JSONB in PostgreSQL.</td></tr>
+    <tr><td>2025-07-10</td><td>Added <code>DELETE /images/photo-entities</code> endpoint and wired document deletion to clean up orphaned Photo/EXIF entities from the knowledge graph.</td></tr>
+    <tr><td>2025-07-10</td><td>Added photo image serving endpoint (<code>GET /images/photo/:filename</code>) and fetch-on-load logic to display photo textures in the 3D graph.</td></tr>
+    <tr><td>2025-07-10</td><td>Tuned 3D graph spacing for image nodes: 5x charge repulsion, 3x link distance, +25 orbit radius offset, and replaced auto-focusNode on new photos with fit-to-view to prevent zoom-in on load.</td></tr>
+    <tr><td>2025-07-10</td><td>Added Playwright E2E test suite for image processing workflow. Exposed API container port 8000 in docker-compose for direct testing.</td></tr>
+    <tr><td>2025-07-10</td><td>Increased spacing around image nodes: 5x charge repulsion, 3x link distance, +25 orbit radius offset. Replaced auto-focusNode on new photos with fit-to-view to prevent zoom-in on load.</td></tr>
+    <tr><td>2025-07-10</td><td>Added <code>face_crops/</code> to .gitignore for extracted face crop images.</td></tr>
+    <tr><td>2025-07-10</td><td>Added face crop endpoint (<code>GET /images/face-crop/:person</code>) to serve person face images from detected faces. Routes through KG API instead of LightRAG for face crop serving.</td></tr>
+    <tr><td>2025-07-10</td><td>Rendered person nodes as oval face crops in 3D graph. Face images loaded from API face crop endpoint and applied as textures to elliptical node meshes.</td></tr>
+    <tr><td>2025-07-10</td><td>Fixed person-to-face mapping using position-based sorting and <code>face_mapping.json</code>. Faces sorted by area descending to match VLM salience ordering.</td></tr>
+    <tr><td>2025-07-11</td><td>Implemented cursor-centered zoom for 3D graph — zoom now focuses on the point under the cursor rather than the center of the viewport.</td></tr>
+    <tr><td>2025-07-11</td><td>Used VLM face descriptions for accurate person-to-face matching. VLM describes each face in the image (position, appearance), which is matched to DeepFace-identified person names for correct person-to-face mapping.</td></tr>
+    <tr><td>2025-07-13</td><td>Added KG API client (<code>kg-api-client.ts</code>) with job management methods: <code>createJob()</code>, <code>listJobs()</code>, <code>getJob()</code>, <code>streamJobEvents()</code>. Added drag-and-drop image upload to chat input. Added job resumption on page load (<code>resumeInProgressJobs()</code>). Fixed event data serialization in job manager (JSONB cast, string event data handling).</td></tr>
   </table>
 </div>
 
