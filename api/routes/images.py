@@ -470,6 +470,36 @@ async def get_photo(filename: str):
     return FileResponse(str(file_path))
 
 
+@router.get("/exif/{file_source:path}")
+async def get_photo_exif(file_source: str):
+    """Return persisted EXIF metadata for a photo, keyed by file_source."""
+    exif = await db_module.get_photo_exif(file_source)
+    if not exif:
+        raise HTTPException(status_code=404, detail=f"No EXIF data found for {file_source}")
+
+    key_map = {
+        "camera": "camera",
+        "date_taken_friendly": "date_taken_friendly",
+        "location": "location",
+        "lens": "lens",
+        "f_number": "f_number",
+        "iso": "iso",
+        "focal_length_mm": "focal_length",
+        "exposure_time": "exposure_time",
+        "image_width": "image_width",
+        "image_height": "image_height",
+        "flash": "flash",
+        "white_balance": "white_balance",
+        "orientation": "orientation",
+    }
+    mapped: dict[str, Any] = {}
+    for backend_key, frontend_key in key_map.items():
+        val = exif.get(backend_key)
+        if val is not None and val != "":
+            mapped[frontend_key] = val
+    return mapped
+
+
 @router.get("/faces/crops/{name:path}")
 async def get_face_crop(name: str):
     """Serve a cropped face image for a person entity.

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { graphStore } from '$lib/stores/graph.svelte';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
+  import { API } from '$lib/constants';
   import type GraphCanvas from './GraphCanvas.svelte';
 
   let {
@@ -91,12 +92,93 @@
   $effect(() => {
     return () => stopTracking();
   });
+
+  const EXIF_DISPLAY_KEYS: Record<string, string> = {
+    camera: 'Camera',
+    date_taken_friendly: 'Date',
+    location: 'Location',
+    lens: 'Lens',
+    f_number: 'f/',
+    iso: 'ISO',
+    focal_length: 'Focal Length',
+    exposure_time: 'Exposure',
+    image_width: 'Width',
+    image_height: 'Height',
+    flash: 'Flash',
+    white_balance: 'White Balance',
+    orientation: 'Orientation',
+  };
+
+  const exifCache = new Map<string, { label: string; value: string }[] | null>();
+  let fetchedExifNodeId = $state<string | null>(null);
+  let fetchedExifRows = $state<{ label: string; value: string }[]>([]);
+
+  function formatExifRows(exif: Record<string, unknown>): { label: string; value: string }[] {
+    const rows: { label: string; value: string }[] = [];
+    for (const [key, displayLabel] of Object.entries(EXIF_DISPLAY_KEYS)) {
+      const val = exif[key];
+      if (val != null && val !== '') {
+        const strVal = String(val);
+        if (key === 'f_number') {
+          rows.push({ label: displayLabel, value: `f/${strVal}` });
+        } else {
+          rows.push({ label: displayLabel, value: strVal });
+        }
+      }
+    }
+    return rows;
+  }
+
+  async function fetchExifForNode(nodeId: string) {
+    if (exifCache.has(nodeId)) {
+      fetchedExifRows = exifCache.get(nodeId) ?? [];
+      fetchedExifNodeId = nodeId;
+      return;
+    }
+
+    let fileSource: string | undefined;
+    if (graphCanvas) {
+      const graph = graphCanvas.getGraph();
+      const data = graph?.graphData();
+      const node = (data?.nodes as { id: string | number; properties?: Record<string, unknown> }[] | undefined)
+        ?.find(n => String(n.id) === nodeId);
+      fileSource = (node?.properties?.source_id as string) ?? (node?.properties?.file_path as string);
+    }
+    if (!fileSource) return;
+
+    try {
+      const resp = await fetch(`/api/kg${API.kg.photoExif(fileSource)}`);
+      if (!resp.ok) {
+        exifCache.set(nodeId, null);
+        return;
+      }
+      const exif = await resp.json() as Record<string, unknown>;
+      const rows = formatExifRows(exif);
+      exifCache.set(nodeId, rows);
+      fetchedExifRows = rows;
+      fetchedExifNodeId = nodeId;
+    } catch {
+      exifCache.set(nodeId, null);
+    }
+  }
+
+  $effect(() => {
+    if (cardVisible && cardNodeId) {
+      const live = imageProcessingStore.getExifSummary(cardNodeId);
+      if (live.length > 0) {
+        fetchedExifNodeId = cardNodeId;
+        fetchedExifRows = live;
+      } else {
+        fetchExifForNode(cardNodeId);
+      }
+    }
+  });
 </script>
 
 {#if cardVisible && cardNodeId}
   {@const status = imageProcessingStore.statuses[cardNodeId]}
   {@const imageUrl = graphStore.photoImages[cardNodeId]}
-  {@const exifRows = imageProcessingStore.getExifSummary(cardNodeId)}
+  {@const exifRows = fetchedExifNodeId === cardNodeId ? fetchedExifRows : []}
   {@const fileName = status?.fileName ?? cardNodeId.replace(' (Photo)', '') ?? 'Photo'}
   {@const isProcessing = status && status.stage !== 'complete' && status.stage !== 'error'}
   {@const isComplete = status?.stage === 'complete'}

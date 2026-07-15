@@ -14,6 +14,7 @@ export const API = {
     imagesReprocess: '/images/reprocess',
     imagesHealth: '/images/health',
     photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
+    photoExif: (fileSource: string) => `/images/exif/${encodeURIComponent(fileSource)}`,
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
     faceCrop: (name: string) => `/images/faces/crops/${encodeURIComponent(name)}`,
     createJob: '/images/jobs',
