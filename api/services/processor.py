@@ -5,9 +5,11 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, AsyncGenerator
 from urllib.error import URLError
@@ -27,11 +29,13 @@ LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 VLM_URL = os.environ.get("VLM_LLM_BINDING_HOST", "http://host.docker.internal:8080")
 VLM_MODEL = os.environ.get("VLM_LLM_MODEL", "gemma-4-12B-it-qat-UD-Q4_K_XL")
 VLM_API_KEY = os.environ.get("VLM_LLM_BINDING_API_KEY", "llama-server")
-FACE_DETECTOR = os.environ.get("FACE_DETECTOR_BACKEND", "opencv")
+FACE_DETECTOR = os.environ.get("FACE_DETECTOR_BACKEND", "mtcnn")
 FACE_ATTRIBUTES = os.environ.get("FACE_ATTRIBUTES", "age,gender,emotion,race").split(",")
 
 _MAX_ENTITY_ATTEMPTS = 5
 _MAX_RELATION_ATTEMPTS = 5
+_VLM_MAX_RETRIES = 3
+_VLM_RETRY_BACKOFF_BASE = 5  # seconds
 
 
 async def _create_entity_verified(
@@ -396,7 +400,8 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
 
     script = (
         "import json, sys, os\n"
-        "os.environ.setdefault('FACE_DETECTOR_BACKEND', 'opencv')\n"
+        "# Always use mtcnn in subprocess — retinaface/opencv Haar cascades OOM or fail in containers\n"
+        "os.environ['FACE_DETECTOR_BACKEND'] = 'mtcnn'\n"
         "from processors.face_recognizer import analyze_attributes, identify_person\n"
         "from pathlib import Path\n"
         f"image_path = {json.dumps(image_path)}\n"
@@ -433,7 +438,7 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
 
         if proc.returncode != 0:
             logger.warning("Face recognition subprocess failed (rc=%d): %s", proc.returncode, stderr.decode()[:500])
@@ -456,7 +461,7 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
         return None
 
 
-def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[str], source_id: str) -> None:
+def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[str], source_id: str, bboxes: list[dict[str, Any]] | None = None) -> None:
     """Save cropped face images with a person-to-crop mapping.
 
     Crops are saved to FACES_CACHE_DIR as JPEG files named by the person name.
@@ -464,13 +469,23 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
 
     Faces are sorted by area (largest first) to match the VLM's salience-based
     ordering: Person 1 = most prominent face, Person 2 = second, etc.
+
+    Args:
+        image_path: Path to the source image.
+        faces: List of face attribute dicts from analyze_attributes().
+        names: List of person names corresponding to each face.
+        source_id: Source identifier (typically the filename).
+        bboxes: Pre-computed bounding boxes from detect_faces(). If None,
+            detect_faces() will be called (expensive — loads DeepFace model).
     """
     from PIL import Image
 
     faces_cache_dir = Path(os.environ.get("FACES_CACHE_DIR", str(Path(_PROJECT_ROOT) / "face_crops")))
     faces_cache_dir.mkdir(parents=True, exist_ok=True)
 
-    bboxes = detect_faces(image_path)
+    # Use pre-computed bboxes if available to avoid redundant DeepFace model loading
+    if bboxes is None:
+        bboxes = detect_faces(image_path)
     if not bboxes:
         logger.info("No face bounding boxes for crop saving in %s", image_path)
         return
@@ -552,6 +567,8 @@ def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | N
     exists and contains reference photos.
     """
     try:
+        bboxes = detect_faces(image_path)
+
         attributes = analyze_attributes(
             image_path,
             actions=[a.strip() for a in FACE_ATTRIBUTES if a.strip()],
@@ -586,9 +603,8 @@ def _process_faces(image_path: str, known_faces_path: str) -> dict[str, Any] | N
                 "race": face_attrs.get("race"),
             })
 
-        # Save face crops with person name mapping
         source_id = Path(image_path).name
-        _save_face_crops(image_path, attributes, names, source_id)
+        _save_face_crops(image_path, attributes, names, source_id, bboxes=bboxes)
 
         logger.info("Face analysis succeeded for %s — %d face(s)", image_path, len(combined))
         return {"faces": combined}
@@ -615,10 +631,17 @@ async def process_image(
         yield ProcessingEvent(event="detecting_faces", data={"image_path": image_path})
         try:
             face_data = await _run_face_detection_subprocess(image_path, known_faces_path)
+            if face_data is None:
+                logger.info("Subprocess returned None for %s — falling back to in-process detection", image_path)
+                face_data = await asyncio.to_thread(_process_faces, image_path, known_faces_path)
             logger.info("Face detection completed for %s: %s", image_path, "ok" if face_data else "none")
         except Exception as exc:
-            logger.warning("Face recognition subprocess error for %s: %s", image_path, exc)
-            face_data = None
+            logger.warning("Face recognition error for %s: %s — trying in-process fallback", image_path, exc)
+            try:
+                face_data = await asyncio.to_thread(_process_faces, image_path, known_faces_path)
+            except Exception:
+                logger.exception("In-process face detection also failed for %s", image_path)
+                face_data = None
         yield ProcessingEvent(event="faces_complete", data={"faces": face_data or {}})
 
     captions = _build_captions(exif_data, face_data, image_path)
@@ -688,17 +711,36 @@ async def describe_image_with_vlm(
     if VLM_API_KEY:
         headers["Authorization"] = f"Bearer {VLM_API_KEY}"
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
+    last_exc: Exception | None = None
+    for attempt in range(1, _VLM_MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
 
-    if resp.status_code != 200:
-        logger.error("VLM request failed: %d %s", resp.status_code, resp.text[:500])
-        raise RuntimeError(f"VLM request failed: {resp.status_code} {resp.text[:200]}")
+            if resp.status_code != 200:
+                logger.error("VLM request failed: %d %s (attempt %d/%d)", resp.status_code, resp.text[:500], attempt, _VLM_MAX_RETRIES)
+                last_exc = RuntimeError(f"VLM request failed: {resp.status_code} {resp.text[:200]}")
+                if attempt < _VLM_MAX_RETRIES:
+                    delay = _VLM_RETRY_BACKOFF_BASE * (2 ** (attempt - 1))
+                    logger.info("VLM retry %d/%d in %.0fs for %s", attempt, _VLM_MAX_RETRIES, delay, image_path)
+                    await asyncio.sleep(delay)
+                    continue
+                raise last_exc
 
-    result = resp.json()
-    description = result["choices"][0]["message"]["content"]
-    logger.info("VLM description generated (%d chars) for %s", len(description), image_path)
-    return description
+            result = resp.json()
+            description = result["choices"][0]["message"]["content"]
+            logger.info("VLM description generated (%d chars) for %s (attempt %d)", len(description), image_path, attempt)
+            return description
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            last_exc = exc
+            if attempt < _VLM_MAX_RETRIES:
+                delay = _VLM_RETRY_BACKOFF_BASE * (2 ** (attempt - 1))
+                logger.warning("VLM timeout/error for %s (attempt %d/%d): %s, retrying in %.0fs", image_path, attempt, _VLM_MAX_RETRIES, type(exc).__name__, delay)
+                await asyncio.sleep(delay)
+            else:
+                logger.error("VLM failed after %d attempts for %s: %s", _VLM_MAX_RETRIES, image_path, exc)
+                raise
+    raise last_exc or RuntimeError("VLM failed unexpectedly")
 
 
 async def describe_face_crop(
@@ -783,6 +825,15 @@ async def upload_image_to_lightrag(
         description = await describe_image_with_vlm(image_path, context=vlm_context)
     except Exception as exc:
         logger.exception("VLM description failed for %s", image_path)
+        if metadata_text:
+            logger.info("Falling back to EXIF-only insertion for %s", image_path)
+            file_name = filename or Path(image_path).name
+            fallback_text = f"Image: {file_name}\n\n[Image description unavailable — visual analysis failed.]\n\n{metadata_text}"
+            return await insert_metadata_into_lightrag(
+                lightrag_url,
+                fallback_text,
+                file_name,
+            )
         return {"status": "error", "reason": "vlm_description_failed", "detail": str(exc)}
 
     file_name = filename or Path(image_path).name
@@ -894,6 +945,54 @@ async def inject_exif_relations(
     return results
 
 
+_LOCATION_SUFFIXES = (" (Location)", " (Date)", " (Camera)", " (Photo)")
+_LOCATION_ABBREVS = {
+    "st": "saint", "mt": "mount", "ft": "fort",
+    "n": "north", "s": "south", "e": "east", "w": "west",
+}
+
+
+def _strip_entity_suffix(name: str) -> str:
+    for suffix in _LOCATION_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _normalize_for_matching(name: str) -> str:
+    bare = _strip_entity_suffix(name)
+    normalized = re.sub(r"[.\-,]", " ", bare.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    words = normalized.split()
+    expanded = []
+    for word in words:
+        expanded.append(_LOCATION_ABBREVS.get(word, word))
+    return " ".join(expanded)
+
+
+def _find_matching_entity(entity_name: str, existing_labels: set[str], threshold: float = 0.85) -> str | None:
+    if entity_name in existing_labels:
+        return entity_name
+
+    bare_name = _strip_entity_suffix(entity_name)
+    if bare_name in existing_labels:
+        return bare_name
+
+    target_norm = _normalize_for_matching(entity_name)
+
+    best_match: str | None = None
+    best_score = 0.0
+
+    for label in existing_labels:
+        label_norm = _normalize_for_matching(label)
+        score = SequenceMatcher(None, target_norm, label_norm).ratio()
+        if score > best_score and score >= threshold:
+            best_score = score
+            best_match = label
+
+    return best_match
+
+
 async def create_exif_relations(
     lightrag_url: str,
     file_source: str,
@@ -936,9 +1035,12 @@ async def create_exif_relations(
         entity_name = dim["name"]
         raw_value = dim["name"].rsplit(" (", 1)[0]
 
-        if entity_name in existing_labels or raw_value in existing_labels:
-            logger.info("[EXIF Relations] Entity '%s' already exists, skipping creation", entity_name)
-            results["entities_created"].append({"status": "exists", "entity_name": entity_name})
+        existing_match = _find_matching_entity(entity_name, existing_labels)
+
+        if existing_match:
+            logger.info("[EXIF Relations] Entity '%s' matches existing '%s', reusing", entity_name, existing_match)
+            dim["_resolved_name"] = existing_match
+            results["entities_created"].append({"status": "exists", "entity_name": existing_match, "original_name": entity_name})
         else:
             entity_result = await _create_entity_verified(
                 base_url, entity_name,
@@ -947,10 +1049,11 @@ async def create_exif_relations(
             entity_result["entity_name"] = entity_name
             entity_result["entity_type"] = dim["entity_type"]
             results["entities_created"].append(entity_result)
+            existing_labels.add(entity_name)
             await asyncio.sleep(0.5)
 
     for dim in exif_dimensions:
-        entity_name = dim["name"]
+        entity_name = dim.get("_resolved_name") or dim["name"]
 
         relation_result = await _create_relation_verified(
             base_url, photo_name, entity_name,
@@ -961,14 +1064,15 @@ async def create_exif_relations(
         results["relations_created"].append(relation_result)
 
         for other_dim in exif_dimensions:
-            if other_dim["name"] == entity_name:
+            other_name = other_dim.get("_resolved_name") or other_dim["name"]
+            if other_name == entity_name:
                 continue
             cross_result = await _create_relation_verified(
-                base_url, entity_name, other_dim["name"],
-                {"description": f"{dim['edge_description']}, also {other_dim['edge_keyword']} {other_dim['name']}", "keywords": dim["edge_keyword"], "weight": 1.0},
+                base_url, entity_name, other_name,
+                {"description": f"{dim['edge_description']}, also {other_dim['edge_keyword']} {other_name}", "keywords": dim["edge_keyword"], "weight": 1.0},
             )
             cross_result["source"] = entity_name
-            cross_result["target"] = other_dim["name"]
+            cross_result["target"] = other_name
             results["relations_created"].append(cross_result)
 
     logger.info("[EXIF Relations] Complete for %s: %d entities, %d relations",
@@ -1029,8 +1133,12 @@ async def link_exif_to_visual_entities(
                 continue
             props = node.get("properties", {})
             file_path = props.get("file_path", "")
+            # Normalize Unicode whitespace variants that LLMs sometimes produce
+            # (e.g., U+202F narrow no-break space, U+00A0 non-breaking space)
+            normalized_path = file_path.replace("\u202f", " ").replace("\u00a0", " ")
+            normalized_source = file_source.replace("\u202f", " ").replace("\u00a0", " ")
             logger.info("[EXIF Links] Checking '%s': file_path='%s' vs file_source='%s'", label, file_path, file_source)
-            if file_path != file_source:
+            if normalized_path != normalized_source:
                 continue
 
             link_result = await _create_relation_verified(

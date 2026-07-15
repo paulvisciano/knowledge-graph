@@ -106,10 +106,16 @@ async def update_job_status(job_id: str, status: str, stage: str = "", error: st
 async def store_event(job_id: str, event_type: str, event_data: dict) -> None:
     import time
 
+    if isinstance(event_data, str):
+        try:
+            event_data = json.loads(event_data)
+        except (json.JSONDecodeError, TypeError):
+            event_data = {"raw": event_data}
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO job_events (job_id, event_type, event_data, created_at) VALUES ($1, $2, $3, $4)""",
+            """INSERT INTO job_events (job_id, event_type, event_data, created_at) VALUES ($1, $2, $3::jsonb, $4)""",
             job_id, event_type, json.dumps(event_data), time.time(),
         )
     q = _event_queues.get(job_id)

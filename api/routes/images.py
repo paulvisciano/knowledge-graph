@@ -152,6 +152,16 @@ async def _process_and_stream(
         upload_result = await upload_image_to_lightrag(
             LIGHTRAG_URL, file_path, filename=file_source, metadata_text=metadata_text,
         )
+        if upload_result.get("status") == "error":
+            yield ServerSentEvent(
+                event="message",
+                data=json.dumps({"event": "upload_failed", "data": upload_result, "timestamp": time.time()}),
+            )
+            yield ServerSentEvent(
+                event="message",
+                data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source, "status": "upload_failed"}, "timestamp": time.time()}),
+            )
+            return
         yield ServerSentEvent(
             event="message",
             data=json.dumps({"event": "upload_complete", "data": upload_result, "timestamp": time.time()}),
@@ -365,6 +375,10 @@ async def process_image_json(
             upload_result = await upload_image_to_lightrag(
                 LIGHTRAG_URL, tmp.name, filename=file_source, metadata_text=metadata_text,
             )
+            if upload_result.get("status") == "error":
+                events.append(ProcessingEvent(event="upload_failed", data=upload_result))
+                events.append(ProcessingEvent(event="pipeline_complete", data={"file_source": file_source, "status": "upload_failed"}))
+                return {"events": [asdict(e) for e in events]}
             events.append(ProcessingEvent(event="upload_complete", data=upload_result))
         except Exception as exc:
             events.append(ProcessingEvent(event="upload_failed", data={"error": str(exc)}))
@@ -553,15 +567,23 @@ async def get_face_crop(name: str):
     if not source_file:
         raise HTTPException(status_code=404, detail=f"No source image found for '{name}'")
 
-    image_path = INPUT_DIR / source_file
-    if not image_path.is_file():
+    # LightRAG may concatenate multiple source files with <SEP>
+    source_files = [f.strip() for f in source_file.split("<SEP>") if f.strip()]
+    image_path = None
+    for sf in source_files:
+        candidate = INPUT_DIR / sf
+        if candidate.is_file():
+            image_path = candidate
+            break
         for ext in ["", ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
-            candidate = INPUT_DIR / f"{source_file}{ext}"
+            candidate = INPUT_DIR / f"{sf}{ext}"
             if candidate.is_file():
                 image_path = candidate
                 break
+        if image_path:
+            break
 
-    if not image_path.is_file():
+    if not image_path:
         raise HTTPException(status_code=404, detail=f"Source image not found: {source_file}")
 
     faces = await asyncio.to_thread(detect_faces, str(image_path))
@@ -700,6 +722,34 @@ async def delete_photo_entities_endpoint(file_source: str):
     """
     result = await delete_photo_entities(LIGHTRAG_URL, file_source)
     return result
+
+
+@router.post("/reprocess")
+async def reprocess_image(
+    file_source: str = Form(...),
+    skip_exif: Optional[str] = Form(None),
+    skip_faces: Optional[str] = Form(None),
+):
+    """Re-process an image that already exists in the INPUT_DIR.
+
+    Finds the file by its original filename and re-runs the full processing
+    pipeline (EXIF, faces, VLM, LightRAG insert). Returns an SSE stream.
+    """
+    skip_exif_bool = _parse_bool(skip_exif)
+    skip_faces_bool = _parse_bool(skip_faces)
+
+    file_path = INPUT_DIR / file_source
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_source}")
+
+    event_generator = _process_and_stream(
+        str(file_path),
+        file_source,
+        skip_exif=skip_exif_bool,
+        skip_faces=skip_faces_bool,
+        insert=True,
+    )
+    return EventSourceResponse(event_generator)
 
 
 @router.post("/jobs")

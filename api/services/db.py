@@ -60,6 +60,40 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
             CREATE INDEX IF NOT EXISTS idx_job_events_created_at ON job_events(job_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                last_modified DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                curr_node TEXT,
+                mcp_server_overrides JSONB,
+                thinking_enabled BOOLEAN,
+                reasoning_effort TEXT,
+                forked_from_conversation_id TEXT,
+                pinned BOOLEAN
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                type TEXT NOT NULL DEFAULT 'message',
+                timestamp DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                role TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                parent TEXT,
+                children JSONB NOT NULL DEFAULT '[]',
+                extra JSONB,
+                reasoning_content TEXT,
+                tool_calls TEXT,
+                completion_id TEXT,
+                tool_call_id TEXT,
+                timings JSONB,
+                model TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conv_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(conv_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified);
         """)
     logger.info("Database tables initialized")
 

@@ -8,5 +8,5 @@ reverse_geocoder>=1.5.1
 deepface>=0.0.100
 tf-keras>=2.21.0
 numpy>=1.26.0
-opencv-python>=4.9.0
+opencv-python>=4.9.0,<5.0.0
 asyncpg>=0.29.0
