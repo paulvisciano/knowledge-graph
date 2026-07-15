@@ -224,10 +224,11 @@ mkdir -p ~/models/bge-reranker-v2-m3
 mv ~/Downloads/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf ~/models/gemma4-12b-obliterated/
 mv ~/Downloads/nomic-embed-text-v2-moe.Q6_K.gguf ~/models/nomic-embed-v2/
 mv ~/Downloads/bge-reranker-v2-m3-Q4_K_M.gguf ~/models/bge-reranker-v2-m3/</pre>
-  <p style="margin-top:0.75rem"><strong>Optional:</strong> For VLM (vision) support, also download the multimodal projection file:</p>
+  <p style="margin-top:0.75rem"><strong>Optional:</strong> For image/vision support, also download the multimodal projection file. This enables the LLM to process images — without it, image ingestion won't work, but chat and text search work fine:</p>
   <pre><span class="muted">~/models/gemma4-12b-qat/</span>
 <span class="muted">└── mmproj-BF16.gguf</span></pre>
-  <p class="muted" style="margin-top:0.5rem">The <code>models/</code> directory in the repo is gitignored. The start scripts expect <code>~/models/</code> by default — adjust <code>MODEL_DIR</code> in <code>.env</code> if your models live elsewhere.</p>
+  <p class="muted" style="margin-top:0.5rem">The start script auto-detects <code>mmproj-BF16.gguf</code> — if present, the LLM server starts with vision enabled. The MTP draft model (<code>mtp-gemma-4-12B-it.gguf</code>) in the same directory is also optional and speeds up inference.</p>
+  <p class="muted" style="margin-top:0.25rem">The <code>models/</code> directory in the repo is gitignored. The start scripts expect <code>~/models/</code> by default — adjust <code>MODEL_DIR</code> in <code>.env</code> if your models live elsewhere.</p>
 </div>
 
 <h3>3. Install llama.cpp (Host)</h3>

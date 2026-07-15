@@ -58,7 +58,7 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
     └── bge-reranker-v2-m3-Q4_K_M.gguf
 ```
 
-**Optional:** For VLM (vision) support, also download `mmproj-BF16.gguf` to `~/models/gemma4-12b-qat/`.
+**Optional:** Download `mmproj-BF16.gguf` to `~/models/gemma4-12b-qat/` for image/vision support. Without it, image ingestion won't work, but chat and text search work fine. The start script auto-detects it.
 
 ## Verify
 
