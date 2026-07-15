@@ -8,7 +8,7 @@ Personal knowledge graph stack: LightRAG + local LLMs + custom UI.
 - **Homebrew** — install: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 - **Docker Desktop** — install: `brew install --cask docker`, then open it and allocate at least 8 GB RAM in Settings → Resources
 - **llama.cpp** — install: `brew install llama.cpp`
-- **~8 GB disk space** for model files
+- **~10 GB disk space** for model files
 
 ## Quick Start
 
@@ -43,6 +43,7 @@ You need three GGUF model files in `~/models/` (or set `MODEL_DIR` in `.env`):
 | Model | File | Size |
 |-------|------|------|
 | LLM (Gemma 4 12B) | `Gemma-4-12B-OBLITERATED-Q4_K_M.gguf` | ~6.9 GB |
+| Vision projection (mmproj) | `mmproj-BF16.gguf` | ~2.3 GB |
 | Embedding (nomic-embed-v2) | `nomic-embed-text-v2-moe.Q6_K.gguf` | ~379 MB |
 | Reranker (bge-reranker-v2-m3) | `bge-reranker-v2-m3-Q4_K_M.gguf` | ~418 MB |
 
@@ -52,13 +53,15 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
 ~/models/
 ├── gemma4-12b-obliterated/
 │   └── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf
+├── gemma4-12b-qat/
+│   └── mmproj-BF16.gguf
 ├── nomic-embed-v2/
 │   └── nomic-embed-text-v2-moe.Q6_K.gguf
 └── bge-reranker-v2-m3/
     └── bge-reranker-v2-m3-Q4_K_M.gguf
 ```
 
-**Optional:** Download `mmproj-BF16.gguf` to `~/models/gemma4-12b-qat/` for image/vision support. Without it, image ingestion won't work, but chat and text search work fine. The start script auto-detects it.
+**Optional:** The MTP draft model (`mtp-gemma-4-12B-it.gguf`) in `~/models/gemma4-12b-qat/` speeds up inference but is not required.
 
 ## Verify
 
