@@ -214,6 +214,20 @@
           <span class="photo-card-spinner"></span>
           <span>{status?.stageLabel ?? 'Processing...'}</span>
         </div>
+        {#if status?.stepper}
+          <div class="photo-card-stepper">
+            {#each status.stepper.filter((s) => s.stage !== 'complete') as step (step.stage)}
+              <div class="photo-card-step {step.state}">
+                <span class="photo-card-step-dot">
+                  {#if step.state === 'done'}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  {/if}
+                </span>
+                <span class="photo-card-step-label">{step.label.replace('...', '')}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
       {:else if isComplete}
         <div class="photo-card-status complete">
           <svg class="photo-card-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
@@ -371,6 +385,67 @@
   }
 
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .photo-card-stepper {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-top: 1px solid rgba(0, 212, 255, 0.12);
+    padding-top: 5px;
+  }
+
+  .photo-card-step {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: #475569;
+    transition: color 0.2s;
+  }
+
+  .photo-card-step.done { color: #4ade80; }
+
+  .photo-card-step.current {
+    color: #00d4ff;
+  }
+
+  .photo-card-step.current .photo-card-step-dot {
+    border-color: #00d4ff;
+    box-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+  }
+
+  .photo-card-step.current .photo-card-step-label {
+    font-weight: 600;
+  }
+
+  .photo-card-step-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .photo-card-step.done .photo-card-step-dot {
+    background: #4ade80;
+    border-color: #4ade80;
+  }
+
+  .photo-card-step-dot svg {
+    width: 7px;
+    height: 7px;
+    color: #0f172a;
+  }
+
+  .photo-card-step-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .photo-card-exif {
     display: flex;

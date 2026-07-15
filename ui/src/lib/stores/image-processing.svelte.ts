@@ -1,14 +1,53 @@
+export type ImageStage =
+  | 'extracting_exif'
+  | 'detecting_faces'
+  | 'building_captions'
+  | 'creating_entities'
+  | 'describing_image'
+  | 'uploading_to_graph'
+  | 'graph_processing'
+  | 'linking_visual_entities'
+  | 'complete'
+  | 'error';
+
 export interface ImageProcessingStatus {
   nodeId: string;
   fileName: string;
   dataUrl: string;
   jobId?: string;
-  stage: 'extracting_metadata' | 'creating_entities' | 'processing_ai' | 'linking_entities' | 'complete' | 'error';
+  stage: ImageStage;
   get stageLabel(): string;
+  get stepper(): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' }[];
   error?: string;
   updatedAt: number;
   exifData?: Record<string, unknown>;
 }
+
+/** Ordered pipeline stages shown in the stepper. 'error' is excluded — rendered separately. */
+const PIPELINE_ORDER: ImageStage[] = [
+  'extracting_exif',
+  'detecting_faces',
+  'building_captions',
+  'creating_entities',
+  'describing_image',
+  'uploading_to_graph',
+  'graph_processing',
+  'linking_visual_entities',
+  'complete',
+];
+
+const STAGE_LABELS: Record<ImageStage, string> = {
+  extracting_exif: 'Extracting EXIF data...',
+  detecting_faces: 'Running facial recognition...',
+  building_captions: 'Building captions...',
+  creating_entities: 'Creating graph entities...',
+  describing_image: 'Running AI analysis...',
+  uploading_to_graph: 'Uploading to knowledge graph...',
+  graph_processing: 'Processing in knowledge graph...',
+  linking_visual_entities: 'Linking visual entities...',
+  complete: 'Processing complete',
+  error: 'Processing failed',
+};
 
 const EXIF_DISPLAY_KEYS: Record<string, string> = {
   camera: 'Camera',
@@ -35,9 +74,18 @@ class ImageProcessingStore {
       fileName,
       dataUrl,
       jobId,
-      stage: 'extracting_metadata',
+      stage: 'extracting_exif',
       get stageLabel() {
         return STAGE_LABELS[this.stage] ?? this.stage;
+      },
+      get stepper() {
+        const currentIdx = PIPELINE_ORDER.indexOf(this.stage);
+        return PIPELINE_ORDER.map((s): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' } => {
+          const sIdx = PIPELINE_ORDER.indexOf(s);
+          const state: 'pending' | 'current' | 'done' =
+            currentIdx < 0 ? 'pending' : currentIdx > sIdx ? 'done' : currentIdx === sIdx ? 'current' : 'pending';
+          return { stage: s, label: STAGE_LABELS[s], state };
+        });
       },
       updatedAt: Date.now(),
     };
@@ -87,26 +135,19 @@ class ImageProcessingStore {
     this.statuses = { ...this.statuses };
   }
 
-  mapEventToStage(eventName: string): ImageProcessingStatus['stage'] | null {
-    if (eventName === 'extracting_exif' || eventName === 'exif_complete' || eventName === 'detecting_faces' || eventName === 'faces_complete' || eventName === 'captions_built' || eventName === 'exif_dimensions_ready') return 'extracting_metadata';
+  mapEventToStage(eventName: string): ImageStage | null {
+    if (eventName === 'extracting_exif' || eventName === 'exif_complete' || eventName === 'exif_dimensions_ready') return 'extracting_exif';
+    if (eventName === 'detecting_faces' || eventName === 'faces_complete') return 'detecting_faces';
+    if (eventName === 'captions_built') return 'building_captions';
     if (eventName === 'injecting_exif_relations' || eventName === 'creating_exif_entities' || eventName === 'photo_node_created' || eventName === 'exif_node_created' || eventName === 'exif_relation_created' || eventName === 'exif_cross_relation_created' || eventName === 'exif_entities_complete') return 'creating_entities';
-    if (eventName === 'describing_image') return 'processing_ai';
-    if (eventName === 'upload_complete' || eventName === 'lightrag_upload_complete' || eventName === 'lightrag_processing_waiting') return 'processing_ai';
-    if (eventName === 'lightrag_processing_complete') return 'linking_entities';
-    if (eventName.startsWith('visual_')) return 'linking_entities';
+    if (eventName === 'describing_image') return 'describing_image';
+    if (eventName === 'upload_complete' || eventName === 'lightrag_upload_complete') return 'uploading_to_graph';
+    if (eventName === 'lightrag_processing_waiting') return 'graph_processing';
+    if (eventName === 'lightrag_processing_complete' || eventName.startsWith('visual_')) return 'linking_visual_entities';
     if (eventName === 'pipeline_complete') return 'complete';
     if (eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')) return 'error';
     return null;
   }
 }
-
-const STAGE_LABELS: Record<string, string> = {
-  extracting_metadata: 'Analyzing image...',
-  creating_entities: 'Creating graph entities...',
-  processing_ai: 'Running AI analysis...',
-  linking_entities: 'Linking knowledge entities...',
-  complete: 'Processing complete',
-  error: 'Processing failed',
-};
 
 export const imageProcessingStore = new ImageProcessingStore();
