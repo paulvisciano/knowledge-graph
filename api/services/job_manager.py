@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -200,6 +201,11 @@ async def _run_job(job: Job) -> None:
                     stage = _map_event_to_stage(event_name)
                     if stage:
                         await update_job_status(job.id, "processing", stage)
+                    if event_name == "exif_complete":
+                        exif = event_data.get("exif") or event_data.get("exif_data")
+                        if exif:
+                            from api.services.db import save_photo_exif
+                            await save_photo_exif(job.file_source, exif)
                     await store_event(job.id, event_name, event_data if isinstance(event_data, dict) else {"raw": event_data})
                 except (json.JSONDecodeError, TypeError):
                     await store_event(job.id, "raw", {"data": sse_event.data})
@@ -230,11 +236,14 @@ def _map_event_to_stage(event_name: str) -> str:
     return ""
 
 
+_STUCK_JOB_TIMEOUT_SECONDS = 30 * 60  # 30 minutes
+
 async def resume_pending_jobs() -> list[str]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM jobs WHERE status IN ('pending', 'processing') ORDER BY created_at")
     resumed = []
+    now = time.time()
     for row in rows:
         job = Job(**dict(row))
         if job.status == "pending":
@@ -242,6 +251,14 @@ async def resume_pending_jobs() -> list[str]:
             await start_processing(job)
             resumed.append(job.id)
         elif job.status == "processing":
+            # If a processing job hasn't updated in 30 minutes, it's likely stuck
+            if (now - job.updated_at) > _STUCK_JOB_TIMEOUT_SECONDS:
+                logger.warning(
+                    "Marking stuck job %s as failed (no update for %.0f minutes)",
+                    job.id, (now - job.updated_at) / 60,
+                )
+                await update_job_status(job.id, "failed", "error", "Job stuck: no progress for 30 minutes")
+                continue
             if not Path(job.file_path).exists():
                 await update_job_status(job.id, "failed", "error", "File no longer exists")
                 continue

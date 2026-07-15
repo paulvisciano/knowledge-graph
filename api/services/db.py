@@ -94,6 +94,13 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conv_id);
             CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(conv_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified);
+
+            CREATE TABLE IF NOT EXISTS photo_metadata (
+                file_source TEXT PRIMARY KEY,
+                exif_data JSONB NOT NULL DEFAULT '{}',
+                created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
+            );
         """)
     logger.info("Database tables initialized")
 
@@ -103,3 +110,31 @@ async def close_db() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
+
+
+async def save_photo_exif(file_source: str, exif_data: dict) -> None:
+    import json
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO photo_metadata (file_source, exif_data, created_at, updated_at)
+               VALUES ($1, $2, extract(epoch from now()), extract(epoch from now()))
+               ON CONFLICT (file_source)
+               DO UPDATE SET exif_data = $2, updated_at = extract(epoch from now())""",
+            file_source, json.dumps(exif_data),
+        )
+
+
+async def get_photo_exif(file_source: str) -> dict | None:
+    import json
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT exif_data FROM photo_metadata WHERE file_source = $1",
+            file_source,
+        )
+    if row and row["exif_data"]:
+        return json.loads(row["exif_data"])
+    return None
