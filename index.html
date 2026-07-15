@@ -188,7 +188,7 @@ cp .env.example .env</pre>
 
 <h3>2. Download Model Files</h3>
 <div class="card">
-  <p>You need three GGUF model files (~8 GB total). Place them under <code>~/models/</code> (or set <code>MODEL_DIR</code> in <code>.env</code>):</p>
+  <p>You need four GGUF model files (~10 GB total). Place them under <code>~/models/</code> (or set <code>MODEL_DIR</code> in <code>.env</code>):</p>
   <table>
     <tr><th>Model</th><th>File</th><th>Size</th><th>HuggingFace Search</th></tr>
     <tr><td>LLM (Gemma 4 12B)</td><td><code>Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</code></td><td>~6.9 GB</td><td>Search "Gemma-4-12B OBLITERATED GGUF" on <a href="https://huggingface.co/models?search=gemma-4-12b-obliterated+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
@@ -548,8 +548,8 @@ docker compose down</pre>
 <pre>
 knowledge-graph/
 ├── docker-compose.yml      <span class="muted"># orchestrates LightRAG + PostgreSQL</span>
-├── .env                    <span class="muted"># local config (not committed)</span>
-├── .env.example            <span class="muted"># template to copy</span>
+├── .env                    <span class="muted"># single config file for entire stack (not committed)</span>
+├── .env.example            <span class="muted"># template — cp .env.example .env</span>
 ├── .venv/                  <span class="muted"># Python 3.11 venv (not committed)</span>
 ├── README.md
 ├── models → ~/models       <span class="muted"># symlink to GGUF model files</span>
@@ -563,7 +563,6 @@ knowledge-graph/
 │       ├── processor.py     <span class="muted"># EXIF → faces → VLM (context-aware) → combined doc insert → EXIF entity injection → visual entity linking</span>
 │       └── job_manager.py   <span class="muted"># SQLite-backed persistent job queue with status tracking and event streaming</span>
 ├── lightrag/               <span class="muted"># LightRAG source (git submodule — fork with patches)</span>
-│   ├── .env                <span class="muted"># local config (gitignored, not needed — all config in root .env)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
 │   ├── lightrag/            <span class="muted"># Python package source</span>
 │   └── ...
@@ -599,34 +598,24 @@ knowledge-graph/
 <h2>Quick Start</h2>
 
 <div class="card success">
-<pre><span class="muted"># 1. Configure</span>
+<pre><span class="muted"># 1. Configure (single .env file for entire stack)</span>
 cp .env.example .env
 
-<span class="muted"># 2. Create Python 3.11+ venv and install deps</span>
-/opt/homebrew/bin/python3.11 -m venv .venv
-.venv/bin/pip install -r api/requirements.txt
-
-<span class="muted"># 3. Start llama-servers on host</span>
+<span class="muted"># 2. Start llama-servers on host</span>
 ./scripts/start-llama-servers.sh
 
-<span class="muted"># 4. Start LightRAG + PostgreSQL</span>
+<span class="muted"># 3. Start Docker services (LightRAG + PostgreSQL + API + Nexus)</span>
+docker compose up -d --build
+
+<span class="muted"># 4. Or start just LightRAG + PostgreSQL (without UI)</span>
 docker compose up -d lightrag postgres
 
-<span class="muted"># 5. Start API backend + Nexus UI (Docker)</span>
-docker compose up -d
-
-<span class="muted"># 6. Or start just LightRAG + PostgreSQL (without UI)</span>
-docker compose up -d lightrag postgres
-
-<span class="muted"># 7. Process an image (CLI)</span>
-.venv/bin/python scripts/process_image.py --json photo.jpg
-
-<span class="muted"># 8. Process an image (API)</span>
+<span class="muted"># 5. Process an image (API)</span>
 curl -X POST http://localhost:8000/images/process-json \
   -F "file=@photo.jpg"
 
-<span class="muted"># 9. Open Nexus UI</span>
-open http://localhost:5180
+<span class="muted"># 6. Open Nexus UI (port 3000 in Docker, 5180 in dev mode)</span>
+open http://localhost:3000
 
 <span class="muted"># Or open LightRAG built-in WebUI</span>
 open http://localhost:9621
