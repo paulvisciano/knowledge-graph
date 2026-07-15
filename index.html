@@ -181,11 +181,9 @@ cd knowledge-graph
 <span class="muted"># If you already cloned without --recurse-submodules:</span>
 git submodule update --init --recursive
 
-<span class="muted"># Copy the environment template (edit paths/ports if needed)</span>
-cp .env.example .env
-
-<span class="muted"># Copy the LightRAG config template</span>
-cp lightrag/env.example lightrag/.env</pre>
+<span class="muted"># Copy the environment template and customize as needed</span>
+cp .env.example .env</pre>
+  <p class="muted" style="margin-top:0.5rem">All config lives in a single <code>.env</code> file — model names, ports, storage backends, everything. No separate LightRAG config needed.</p>
 </div>
 
 <h3>2. Download Model Files</h3>
@@ -565,7 +563,7 @@ knowledge-graph/
 │       ├── processor.py     <span class="muted"># EXIF → faces → VLM (context-aware) → combined doc insert → EXIF entity injection → visual entity linking</span>
 │       └── job_manager.py   <span class="muted"># SQLite-backed persistent job queue with status tracking and event streaming</span>
 ├── lightrag/               <span class="muted"># LightRAG source (git submodule — fork with patches)</span>
-│   ├── .env                <span class="muted"># container config (host.docker.internal)</span>
+│   ├── .env                <span class="muted"># local config (gitignored, not needed — all config in root .env)</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build</span>
 │   ├── lightrag/            <span class="muted"># Python package source</span>
 │   └── ...

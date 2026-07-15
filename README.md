@@ -22,7 +22,7 @@ git submodule update --init --recursive
 
 # 2. Configure
 cp .env.example .env
-cp lightrag/env.example lightrag/.env
+# All config in one file — model names, ports, storage backends. No separate LightRAG config needed.
 
 # 3. Download model files (see "Model Files" below)
 
