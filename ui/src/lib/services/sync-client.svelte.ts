@@ -208,7 +208,11 @@ class SyncClient {
 
   toSyncMsg(convId: string, msg: ChatMessage, parentId: string | null): DatabaseMessage {
     const extra: unknown[] = [];
-    if (msg.audioUrl) extra.push({ type: 'audioUrl', url: msg.audioUrl });
+    // Persist the durable base64 audio data + format, NOT the blob: URL —
+    // blob URLs are session-only and die on reload (audioUrl is regenerated
+    // from audioData on load in fromSyncMsg). Mirrors how imageUrls stores
+    // durable data: URLs.
+    if (msg.audioData) extra.push({ type: 'audioData', data: msg.audioData, format: msg.audioFormat ?? 'wav' });
     if (msg.imageUrls?.length) extra.push({ type: 'imageUrls', urls: msg.imageUrls });
 
     return {
@@ -255,12 +259,18 @@ class SyncClient {
     }
 
     let audioUrl: string | undefined;
+    let audioData: string | undefined;
+    let audioFormat: 'wav' | 'mp3' | undefined;
     let imageUrls: string[] | undefined;
     if (Array.isArray(data.extra)) {
       for (const item of data.extra) {
         if (item && typeof item === 'object') {
           const e = item as Record<string, unknown>;
-          if (e.type === 'audioUrl' && typeof e.url === 'string') audioUrl = e.url;
+          if (e.type === 'audioData' && typeof e.data === 'string') {
+            audioData = e.data;
+            audioFormat = (e.format === 'mp3' ? 'mp3' : 'wav');
+            audioUrl = `data:audio/${audioFormat};base64,${audioData}`;
+          }
           if (e.type === 'imageUrls' && Array.isArray(e.urls)) imageUrls = e.urls as string[];
         }
       }
@@ -276,6 +286,8 @@ class SyncClient {
       timings: data.timings as MessageTimings | undefined,
       model: data.model ?? undefined,
       audioUrl,
+      audioData,
+      audioFormat,
       imageUrls,
     };
   }

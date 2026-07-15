@@ -1166,8 +1166,11 @@
     isProcessing = true;
     processingLabel = 'Regenerating...';
 
-    // Stream a new assistant response using the existing conversation history
-    if (chatMode === 'kg-direct') {
+    // Stream a new assistant response using the existing conversation history.
+    // Audio is multimodal and must route through streamAssistantResponse even in
+    // kg-direct mode (matches handleSend routing), otherwise audioData is dropped
+    // and the model receives an empty user message -> "[no-context]".
+    if (chatMode === 'kg-direct' && !msg.audioData) {
       streamKGChatResponse();
     } else {
       streamAssistantResponse();
@@ -1632,10 +1635,10 @@
                   {#if !isActiveConversationStreaming}
                     <button
                       onclick={() => resendMessage(msg.id)}
-                      class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan"
+                      class="flex items-center gap-1 rounded-md border border-cyber-border/50 bg-cyber-surface-2/60 px-2 py-1 text-[11px] font-medium text-cyber-text-dim transition-all duration-200 hover:border-cyber-cyan/50 hover:bg-cyber-cyan/10 hover:text-cyber-cyan hover:glow-cyan focus:outline-none focus:ring-1 focus:ring-cyber-cyan/40 active:scale-95"
                       title="Regenerate response"
                     >
-                      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                       Regenerate
                     </button>
                   {/if}
