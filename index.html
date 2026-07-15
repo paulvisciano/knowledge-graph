@@ -150,7 +150,26 @@
 <h2>Getting Started</h2>
 
 <div class="card accent" style="margin-bottom:1rem">
-  <p>Set up the full stack on a new machine. <strong>Prerequisites:</strong> macOS with Apple Silicon, <a href="https://docs.docker.com/desktop/install/mac-install/" target="_blank" rel="noopener">Docker Desktop</a>, <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a>, and ~8 GB free disk space for model files.</p>
+  <p>Set up the full stack on a new machine. <strong>Prerequisites:</strong> macOS with Apple Silicon, ~8 GB free disk space for model files, and the following tools:</p>
+  <table style="margin-top:0.5rem">
+    <tr><th>Tool</th><th>Install</th><th>Why</th></tr>
+    <tr>
+      <td><a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a></td>
+      <td><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></td>
+      <td>Package manager — needed for llama.cpp</td>
+    </tr>
+    <tr>
+      <td><a href="https://docs.docker.com/desktop/setup/install/mac-install/" target="_blank" rel="noopener">Docker Desktop</a></td>
+      <td><code>brew install --cask docker</code></td>
+      <td>Runs LightRAG, PostgreSQL, API, Nexus UI in containers</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener">llama.cpp</a></td>
+      <td><code>brew install llama.cpp</code></td>
+      <td>Runs LLM, embedding, and reranker models on Metal GPU</td>
+    </tr>
+  </table>
+  <p class="muted" style="margin-top:0.5rem"><strong>Docker Desktop post-install:</strong> After installing, open Docker Desktop and wait for the engine to start (whale icon in menu bar stops animating). Allocate at least <strong>8 GB RAM</strong> in Settings → Resources. The API container uses DeepFace for face recognition which needs significant memory.</p>
 </div>
 
 <h3>1. Clone &amp; Configure</h3>
@@ -171,23 +190,42 @@ cp lightrag/env.example lightrag/.env</pre>
 
 <h3>2. Download Model Files</h3>
 <div class="card">
-  <p>You need three GGUF model files. Place them under <code>~/models/</code> (or set <code>MODEL_DIR</code> in <code>.env</code>):</p>
+  <p>You need three GGUF model files (~8 GB total). Place them under <code>~/models/</code> (or set <code>MODEL_DIR</code> in <code>.env</code>):</p>
   <table>
-    <tr><th>Model</th><th>File</th><th>Size</th><th>Source</th></tr>
-    <tr><td>LLM (Gemma 4 12B)</td><td><code>Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</code></td><td>~6.9 GB</td><td>HuggingFace / ggml-org</td></tr>
-    <tr><td>Embedding (nomic-embed-v2)</td><td><code>nomic-embed-text-v2-moe.Q6_K.gguf</code></td><td>~379 MB</td><td>HuggingFace / ggml-org</td></tr>
-    <tr><td>Reranker (bge-reranker-v2-m3)</td><td><code>bge-reranker-v2-m3-Q4_K_M.gguf</code></td><td>~418 MB</td><td>HuggingFace / ggml-org</td></tr>
+    <tr><th>Model</th><th>File</th><th>Size</th><th>HuggingFace Search</th></tr>
+    <tr><td>LLM (Gemma 4 12B)</td><td><code>Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</code></td><td>~6.9 GB</td><td>Search "Gemma-4-12B OBLITERATED GGUF" on <a href="https://huggingface.co/models?search=gemma-4-12b-obliterated+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
+    <tr><td>Embedding (nomic-embed-v2)</td><td><code>nomic-embed-text-v2-moe.Q6_K.gguf</code></td><td>~379 MB</td><td>Search "nomic-embed-text-v2-moe GGUF" on <a href="https://huggingface.co/models?search=nomic-embed-text-v2-moe+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
+    <tr><td>Reranker (bge-reranker-v2-m3)</td><td><code>bge-reranker-v2-m3-Q4_K_M.gguf</code></td><td>~418 MB</td><td>Search "bge-reranker-v2-m3 GGUF" on <a href="https://huggingface.co/models?search=bge-reranker-v2-m3+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
   </table>
-  <p style="margin-top:0.5rem">Expected directory layout:</p>
-<pre><span class="muted">~/models/</span>
-<span class="muted">├── gemma4-12b-obliterated/</span>
-<span class="muted">│   └── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</span>
-<span class="muted">├── nomic-embed-v2/</span>
-<span class="muted">│   └── nomic-embed-text-v2-moe.Q6_K.gguf</span>
-<span class="muted">└── bge-reranker-v2-m3/</span>
-<span class="muted">    └── bge-reranker-v2-m3-Q4_K_M.gguf</span></pre>
-  <p style="margin-top:0.5rem"><strong>Optional:</strong> For VLM (vision) support, also download the multimodal projection file:</p>
-<pre><span class="muted">~/models/gemma4-12b-qat/</span>
+  <p style="margin-top:0.75rem"><strong>How to download from HuggingFace:</strong></p>
+  <pre><span class="muted"># Option A: Direct browser download</span>
+<span class="muted"># 1. Click the HuggingFace links above</span>
+<span class="muted"># 2. Find the .gguf file in the Files & versions tab</span>
+<span class="muted"># 3. Click the download icon next to the file</span>
+
+<span class="muted"># Option B: Install huggingface-cli for faster downloads</span>
+pip install huggingface-hub
+
+<span class="muted"># Example: download the LLM model</span>
+huggingface-cli download bartowski/Gemma-4-12B-OBLITERATED-GGUF \
+  Gemma-4-12B-OBLITERATED-Q4_K_M.gguf \
+  --local-dir ~/models/gemma4-12b-obliterated
+
+<span class="muted"># The exact repo name may differ — search HuggingFace for the</span>
+<span class="muted"># current location of each model.</span></pre>
+  <p style="margin-top:0.75rem">Create the directory structure and place files:</p>
+<pre><span class="muted"># Create model directories</span>
+mkdir -p ~/models/gemma4-12b-obliterated
+mkdir -p ~/models/nomic-embed-v2
+mkdir -p ~/models/bge-reranker-v2-m3
+
+<span class="muted"># Move downloaded files into place</span>
+<span class="muted"># (paths depend on how you downloaded them)</span>
+mv ~/Downloads/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf ~/models/gemma4-12b-obliterated/
+mv ~/Downloads/nomic-embed-text-v2-moe.Q6_K.gguf ~/models/nomic-embed-v2/
+mv ~/Downloads/bge-reranker-v2-m3-Q4_K_M.gguf ~/models/bge-reranker-v2-m3/</pre>
+  <p style="margin-top:0.75rem"><strong>Optional:</strong> For VLM (vision) support, also download the multimodal projection file:</p>
+  <pre><span class="muted">~/models/gemma4-12b-qat/</span>
 <span class="muted">└── mmproj-BF16.gguf</span></pre>
   <p class="muted" style="margin-top:0.5rem">The <code>models/</code> directory in the repo is gitignored. The start scripts expect <code>~/models/</code> by default — adjust <code>MODEL_DIR</code> in <code>.env</code> if your models live elsewhere.</p>
 </div>
