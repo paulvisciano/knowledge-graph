@@ -975,12 +975,12 @@
         const targetVis = nodeTargetOpacity.get(targetId) ?? 0;
         return sourceVis > 0.01 && targetVis > 0.01;
       })
-      .d3AlphaDecay(0.1)
+      .d3AlphaDecay(0.3)
       .d3VelocityDecay(0.3)
-      .d3AlphaMin(0.05)
-      .warmupTicks(50)
-      .cooldownTicks(100)
-      .cooldownTime(3000)
+      .d3AlphaMin(0.5)
+      .warmupTicks(20)
+      .cooldownTicks(30)
+      .cooldownTime(500)
       .onEngineStop(() => {
         // Freeze simulation once layout settles — prevent any drift on interaction
         fg.d3AlphaDecay(1);
@@ -1063,7 +1063,7 @@
 
     setTimeout(() => {
       fg.zoomToFit(500, 80);
-    }, 1000);
+    }, 200);
 
     // Override default TrackballControls scroll zoom with cursor-centered zoom
     const controls = fg.controls();
