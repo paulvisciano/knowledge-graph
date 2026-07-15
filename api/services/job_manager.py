@@ -262,6 +262,15 @@ async def resume_pending_jobs() -> list[str]:
             if not Path(job.file_path).exists():
                 await update_job_status(job.id, "failed", "error", "File no longer exists")
                 continue
+            prior_events = await get_events(job.id)
+            prior_types = {e["event_type"] for e in prior_events}
+            if "detecting_faces" in prior_types and "faces_complete" not in prior_types:
+                if not job.skip_faces:
+                    job.skip_faces = True
+                    logger.warning(
+                        "Job %s was interrupted during face detection — skipping faces on resume",
+                        job.id,
+                    )
             logger.info("Re-running interrupted job %s for %s", job.id, job.file_source)
             await start_processing(job)
             resumed.append(job.id)

@@ -42,6 +42,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +66,7 @@ _sklearn_dbscan_checked: bool = False
 _DEFAULT_MODEL = "ArcFace"
 _DEFAULT_DETECTOR = "retinaface"
 _FALLBACK_DETECTOR = "mtcnn"
+_FACE_DETECT_MAX_DIM = int(os.environ.get("FACE_DETECT_MAX_DIM", "1920"))
 
 
 def _import_deepface() -> Any:  # noqa: ANN401 — module-level cache, type varies
@@ -153,6 +157,51 @@ def _bbox_from_facial_area(facial_area: dict[str, int]) -> list[int]:
     return [x, y, x + w, y + h]
 
 
+@contextmanager
+def _downscale_for_detection(image_path: str | Path, max_long: int = _FACE_DETECT_MAX_DIM):
+    """Yield ``(effective_path, scale_x, scale_y)`` for face detection.
+
+    If the image's longest edge exceeds ``max_long``, a downscaled JPEG copy
+    is written to a temp file and yielded as ``effective_path``.  ``scale_x``
+    and ``scale_y`` are the factors to convert coordinates from the downscaled
+    image back to the original (``orig_coord = ds_coord * scale``).
+
+    If the image is already small enough, the original path is yielded with
+    scale factors of 1.0 and no temp file is created.
+    """
+    from PIL import Image
+
+    image_path = Path(image_path)
+    with Image.open(image_path) as img:
+        w, h = img.size
+    longest = max(w, h)
+    if longest <= max_long:
+        yield str(image_path), 1.0, 1.0
+        return
+
+    scale = max_long / longest
+    ds_w, ds_h = int(w * scale), int(h * scale)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            img = img.resize((ds_w, ds_h), Image.Resampling.LANCZOS)
+            img.save(tmp_path, "JPEG", quality=90)
+        logger.info(
+            f"[FACE] Downscaled {image_path.name} from {w}x{h} to {ds_w}x{ds_h} "
+            f"for detection (scale={scale:.3f})"
+        )
+        yield tmp_path, w / ds_w, h / ds_h
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _detect_with_fallback(
     deepface: Any,
     image_path: str | Path,
@@ -240,7 +289,8 @@ def detect_faces(image_path: str | Path) -> list[dict[str, Any]]:
 
     try:
         logger.info(f"[FACE] Detecting faces in {image_path.name} ({image_path.stat().st_size / 1_048_576:.1f} MB)")
-        raw_faces = _detect_with_fallback(deepface, image_path)
+        with _downscale_for_detection(image_path) as (eff_path, sx, sy):
+            raw_faces = _detect_with_fallback(deepface, eff_path)
     except Exception as exc:
         logger.warning(f"[FACE] Face detection failed on {image_path.name}: {exc}")
         return []
@@ -253,6 +303,13 @@ def detect_faces(image_path: str | Path) -> list[dict[str, Any]]:
     for idx, face in enumerate(raw_faces):
         facial_area = face.get("facial_area", {})
         confidence = face.get("confidence", 0.0)
+        if sx != 1.0 or sy != 1.0:
+            facial_area = {
+                "x": int(facial_area.get("x", 0) * sx),
+                "y": int(facial_area.get("y", 0) * sy),
+                "w": int(facial_area.get("w", 0) * sx),
+                "h": int(facial_area.get("h", 0) * sy),
+            }
         fid = _face_id(image_path, idx, facial_area)
         bbox = _bbox_from_facial_area(facial_area)
         results.append(
@@ -319,36 +376,33 @@ def extract_face_embeddings(
             f"[FACE] Extracting embeddings from {image_path.name} "
             f"({image_path.stat().st_size / 1_048_576:.1f} MB, model={model_name})"
         )
-        str_path = str(image_path)
-        # DeepFace.represent returns a list of dicts; each has
-        # 'embedding', 'facial_area', and 'face_confidence'.
-        try:
-            representations = deepface.represent(
-                img_path=str_path,
-                model_name=model_name,
-                detector_backend=detector_backend,
-                enforce_detection=True,
-            )
-        except ValueError as exc:
-            # RetinaFace can raise ValueError on certain images; fall back
-            if "Face could not be detected" in str(exc) or detector_backend != _FALLBACK_DETECTOR:
-                logger.info(
-                    f"[FACE] {detector_backend} detector failed for embeddings on "
-                    f"{image_path.name}, trying {_FALLBACK_DETECTOR}"
+        with _downscale_for_detection(image_path) as (eff_path, sx, sy):
+            try:
+                representations = deepface.represent(
+                    img_path=eff_path,
+                    model_name=model_name,
+                    detector_backend=detector_backend,
+                    enforce_detection=True,
                 )
-                try:
-                    representations = deepface.represent(
-                        img_path=str_path,
-                        model_name=model_name,
-                        detector_backend=_FALLBACK_DETECTOR,
-                        enforce_detection=True,
+            except ValueError as exc:
+                if "Face could not be detected" in str(exc) or detector_backend != _FALLBACK_DETECTOR:
+                    logger.info(
+                        f"[FACE] {detector_backend} detector failed for embeddings on "
+                        f"{image_path.name}, trying {_FALLBACK_DETECTOR}"
                     )
-                except ValueError:
+                    try:
+                        representations = deepface.represent(
+                            img_path=eff_path,
+                            model_name=model_name,
+                            detector_backend=_FALLBACK_DETECTOR,
+                            enforce_detection=True,
+                        )
+                    except ValueError:
+                        logger.debug(f"[FACE] No faces detected in {image_path.name}")
+                        return []
+                else:
                     logger.debug(f"[FACE] No faces detected in {image_path.name}")
                     return []
-            else:
-                logger.debug(f"[FACE] No faces detected in {image_path.name}")
-                return []
     except Exception as exc:
         logger.warning(f"[FACE] Embedding extraction failed on {image_path.name}: {exc}")
         return []
@@ -362,10 +416,16 @@ def extract_face_embeddings(
         facial_area = rep.get("facial_area", {})
         confidence = rep.get("face_confidence", 0.0)
         embedding = rep.get("embedding", [])
+        if sx != 1.0 or sy != 1.0:
+            facial_area = {
+                "x": int(facial_area.get("x", 0) * sx),
+                "y": int(facial_area.get("y", 0) * sy),
+                "w": int(facial_area.get("w", 0) * sx),
+                "h": int(facial_area.get("h", 0) * sy),
+            }
         fid = _face_id(image_path, idx, facial_area)
         bbox = _bbox_from_facial_area(facial_area)
 
-        # Convert numpy array to list for JSON-serialisable output
         emb_list: list[float] = (
             embedding.tolist() if isinstance(embedding, np.ndarray) else [float(v) for v in embedding]
         )
@@ -528,7 +588,6 @@ def identify_person(
         logger.debug(f"[FACE] Face database not found: {db_path}")
         return []
 
-    str_path = str(image_path)
     str_db = str(db_path)
 
     try:
@@ -536,26 +595,26 @@ def identify_person(
             f"[FACE] Identifying persons in {image_path.name} against "
             f"database at {db_path} (model={model_name})"
         )
-        try:
-            dfs = deepface.find(
-                img_path=str_path,
-                db_path=str_db,
-                model_name=model_name,
-                detector_backend=detector_backend,
-                enforce_detection=False,
-            )
-        except Exception:
-            # Retry with opencv detector on failure
-            logger.info(
-                f"[FACE] Retrying identification with {_FALLBACK_DETECTOR} detector"
-            )
-            dfs = deepface.find(
-                img_path=str_path,
-                db_path=str_db,
-                model_name=model_name,
-                detector_backend=_FALLBACK_DETECTOR,
-                enforce_detection=False,
-            )
+        with _downscale_for_detection(image_path) as (eff_path, _sx, _sy):
+            try:
+                dfs = deepface.find(
+                    img_path=eff_path,
+                    db_path=str_db,
+                    model_name=model_name,
+                    detector_backend=detector_backend,
+                    enforce_detection=False,
+                )
+            except Exception:
+                logger.info(
+                    f"[FACE] Retrying identification with {_FALLBACK_DETECTOR} detector"
+                )
+                dfs = deepface.find(
+                    img_path=eff_path,
+                    db_path=str_db,
+                    model_name=model_name,
+                    detector_backend=_FALLBACK_DETECTOR,
+                    enforce_detection=False,
+                )
     except Exception as exc:
         logger.warning(f"[FACE] Person identification failed on {image_path.name}: {exc}")
         return []
@@ -645,36 +704,33 @@ def analyze_attributes(
     if actions is None:
         actions = ["age", "gender", "emotion", "race"]
 
-    str_path = str(image_path)
-
     try:
         logger.info(
             f"[FACE] Analyzing attributes in {image_path.name} "
             f"({image_path.stat().st_size / 1_048_576:.1f} MB, actions={actions})"
         )
-        try:
-            analysis = deepface.analyze(
-                img_path=str_path,
-                actions=actions,
-                detector_backend=detector_backend,
-                enforce_detection=False,
-            )
-        except Exception:
-            # Retry with opencv detector on failure
-            logger.info(
-                f"[FACE] Retrying attribute analysis with {_FALLBACK_DETECTOR} detector"
-            )
-            analysis = deepface.analyze(
-                img_path=str_path,
-                actions=actions,
-                detector_backend=_FALLBACK_DETECTOR,
-                enforce_detection=False,
-            )
+        with _downscale_for_detection(image_path) as (eff_path, sx, sy):
+            try:
+                analysis = deepface.analyze(
+                    img_path=eff_path,
+                    actions=actions,
+                    detector_backend=detector_backend,
+                    enforce_detection=False,
+                )
+            except Exception:
+                logger.info(
+                    f"[FACE] Retrying attribute analysis with {_FALLBACK_DETECTOR} detector"
+                )
+                analysis = deepface.analyze(
+                    img_path=eff_path,
+                    actions=actions,
+                    detector_backend=_FALLBACK_DETECTOR,
+                    enforce_detection=False,
+                )
     except Exception as exc:
         logger.warning(f"[FACE] Attribute analysis failed on {image_path.name}: {exc}")
         return []
 
-    # DeepFace.analyze() may return a single dict or a list of dicts
     if isinstance(analysis, dict):
         analysis = [analysis]
 
@@ -685,7 +741,13 @@ def analyze_attributes(
     results: list[dict[str, Any]] = []
     for idx, face_info in enumerate(analysis):
         facial_area = face_info.get("region", {})
-        # region uses 'x', 'y', 'w', 'h' — same format as extract_faces
+        if sx != 1.0 or sy != 1.0:
+            facial_area = {
+                "x": int(facial_area.get("x", 0) * sx),
+                "y": int(facial_area.get("y", 0) * sy),
+                "w": int(facial_area.get("w", 0) * sx),
+                "h": int(facial_area.get("h", 0) * sy),
+            }
         fid = _face_id(image_path, idx, facial_area)
 
         age = face_info.get("age")
@@ -693,7 +755,6 @@ def analyze_attributes(
         emotion = face_info.get("dominant_emotion")
         race = face_info.get("dominant_race")
 
-        # Convert age to int if it's numeric
         if age is not None:
             try:
                 age = int(age)

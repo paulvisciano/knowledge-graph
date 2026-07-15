@@ -632,29 +632,12 @@ async def process_image(
         try:
             face_data = await _run_face_detection_subprocess(image_path, known_faces_path)
             if face_data is None:
-                logger.info("Subprocess returned None for %s — falling back to in-process detection", image_path)
-                try:
-                    face_data = await asyncio.wait_for(
-                        asyncio.to_thread(_process_faces, image_path, known_faces_path),
-                        timeout=120,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("In-process face detection timed out for %s (120s)", image_path)
-                    face_data = None
+                logger.warning("Face recognition subprocess failed for %s — continuing without faces", image_path)
+                face_data = None
             logger.info("Face detection completed for %s: %s", image_path, "ok" if face_data else "none")
         except Exception as exc:
-            logger.warning("Face recognition error for %s: %s — trying in-process fallback", image_path, exc)
-            try:
-                face_data = await asyncio.wait_for(
-                    asyncio.to_thread(_process_faces, image_path, known_faces_path),
-                    timeout=120,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("In-process face detection timed out for %s (120s)", image_path)
-                face_data = None
-            except Exception:
-                logger.exception("In-process face detection also failed for %s", image_path)
-                face_data = None
+            logger.warning("Face recognition error for %s: %s — continuing without faces", image_path, exc)
+            face_data = None
         yield ProcessingEvent(event="faces_complete", data={"faces": face_data or {}})
 
     captions = _build_captions(exif_data, face_data, image_path)
