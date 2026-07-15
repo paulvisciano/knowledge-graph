@@ -1,0 +1,4 @@
+[submodule "lightrag"]
+	path = lightrag
+	url = https://github.com/paulvisciano/LightRAG.git
+	branch = knowledge-graph-custom

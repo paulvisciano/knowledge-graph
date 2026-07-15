@@ -12,8 +12,9 @@ __pycache__/
 models/
 !models/.gitkeep
 
-lightrag/
-!lightrag/.env.example
+# lightrag is now a git submodule — not ignored
+# Local config inside lightrag
+lightrag/.env
 
 secrets/
 
