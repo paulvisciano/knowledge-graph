@@ -1913,7 +1913,11 @@
 
   @media (max-width: 768px) {
     .chat-input-bar {
-      bottom: 64px;
+      position: fixed;
+      bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
+      left: 0;
+      right: 0;
+      transform: none;
       max-width: 100%;
       padding: 0 8px;
     }
