@@ -198,6 +198,7 @@ cp lightrag/env.example lightrag/.env</pre>
     <tr><td>Reranker (bge-reranker-v2-m3)</td><td><code>bge-reranker-v2-m3-Q4_K_M.gguf</code></td><td>~418 MB</td><td>Search "bge-reranker-v2-m3 GGUF" on <a href="https://huggingface.co/models?search=bge-reranker-v2-m3+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
     <tr><td>Vision projection (mmproj)</td><td><code>mmproj-BF16.gguf</code></td><td>~2.3 GB</td><td>Search "Gemma 4 12B mmproj GGUF" on <a href="https://huggingface.co/models?search=gemma-4+mmproj+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
   </table>
+  <p class="muted" style="margin-top:0.5rem"><strong>Why mmproj?</strong> Gemma 4 has a vision architecture, but in llama.cpp the vision encoder weights are a separate file. The base GGUF contains only the language model — <code>mmproj-BF16.gguf</code> is the vision projection that maps image pixels into the model's embedding space. Without it, <code>llama-server</code> cannot process images. The start script passes it via <code>--mmproj</code>.</p>
   <p style="margin-top:0.75rem"><strong>How to download from HuggingFace:</strong></p>
   <pre><span class="muted"># Option A: Direct browser download</span>
 <span class="muted"># 1. Click the HuggingFace links above</span>
