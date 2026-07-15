@@ -1,5 +1,4 @@
 <script lang="ts">
-  import '$lib/framework7';
   import '../app.css';
   import Icon from '$lib/components/ui/Icon.svelte';
   import NavDrawer from '$lib/components/ui/NavDrawer.svelte';
@@ -9,7 +8,7 @@
   import { navDrawerOpen, historyPanelOpen, settingsDrawerOpen, activeTab, type TabId } from '$lib/stores/ui';
   import { connectionStore } from '$lib/stores/connection.svelte';
   import { lightragStatus, llamaStatus } from '$lib/stores/ui';
-  import { isMobile } from '$lib/composables/use-breakpoint';
+  import { isMobile, isTablet } from '$lib/composables/use-breakpoint';
 
   let { children }: { children: import('svelte').Snippet } = $props();
 
@@ -36,7 +35,7 @@
   }
 </script>
 
-{#if $isMobile}
+{#if $isMobile || $isTablet}
   <div class="nexus-mobile-shell">
       <header class="mobile-topbar">
         <button onclick={openMobileNav} class="mobile-topbar-btn" aria-label="Menu">
