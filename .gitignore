@@ -39,3 +39,6 @@ venv/
 
 # Face crop cache
 face_crops/
+.playwright-mcp/
+dist/
+graph-screenshot.png
