@@ -62,7 +62,7 @@ _sklearn_dbscan_checked: bool = False
 # Default configuration
 _DEFAULT_MODEL = "ArcFace"
 _DEFAULT_DETECTOR = "retinaface"
-_FALLBACK_DETECTOR = "opencv"
+_FALLBACK_DETECTOR = "mtcnn"
 
 
 def _import_deepface() -> Any:  # noqa: ANN401 — module-level cache, type varies

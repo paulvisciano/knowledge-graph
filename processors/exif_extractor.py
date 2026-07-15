@@ -12,6 +12,7 @@ Graph through the existing entity extraction pipeline.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,36 @@ def _friendly_camera(make: str | None, model: str | None) -> str | None:
     return " ".join(parts) if parts else None
 
 
+_COMMON_ABBREVIATIONS: dict[str, str] = {
+    "st": "Saint",
+    "st.": "Saint",
+    "mt": "Mount",
+    "mt.": "Mount",
+    "ft": "Fort",
+    "ft.": "Fort",
+    "n": "North",
+    "s": "South",
+    "e": "East",
+    "w": "West",
+}
+
+
+def _normalize_city_name(name: str) -> str:
+    normalized = re.sub(r"\s+", " ", name.strip())
+    normalized = re.sub(r"\.", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized.strip())
+
+    words: list[str] = []
+    for word in normalized.split(" "):
+        lower = word.lower()
+        if lower in _COMMON_ABBREVIATIONS:
+            words.append(_COMMON_ABBREVIATIONS[lower])
+        else:
+            words.append(word.title() if word and not word[0].isupper() else word)
+
+    return " ".join(words)
+
+
 def _friendly_location(geo: dict[str, str]) -> str | None:
     city = geo.get("city", "").strip()
     admin1 = geo.get("admin1", "").strip()
@@ -164,7 +195,7 @@ def _friendly_location(geo: dict[str, str]) -> str | None:
 
     parts = []
     if city:
-        parts.append(city)
+        parts.append(_normalize_city_name(city))
     if admin1 and admin1 != city:
         parts.append(admin1)
     if cc:
