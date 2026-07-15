@@ -197,6 +197,7 @@ cp .env.example .env</pre>
     <tr><td>Vision projection (mmproj)</td><td><code>mmproj-BF16.gguf</code></td><td>~2.3 GB</td><td>Search "Gemma 4 12B mmproj GGUF" on <a href="https://huggingface.co/models?search=gemma-4+mmproj+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
   </table>
   <p class="muted" style="margin-top:0.5rem"><strong>Why mmproj?</strong> Gemma 4 has a vision architecture, but in llama.cpp the vision encoder weights are a separate file. The base GGUF contains only the language model — <code>mmproj-BF16.gguf</code> is the vision projection that maps image pixels into the model's embedding space. Without it, <code>llama-server</code> cannot process images. The start script passes it via <code>--mmproj</code>.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>⚠️ mmproj compatibility:</strong> The Gemma 4 12B mmproj uses the <code>gemma4uv</code> projector type, which requires llama.cpp <strong>v9750+</strong> (June 2026 or later). Older versions crash with <code>unknown projector type: gemma4uv</code>. If you see this error, upgrade: <code>brew upgrade llama.cpp</code>. If you can't upgrade, move the mmproj aside (<code>mv mmproj-BF16.gguf mmproj-BF16.gguf.bak</code>) — the start script will skip <code>--mmproj</code> and the API will fall back to EXIF-only image processing (location, date, camera metadata still works, but no visual descriptions).</p>
   <p style="margin-top:0.75rem"><strong>How to download from HuggingFace:</strong></p>
   <pre><span class="muted"># Option A: Direct browser download</span>
 <span class="muted"># 1. Click the HuggingFace links above</span>
@@ -241,8 +242,12 @@ mv ~/Downloads/bge-reranker-v2-m3-Q4_K_M.gguf ~/models/bge-reranker-v2-m3/</pre>
 <pre><span class="muted"># Install llama.cpp via Homebrew (provides llama-server)</span>
 brew install llama.cpp
 
-<span class="muted"># Verify</span>
-llama-server --version</pre>
+<span class="muted"># Verify — must be v9750+ for Gemma 4 12B vision support</span>
+llama-server --version
+
+<span class="muted"># If older than v9750, upgrade:</span>
+brew upgrade llama.cpp</pre>
+  <p class="muted" style="margin-top:0.5rem"><strong>⚠️ Version requirement:</strong> llama.cpp <strong>v9750+</strong> (June 2026 or later) is required for the <code>gemma4uv</code> projector type used by Gemma 4 12B's mmproj. Older versions crash with <code>unknown projector type: gemma4uv</code>. If you can't upgrade, move the mmproj aside — the stack will run in text-only mode with EXIF fallback for images.</p>
 </div>
 
 <h3>4. Start the LLM Servers (Host — Metal GPU)</h3>
