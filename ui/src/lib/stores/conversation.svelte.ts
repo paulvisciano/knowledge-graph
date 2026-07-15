@@ -12,6 +12,8 @@ class ConversationStore {
   conversations = $state<Conversation[]>([]);
   activeConversationId = $state('');
   unreadConversations = $state<Set<string>>(new Set());
+  /** Incremented each time a conversation is navigated to, used to force re-evaluation even for the same ID */
+  navigateCount = $state(0);
 
   get activeConversation(): Conversation | undefined {
     return this.conversations.find((c) => c.id === this.activeConversationId);
@@ -40,6 +42,7 @@ class ConversationStore {
 
   switchConversation(id: string): void {
     this.activeConversationId = id;
+    this.navigateCount++;
     if (this.unreadConversations.has(id)) {
       this.unreadConversations = new Set(
         [...this.unreadConversations].filter((cid) => cid !== id)
@@ -61,6 +64,13 @@ class ConversationStore {
 
   setConversations(conversations: Conversation[]): void {
     this.conversations = conversations;
+  }
+
+  deleteConversation(id: string): void {
+    this.conversations = this.conversations.filter((c) => c.id !== id);
+    if (this.activeConversationId === id) {
+      this.activeConversationId = this.conversations[0]?.id ?? '';
+    }
   }
 }
 

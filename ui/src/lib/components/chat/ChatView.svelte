@@ -8,6 +8,7 @@
   import { kgApiClient } from '$lib/services/kg-api-client';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { eventBus } from '$lib/stores/event-bus.svelte';
+  import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
 
   interface Conversation {
     id: string;
@@ -105,6 +106,17 @@
     }
   }
 
+  function handleImageAttached(att: Attachment) {
+    if (!isImageType(att.mimeType)) return;
+    const photoNodeId = `${att.name} (Photo)`;
+    graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
+    if (att.dataUrl) {
+      graphStore.setPhotoImage(photoNodeId, att.dataUrl);
+      imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
+    }
+    processImageViaSse(att);
+  }
+
   function createConversation(): Conversation {
     return {
       id: generateId(),
@@ -174,10 +186,9 @@
     conv.updatedAt = Date.now();
 
     // Process image attachments through the KG pipeline with real-time SSE progress
+    // All images are processed concurrently — each gets its own SSE stream
     const imageFiles = attachments.filter((a) => isImageType(a.mimeType) && a.file);
-    for (const att of imageFiles) {
-      processImageViaSse(att);
-    }
+    Promise.allSettled(imageFiles.map((att) => processImageViaSse(att)));
 
     const assistantMsg: ChatMessage = {
       id: generateId(),
@@ -194,15 +205,16 @@
     streamAbortController = new AbortController();
 
     try {
-      type ContentPart = { type: string; text?: string; image_url?: { url: string } };
+      type ContentPart = { type: string; text?: string; image_url?: { url: string }; input_audio?: { data: string; format: string } };
       type ApiMessage = { role: string; content: string | ContentPart[] | null };
       const apiMessages: ApiMessage[] = conv.messages
         .filter((m) => !m.isStreaming)
         .map((m) => {
-          if (m.role === 'user' && m.imageUrls && m.imageUrls.length > 0) {
+          if (m.role === 'user' && ((m.imageUrls && m.imageUrls.length > 0) || m.audioData)) {
             const parts: ContentPart[] = [];
             if (m.content.trim()) parts.push({ type: 'text', text: m.content });
-            for (const url of m.imageUrls) parts.push({ type: 'image_url', image_url: { url } });
+            if (m.audioData) parts.push({ type: 'input_audio', input_audio: { data: m.audioData, format: m.audioFormat ?? 'wav' } });
+            if (m.imageUrls) for (const url of m.imageUrls) parts.push({ type: 'image_url', image_url: { url } });
             return { role: m.role, content: parts };
           }
           return { role: m.role, content: m.content };
@@ -324,6 +336,7 @@
       models={availableModels}
       selectedModel={selectedModel}
       onModelChange={(m: string) => (selectedModel = m)}
+      onImageAttached={handleImageAttached}
     />
   </div>
 </div>

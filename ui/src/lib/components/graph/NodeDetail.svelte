@@ -1,6 +1,8 @@
 <script lang="ts">
   import { type KGNode, type KGEdge } from '$lib/constants';
   import { lightragClient } from '$lib/services/lightrag-client';
+  import { kgApiClient } from '$lib/services/kg-api-client';
+  import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
   const ACCENT_COLORS = ['#00d4ff', '#a855f7', '#00ff88', '#ff8c00'];
 
   let {
@@ -107,6 +109,51 @@
     const et = n.properties?.entity_type;
     if (typeof et === 'string') return et.toLowerCase() === 'image';
     return n.id.toLowerCase().includes('(image)');
+  }
+
+  function isPhotoNode(n: KGNode): boolean {
+    const et = n.properties?.entity_type;
+    if (typeof et === 'string') return et.toLowerCase() === 'photo';
+    return n.id.toLowerCase().includes('(photo)');
+  }
+
+  let reprocessing = $state(false);
+
+  function getFileSourceFromPhoto(n: KGNode): string | null {
+    const src = n.properties?.source_id as string | undefined;
+    if (src) return src;
+    const match = n.id.match(/^(.+)\s*\(Photo\)$/i);
+    return match ? match[1].trim() : null;
+  }
+
+  async function handleReprocess() {
+    if (!node || reprocessing) return;
+    const fileSource = getFileSourceFromPhoto(node);
+    if (!fileSource) return;
+    reprocessing = true;
+    try {
+      const { stream } = kgApiClient.reprocessImageSse(fileSource);
+      const nodeId = node.id;
+      imageProcessingStore.startProcessing(nodeId, fileSource, '');
+      for await (const { data } of stream) {
+        try {
+          const parsed = JSON.parse(data);
+          const eventName: string = parsed.event ?? '';
+          const stage = imageProcessingStore.mapEventToStage(eventName);
+          if (stage) imageProcessingStore.updateStage(nodeId, stage);
+          if (eventName === 'pipeline_complete' || eventName === 'upload_failed') {
+            const error = parsed.data?.error ?? parsed.data?.reason;
+            if (error) imageProcessingStore.updateStage(nodeId, 'error', String(error));
+            break;
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    } catch (err) {
+      console.error('Reprocess failed:', err);
+      if (node) imageProcessingStore.updateStage(node.id, 'error', String(err));
+    } finally {
+      reprocessing = false;
+    }
   }
 
   function getPersonPhotoUrl(n: KGNode): string {
@@ -313,6 +360,21 @@
     </div>
 
     <div class="p-3 border-t border-cyber-border flex gap-2">
+      {#if isPhotoNode(node!) && getFileSourceFromPhoto(node!)}
+        <button
+          onclick={handleReprocess}
+          disabled={reprocessing}
+          class="flex-1 py-2 rounded-lg text-xs font-medium bg-cyber-green/10 text-cyber-green border border-cyber-green/30 hover:bg-cyber-green/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {#if reprocessing}
+            <svg class="inline h-3 w-3 animate-spin mr-1" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+            Reprocessing...
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline mr-1"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            Reprocess
+          {/if}
+        </button>
+      {/if}
       <button
         onclick={() => onqueryAbout(node!)}
         class="flex-1 py-2 rounded-lg text-xs font-medium bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/30 hover:bg-cyber-cyan/20 transition-colors"

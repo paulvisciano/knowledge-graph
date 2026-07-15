@@ -16,7 +16,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { AudioRecorder, convertToWav, transcribeAudio, isAudioRecordingSupported } from '$lib/utils/audio-recording';
+  import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
   import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
 
@@ -42,6 +42,10 @@
     (window as any).__graphStore = graphStore;
     (window as any).__imageProcessingStore = imageProcessingStore;
   }
+
+  $effect(() => {
+    resumeInProgressJobs();
+  });
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
   let isStreaming = $state(false);
@@ -62,6 +66,8 @@
   let attachError = $state('');
   let imageFileInput: HTMLInputElement | undefined = $state();
   let docFileInput: HTMLInputElement | undefined = $state();
+  let isDraggingOver = $state(false);
+  let dragCounter = 0;
 
   // Stream cancellation support — allows navigation during streaming
   let streamAbortController: AbortController | null = null;
@@ -156,20 +162,16 @@
     if (isRecording) {
       isRecording = false;
       try {
-        const audioBlob = await audioRecorder.stopRecording();
-        const wavBlob = await convertToWav(audioBlob);
+        const wavBlob = await audioRecorder.stopRecording();
+        console.log('[audio] WAV blob size:', wavBlob.size, 'type:', wavBlob.type);
         const audioUrl = URL.createObjectURL(wavBlob);
         isTranscribing = true;
-        processingLabel = 'Transcribing...';
-        const text = await transcribeAudio(audioBlob, API.llama.transcriptions);
-        if (text.trim()) {
-          chatInput = text.trim();
-          await handleSend(audioUrl);
-        } else {
-          URL.revokeObjectURL(audioUrl);
-        }
+        processingLabel = 'Processing audio...';
+        const audioData = await blobToBase64(wavBlob);
+        console.log('[audio] base64 length:', audioData.length, 'format: wav');
+        await handleSend(audioUrl, audioData, 'wav');
       } catch (e) {
-        console.error('Transcription failed:', e);
+        console.error('Audio processing failed:', e);
       } finally {
         isTranscribing = false;
         processingLabel = '';
@@ -193,23 +195,41 @@
       return;
     }
     const files = Array.from(fileList).slice(0, remaining);
-    for (const file of files) {
-      try {
-        const att = await fileToAttachment(file);
-        attachments = [...attachments, att];
+
+    // Convert all files to attachments in parallel for responsiveness
+    const results = await Promise.allSettled(files.map((file) => fileToAttachment(file)));
+    const newAttachments: Attachment[] = [];
+    const imageAttachments: Attachment[] = [];
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const att = result.value;
+        newAttachments.push(att);
         if (isImageType(att.mimeType)) {
-          const photoNodeId = `${att.name} (Photo)`;
-          graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
-          if (att.dataUrl) {
-            graphStore.setPhotoImage(photoNodeId, att.dataUrl);
-            imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
-          }
-          // Start processing immediately — don't wait for user to send a message
-          processSingleImage(att);
+          imageAttachments.push(att);
         }
-      } catch (e) {
-        attachError = e instanceof Error ? e.message : 'Failed to attach file';
+      } else {
+        attachError = result.reason instanceof Error ? result.reason.message : 'Failed to attach file';
       }
+    }
+
+    if (newAttachments.length > 0) {
+      attachments = [...attachments, ...newAttachments];
+    }
+
+    // Add all image nodes to the graph immediately and start processing in parallel
+    for (const att of imageAttachments) {
+      const photoNodeId = `${att.name} (Photo)`;
+      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
+      if (att.dataUrl) {
+        graphStore.setPhotoImage(photoNodeId, att.dataUrl);
+        imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
+      }
+    }
+
+    // Process all images concurrently — each gets its own job and SSE stream
+    for (const att of imageAttachments) {
+      processSingleImage(att);
     }
   }
 
@@ -225,6 +245,40 @@
     const att = attachments.find((a) => a.id === id);
     if (att?.thumbnailUrl) URL.revokeObjectURL(att.thumbnailUrl);
     attachments = attachments.filter((a) => a.id !== id);
+  }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDragEnter(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    if (dragCounter === 1) {
+      isDraggingOver = true;
+    }
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter === 0) {
+      isDraggingOver = false;
+    }
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingOver = false;
+    dragCounter = 0;
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      handleAttachFiles(files);
+    }
   }
 
   let promptTokens = $state<number | null>(null);
@@ -491,22 +545,29 @@
      const maxTurns = 10;
      let turn = 0;
 
-      type ContentPart = { type: string; text?: string; image_url?: { url: string } };
+      type ContentPart = { type: string; text?: string; image_url?: { url: string }; input_audio?: { data: string; format: string } };
       type ApiMessage = { role: string; content: string | ContentPart[] | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } | { role: 'tool'; tool_call_id: string; content: string };
       let apiMessages: ApiMessage[] = [
         { role: 'system', content: configStore.systemPrompt },
         ...messages
           .filter((m) => !m.isStreaming)
           .map((m) => {
-            if (m.role === 'user' && m.imageUrls && m.imageUrls.length > 0) {
+            if (m.role === 'user' && (m.imageUrls && m.imageUrls.length > 0 || m.audioData)) {
               const parts: ContentPart[] = [];
               if (m.content.trim()) parts.push({ type: 'text', text: m.content });
-              for (const url of m.imageUrls) parts.push({ type: 'image_url', image_url: { url } });
+              if (m.audioData) parts.push({ type: 'input_audio', input_audio: { data: m.audioData, format: m.audioFormat ?? 'wav' } });
+              if (m.imageUrls) for (const url of m.imageUrls) parts.push({ type: 'image_url', image_url: { url } });
               return { role: m.role, content: parts } as ApiMessage;
             }
             return { role: m.role, content: m.content } as ApiMessage;
           })
       ];
+
+      const audioMsg = apiMessages.find((m) => 'content' in m && Array.isArray(m.content) && m.content.some((p: ContentPart) => p.type === 'input_audio'));
+      if (audioMsg) {
+        const audioPart = (audioMsg.content as ContentPart[]).find((p: ContentPart) => p.type === 'input_audio');
+        console.log('[audio] Sending input_audio to model, format:', audioPart?.input_audio?.format, 'data length:', audioPart?.input_audio?.data?.length);
+      }
 
       if (sentAttachments.length > 0) {
         let lastUserMsg = -1;
@@ -907,9 +968,10 @@
     }
   }
 
-  async function handleSend(audioUrl?: string, startNew = false) {
+  async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false) {
     const trimmed = chatInput.trim();
-    if ((!trimmed && attachments.length === 0) || isActiveConversationStreaming) return;
+    if ((!trimmed && attachments.length === 0) && !audioData) return;
+    if (isActiveConversationStreaming) return;
 
     chatExpanded = true;
     isProcessing = true;
@@ -929,6 +991,7 @@
       content: trimmed,
       timestamp: Date.now(),
       ...(audioUrl ? { audioUrl } : {}),
+      ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
       ...(imageUrls.length > 0 ? { imageUrls } : {}),
     };
     messages = [...messages, userMsg];
@@ -951,8 +1014,8 @@
     });
 
     // Images are now processed immediately on attach via processSingleImage
-
-    if (chatMode === 'kg-direct') {
+    // Audio requires multimodal content parts, so always route through LLM path
+    if (chatMode === 'kg-direct' && !audioData) {
       await streamKGChatResponse();
     } else {
       await streamAssistantResponse(sentAttachments);
@@ -963,74 +1026,9 @@
   async function processSingleImage(att: Attachment) {
     const photoNodeId = `${att.name} (Photo)`;
     try {
-      const { stream, cancel } = kgApiClient.processImageSse(att.file, { insert: true });
-
-      for await (const sseEvent of stream) {
-        let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number };
-        try {
-          payload = JSON.parse(sseEvent.data);
-        } catch {
-          continue;
-        }
-
-        const eventName = payload.event;
-        const eventData = payload.data ?? {};
-        if (!eventName) continue;
-
-        // Update image processing status
-        const mappedStage = imageProcessingStore.mapEventToStage(eventName);
-        if (mappedStage) {
-          const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
-            ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
-          imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
-        }
-
-        // Capture EXIF data for the overlay card
-        if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
-          imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
-        }
-
-        // Push progress to activity feed
-        eventBus.pushEvent({
-          id: crypto.randomUUID(),
-          type: 'graph_update',
-          title: eventName.replace(/_/g, ' '),
-          description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
-          timestamp: Date.now(),
-          status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
-            ? 'completed'
-            : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
-              ? 'error'
-              : 'running',
-          meta: eventData as Record<string, unknown>,
-        });
-
-        // Live graph updates on entity creation events
-        if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
-          const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
-          const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
-          graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
-          if (eventName === 'photo_node_created' && att.dataUrl) {
-            graphStore.setPhotoImage(nodeId, att.dataUrl);
-          }
-        } else if (eventName === 'visual_entity_linked') {
-          const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
-          const targetId = String(eventData.target ?? eventData.entity_name ?? '');
-          const edgeType = String(eventData.relation_type ?? 'depicts');
-          graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
-        } else if (eventName === 'exif_relation_created') {
-          const sourceId = String(eventData.source ?? '');
-          const targetId = String(eventData.target ?? '');
-          const edgeType = String(eventData.relation_type ?? 'has_exif');
-          graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
-        }
-
-        // Final sync
-        if (eventName === 'pipeline_complete') {
-          graphStore.pipelineDone = true;
-          graphStore.refresh();
-        }
-      }
+      const job = await kgApiClient.createJob(att.file, { insert: true });
+      imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl ?? '', job.job_id);
+      await consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.warn(`KG image processing failed for ${att.name}:`, err);
@@ -1046,11 +1044,100 @@
     }
   }
 
+  /** Consume SSE events from a job, with automatic reconnect on page reload. */
+  async function consumeJobEvents(jobId: string, photoNodeId: string, att: Attachment, afterEventId: number = 0) {
+    const { stream, cancel } = kgApiClient.streamJobEvents(jobId, afterEventId);
+
+    for await (const sseEvent of stream) {
+      let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number; event_id?: number };
+      try {
+        payload = JSON.parse(sseEvent.data);
+      } catch {
+        continue;
+      }
+
+      const eventName = payload.event;
+      const eventData = payload.data ?? {};
+      if (!eventName) continue;
+
+      const mappedStage = imageProcessingStore.mapEventToStage(eventName);
+      if (mappedStage) {
+        const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
+          ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
+        imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
+      }
+
+      if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
+        imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
+      }
+
+      eventBus.pushEvent({
+        id: crypto.randomUUID(),
+        type: 'graph_update',
+        title: eventName.replace(/_/g, ' '),
+        description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
+        timestamp: Date.now(),
+        status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
+          ? 'completed'
+          : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
+            ? 'error'
+            : 'running',
+        meta: eventData as Record<string, unknown>,
+      });
+
+      if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
+        const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
+        const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
+        graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
+        if (eventName === 'photo_node_created' && att.dataUrl) {
+          graphStore.setPhotoImage(nodeId, att.dataUrl);
+        }
+      } else if (eventName === 'visual_entity_linked') {
+        const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
+        const targetId = String(eventData.target ?? eventData.entity_name ?? '');
+        const edgeType = String(eventData.relation_type ?? 'depicts');
+        graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+      } else if (eventName === 'exif_relation_created') {
+        const sourceId = String(eventData.source ?? '');
+        const targetId = String(eventData.target ?? '');
+        const edgeType = String(eventData.relation_type ?? 'has_exif');
+        graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+      }
+
+      if (eventName === 'pipeline_complete' || eventName === 'pipeline_failed') {
+        graphStore.pipelineDone = true;
+        graphStore.refresh();
+        cancel();
+        return;
+      }
+    }
+  }
+
   /** Send image attachments through the KG pipeline with real-time SSE progress. */
   async function processImageAttachments(atts: Attachment[]) {
     const imageFiles = atts.filter((a) => isImageType(a.mimeType) && a.file);
     for (const att of imageFiles) {
       processSingleImage(att);
+    }
+  }
+
+  /** On page load, reconnect to any in-progress jobs from the server. */
+  async function resumeInProgressJobs() {
+    try {
+      const jobs = await kgApiClient.listJobs('processing');
+      for (const job of jobs) {
+        const photoNodeId = `${job.file_source} (Photo)`;
+        const existing = imageProcessingStore.getByJobId(job.job_id);
+        if (existing) {
+          await consumeJobEvents(job.job_id, existing.nodeId, { name: job.file_source, dataUrl: '' } as Attachment);
+        } else {
+          imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
+          graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: job.file_source });
+          await consumeJobEvents(job.job_id, photoNodeId, { name: job.file_source, dataUrl: '' } as Attachment);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to resume in-progress jobs:', err);
     }
   }
 
@@ -1201,7 +1288,7 @@
     requestAnimationFrame(() => {
       if (panelTextareaEl) panelTextareaEl.style.height = 'auto';
     });
-    handleSend(undefined, false);
+      handleSend(undefined, undefined, undefined, false);
   }
 
   async function fetchModels() {
@@ -1292,6 +1379,21 @@
     fetchModels();
     syncClient.init().then(() => {
       conversations = [...syncClient.conversations];
+      if (conversations.length > 0 && !activeConversationId) {
+        activeConversationId = conversations[0].id;
+        chatExpanded = true;
+        const conv = conversations[0];
+        if (conv.messages.length === 0) {
+          syncClient.loadConversation(conv.id).then((loaded) => {
+            if (loaded.length > 0) {
+              conv.messages = loaded;
+              messages = [...loaded];
+            }
+          });
+        } else {
+          messages = [...conv.messages];
+        }
+      }
       syncClient.startPeriodicSync(30_000, (updated) => {
         conversations = [...updated];
       });
@@ -1304,17 +1406,36 @@
     conversationStore.unreadConversations = unreadConversations;
   });
 
-  let lastStoreConvId = $state('');
+  let lastNavigatedId = '';
+  let lastNavigateCount = 0;
   $effect(() => {
     const storeId = conversationStore.activeConversationId;
-    if (storeId && storeId !== activeConversationId && storeId !== lastStoreConvId) {
-      lastStoreConvId = storeId;
+    const count = conversationStore.navigateCount;
+    if (storeId && (storeId !== lastNavigatedId || count !== lastNavigateCount)) {
+      lastNavigatedId = storeId;
+      lastNavigateCount = count;
       switchConversation(storeId);
     }
   });
 </script>
 
-<div class="relative h-full w-full overflow-hidden">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="relative h-full w-full overflow-hidden"
+  ondragover={handleDragOver}
+  ondragenter={handleDragEnter}
+  ondragleave={handleDragLeave}
+  ondrop={handleDrop}
+>
+  {#if isDraggingOver}
+    <div class="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-cyber-surface/80 backdrop-blur-sm">
+      <div class="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-cyber-cyan/60 px-12 py-8">
+        <Icon name="image" size={32} color="var(--color-cyber-cyan)" />
+        <div class="text-sm font-medium text-cyber-cyan">Drop images to add to graph</div>
+        <div class="text-xs text-cyber-text-dim/60">EXIF data will be extracted automatically</div>
+      </div>
+    </div>
+  {/if}
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
       <GraphView />
@@ -1385,7 +1506,7 @@
             bind:this={textareaEl}
             bind:value={chatInput}
             oninput={autoResize}
-            onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, true); } }}
+            onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, true); } }}
             placeholder={chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
             rows="1"
             data-testid="chat-input"
@@ -1402,7 +1523,7 @@
             </button>
           {:else}
             <button
-              onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, true) : handleMicClick()}
+              onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, undefined, undefined, true) : handleMicClick()}
               disabled={isTranscribing || (!chatInput.trim() && attachments.length === 0 && !recordingSupported)}
               data-testid="send-button"
               class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (chatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 hover:glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/50 text-cyber-text-dim/30 rounded-lg'}"

@@ -2,6 +2,7 @@ export interface ImageProcessingStatus {
   nodeId: string;
   fileName: string;
   dataUrl: string;
+  jobId?: string;
   stage: 'extracting_metadata' | 'creating_entities' | 'processing_ai' | 'linking_entities' | 'complete' | 'error';
   get stageLabel(): string;
   error?: string;
@@ -28,11 +29,12 @@ const EXIF_DISPLAY_KEYS: Record<string, string> = {
 class ImageProcessingStore {
   statuses = $state<Record<string, ImageProcessingStatus>>({});
 
-  startProcessing(nodeId: string, fileName: string, dataUrl: string) {
+  startProcessing(nodeId: string, fileName: string, dataUrl: string, jobId?: string) {
     this.statuses[nodeId] = {
       nodeId,
       fileName,
       dataUrl,
+      jobId,
       stage: 'extracting_metadata',
       get stageLabel() {
         return STAGE_LABELS[this.stage] ?? this.stage;
@@ -40,6 +42,10 @@ class ImageProcessingStore {
       updatedAt: Date.now(),
     };
     this.statuses = { ...this.statuses };
+  }
+
+  getByJobId(jobId: string): ImageProcessingStatus | undefined {
+    return Object.values(this.statuses).find((s) => s.jobId === jobId);
   }
 
   updateStage(nodeId: string, stage: ImageProcessingStatus['stage'], error?: string) {

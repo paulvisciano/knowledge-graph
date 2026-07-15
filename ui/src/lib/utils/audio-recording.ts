@@ -1,12 +1,52 @@
 /**
- * AudioRecorder - Browser-based audio recording with MediaRecorder API.
- * Based on the llama.cpp server UI implementation.
+ * PCM audio capture via AudioWorklet → WAV → base64 for input_audio API.
  */
+
+const WORKLET_PROCESSOR_CODE = `
+class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.isRecording = false;
+    this.port.onmessage = (event) => {
+      if (event.data.type === 'start') {
+        this.isRecording = true;
+      } else if (event.data.type === 'stop') {
+        this.isRecording = false;
+        this.port.postMessage({ type: 'stopped' });
+      }
+    };
+  }
+
+  process(inputs, outputs, parameters) {
+    if (!this.isRecording) return true;
+    const input = inputs[0];
+    if (input && input[0]) {
+      this.port.postMessage({ type: 'audio', samples: Float32Array.from(input[0]) });
+    }
+    return true;
+  }
+}
+
+registerProcessor('pcm-processor', PCMProcessor);
+`;
+
+let workletBlobUrl: string | null = null;
+
+function getWorkletBlobUrl(): string {
+  if (workletBlobUrl) return workletBlobUrl;
+  const blob = new Blob([WORKLET_PROCESSOR_CODE], { type: 'application/javascript' });
+  workletBlobUrl = URL.createObjectURL(blob);
+  return workletBlobUrl;
+}
+
 export class AudioRecorder {
-  private mediaRecorder: MediaRecorder | null = null;
-  private audioChunks: Blob[] = [];
   private stream: MediaStream | null = null;
+  private audioContext: AudioContext | null = null;
+  private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private recordedChunks: Float32Array[] = [];
   private recordingState = false;
+  private _sampleRate = 0;
+  private workletReady: Promise<void> | null = null;
 
   async startRecording(): Promise<void> {
     try {
@@ -18,58 +58,61 @@ export class AudioRecorder {
         },
       });
 
-      this.initializeRecorder(this.stream);
-      this.audioChunks = [];
-      this.mediaRecorder!.start(100);
+      this.audioContext = new AudioContext();
+      this._sampleRate = this.audioContext.sampleRate;
+
+      this.workletReady = this.audioContext.audioWorklet.addModule(getWorkletBlobUrl());
+      await this.workletReady;
+
+      this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
+
+      const workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+      this.recordedChunks = [];
+
+      workletNode.port.onmessage = (event) => {
+        if (event.data.type === 'audio' && this.recordingState) {
+          this.recordedChunks.push(new Float32Array(event.data.samples));
+        }
+      };
+
+      this.sourceNode.connect(workletNode);
+      workletNode.connect(this.audioContext.destination);
+
+      workletNode.port.postMessage({ type: 'start' });
       this.recordingState = true;
     } catch (error) {
       console.error('Failed to start recording:', error);
+      this.cleanupStream();
       throw new Error('Failed to access microphone. Please check permissions.');
     }
   }
 
   async stopRecording(): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      const recorder = this.mediaRecorder;
-      const chunks = this.audioChunks;
-      const stream = this.stream;
+    if (!this.recordingState) {
+      throw new Error('No active recording to stop');
+    }
 
-      if (!recorder || recorder.state === 'inactive') {
-        reject(new Error('No active recording to stop'));
-        return;
-      }
+    this.recordingState = false;
 
-      // Detach instance state so a new recording can start without races
-      this.mediaRecorder = null;
-      this.audioChunks = [];
-      this.stream = null;
-      this.recordingState = false;
+    const chunks = this.recordedChunks;
+    const sampleRate = this._sampleRate;
 
-      recorder.onstop = () => {
-        const audioBlob = new Blob(chunks, {
-          type: recorder.mimeType || 'audio/wav',
-        });
+    this.recordedChunks = [];
+    this.cleanupStream();
 
-        if (stream) {
-          for (const track of stream.getTracks()) {
-            track.stop();
-          }
-        }
+    if (chunks.length === 0) {
+      throw new Error('No audio data recorded');
+    }
 
-        resolve(audioBlob);
-      };
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const samples = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      samples.set(chunk, offset);
+      offset += chunk.length;
+    }
 
-      recorder.onerror = () => {
-        if (stream) {
-          for (const track of stream.getTracks()) {
-            track.stop();
-          }
-        }
-        reject(new Error('Recording failed'));
-      };
-
-      recorder.stop();
-    });
+    return pcmToWav(samples, sampleRate, 1);
   }
 
   isRecording(): boolean {
@@ -77,57 +120,71 @@ export class AudioRecorder {
   }
 
   cancelRecording(): void {
-    const recorder = this.mediaRecorder;
-    const stream = this.stream;
-
-    this.mediaRecorder = null;
-    this.audioChunks = [];
-    this.stream = null;
     this.recordingState = false;
+    this.recordedChunks = [];
+    this.cleanupStream();
+  }
 
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.onstop = null;
-      recorder.onerror = null;
-      recorder.stop();
+  private cleanupStream(): void {
+    if (this.sourceNode) {
+      this.sourceNode.disconnect();
+      this.sourceNode = null;
     }
-
-    if (stream) {
-      for (const track of stream.getTracks()) {
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
+    }
+    if (this.stream) {
+      for (const track of this.stream.getTracks()) {
         track.stop();
       }
+      this.stream = null;
+    }
+  }
+}
+
+function pcmToWav(samples: Float32Array, sampleRate: number, numberOfChannels: number): Blob {
+  const bytesPerSample = 2;
+  const blockAlign = numberOfChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = samples.length * blockAlign;
+  const bufferSize = 44 + dataSize;
+
+  const arrayBuffer = new ArrayBuffer(bufferSize);
+  const view = new DataView(arrayBuffer);
+
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, bufferSize - 8, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numberOfChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bytesPerSample * 8, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  const pcm = new Int16Array(arrayBuffer, 44, samples.length * numberOfChannels);
+  let p = 0;
+  for (let i = 0; i < samples.length; i++) {
+    for (let c = 0; c < numberOfChannels; c++) {
+      let s = samples[i];
+      if (s > 1) s = 1;
+      else if (s < -1) s = -1;
+      pcm[p++] = s * 0x7fff;
     }
   }
 
-  private initializeRecorder(stream: MediaStream): void {
-    const options: MediaRecorderOptions = {};
-
-    // Prefer WAV, fall back to WebM/Opus, then WebM, then MP4
-    if (MediaRecorder.isTypeSupported('audio/wav')) {
-      options.mimeType = 'audio/wav';
-    } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-      options.mimeType = 'audio/webm;codecs=opus';
-    } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-      options.mimeType = 'audio/webm';
-    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-      options.mimeType = 'audio/mp4';
-    }
-
-    this.mediaRecorder = new MediaRecorder(stream, options);
-
-    this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        this.audioChunks.push(event.data);
-      }
-    };
-
-    this.mediaRecorder.onstop = () => {
-      this.recordingState = false;
-    };
-
-    this.mediaRecorder.onerror = () => {
-      this.recordingState = false;
-    };
-  }
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
 }
 
 export async function convertToWav(audioBlob: Blob): Promise<Blob> {
@@ -155,7 +212,7 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   const length = buffer.length;
   const numberOfChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
-  const bytesPerSample = 2; // 16-bit
+  const bytesPerSample = 2;
   const blockAlign = numberOfChannels * bytesPerSample;
   const byteRate = sampleRate * blockAlign;
   const dataSize = length * blockAlign;
@@ -175,12 +232,12 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   writeString(8, 'WAVE');
   writeString(12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
+  view.setUint16(20, 1, true);
   view.setUint16(22, numberOfChannels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
+  view.setUint16(34, bytesPerSample * 8, true);
   writeString(36, 'data');
   view.setUint32(40, dataSize, true);
 
@@ -201,6 +258,19 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   }
 
   return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1] || result;
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error('Failed to convert blob to base64'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export async function transcribeAudio(
@@ -233,6 +303,7 @@ export function isAudioRecordingSupported(): boolean {
     navigator.mediaDevices &&
     typeof navigator.mediaDevices.getUserMedia === 'function' &&
     typeof window !== 'undefined' &&
-    window.MediaRecorder
+    window.AudioContext &&
+    window.AudioWorkletNode
   );
 }

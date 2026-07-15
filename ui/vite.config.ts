@@ -38,6 +38,7 @@ export default defineConfig({
       },
       '/api/sync': {
         target: kgApiHost,
+        rewrite: (path) => path.replace(/^\/api\/sync/, ''),
         ws: true
       },
       '/mcp': {

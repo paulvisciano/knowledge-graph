@@ -12,6 +12,7 @@
     models = [] as string[],
     selectedModel = '',
     onModelChange,
+    onImageAttached,
   }: {
     onSend: (text: string, attachments: Attachment[]) => void;
     disabled?: boolean;
@@ -20,6 +21,7 @@
     models?: string[];
     selectedModel?: string;
     onModelChange?: (model: string) => void;
+    onImageAttached?: (attachment: Attachment) => void;
   } = $props();
 
   let text = $state('');
@@ -29,6 +31,8 @@
   let showModelDropdown = $state(false);
   let attachments = $state<Attachment[]>([]);
   let attachError = $state('');
+  let isDraggingOver = $state(false);
+  let dragCounter = 0;
 
   function autoResize() {
     if (!textareaEl) return;
@@ -77,12 +81,16 @@
       return;
     }
     const files = Array.from(fileList).slice(0, remaining);
-    for (const file of files) {
-      try {
-        const att = await fileToAttachment(file);
+    const results = await Promise.allSettled(files.map((file) => fileToAttachment(file)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const att = result.value;
         attachments = [...attachments, att];
-      } catch (e) {
-        attachError = e instanceof Error ? e.message : 'Failed to attach file';
+        if (isImageType(att.mimeType) && onImageAttached) {
+          onImageAttached(att);
+        }
+      } else {
+        attachError = result.reason instanceof Error ? result.reason.message : 'Failed to attach file';
       }
     }
     if (imageFileInput) imageFileInput.value = '';
@@ -97,12 +105,12 @@
       return;
     }
     const files = Array.from(fileList).slice(0, remaining);
-    for (const file of files) {
-      try {
-        const att = await fileToAttachment(file);
-        attachments = [...attachments, att];
-      } catch (e) {
-        attachError = e instanceof Error ? e.message : 'Failed to attach file';
+    const results = await Promise.allSettled(files.map((file) => fileToAttachment(file)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        attachments = [...attachments, result.value];
+      } else {
+        attachError = result.reason instanceof Error ? result.reason.message : 'Failed to attach file';
       }
     }
     if (docFileInput) docFileInput.value = '';
@@ -122,9 +130,61 @@
     onModelChange?.(m);
     showModelDropdown = false;
   }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDragEnter(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    if (dragCounter === 1) {
+      isDraggingOver = true;
+    }
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter === 0) {
+      isDraggingOver = false;
+    }
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingOver = false;
+    dragCounter = 0;
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
+      if (imageFiles.length > 0) {
+        handleImageFiles(files);
+      } else {
+        handleDocFiles(files);
+      }
+    }
+  }
 </script>
 
-<div class="border-t border-cyber-border bg-cyber-surface px-4 pb-4 pt-3">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="border-t border-cyber-border bg-cyber-surface px-4 pb-4 pt-3 {isDraggingOver ? 'ring-2 ring-cyber-cyan/60 ring-inset' : ''}"
+  ondragover={handleDragOver}
+  ondragenter={handleDragEnter}
+  ondragleave={handleDragLeave}
+  ondrop={handleDrop}
+>
+  {#if isDraggingOver}
+    <div class="mx-auto mb-2 max-w-3xl flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-cyber-cyan/50 bg-cyber-cyan/5 px-4 py-3 text-sm text-cyber-cyan">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+      Drop images here
+    </div>
+  {/if}
   <div class="mx-auto max-w-3xl">
     {#if models.length > 0}
       <div class="mb-2 flex items-center justify-end">

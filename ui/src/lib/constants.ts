@@ -11,6 +11,7 @@ export const API = {
     health: '/health',
     imagesProcess: '/images/process',
     imagesProcessJson: '/images/process-json',
+    imagesReprocess: '/images/reprocess',
     imagesHealth: '/images/health',
     photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
@@ -58,6 +59,11 @@ export const API = {
     health: '/health',
     slots: '/slots',
     transcriptions: '/v1/audio/transcriptions',
+  },
+  sync: {
+    conversations: '/conversations',
+    conversation: (id: string) => `/conversations/${id}`,
+    conversationsSince: '/conversations/since',
   },
 } as const;
 
@@ -149,6 +155,8 @@ export interface ChatMessage {
   timings?: MessageTimings;
   model?: string;
   audioUrl?: string;
+  audioData?: string;
+  audioFormat?: 'wav' | 'mp3';
   imageUrls?: string[];
 }
 

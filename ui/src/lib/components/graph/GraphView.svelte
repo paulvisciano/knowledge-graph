@@ -32,6 +32,7 @@
   let fullscreenUrl = $state<string | null>(null);
 
   let highlightedIds = $state<Set<string>>(new Set());
+  let locallyAddedNodeIds = new Set<string>();
 
   let degreeMap = $derived.by(() => {
     const map = new Map<string, number>();
@@ -78,7 +79,7 @@
       visibleNodeIds = new Set(activePhotoCluster);
       return;
     }
-    // Show the top 50 entities with the most relations
+    // Show the top 50 entities with the most relations, but always include locally-added nodes
     const sorted = [...allNodes].sort((a, b) =>
       (degreeMap.get(b.id) ?? 0) - (degreeMap.get(a.id) ?? 0)
     );
@@ -87,7 +88,11 @@
       return;
     }
     const top50 = sorted.slice(0, 50);
-    visibleNodeIds = new Set(top50.map((n) => n.id));
+    const visible = new Set(top50.map((n) => n.id));
+    for (const id of locallyAddedNodeIds) {
+      visible.add(id);
+    }
+    visibleNodeIds = visible;
   }
 
   let neighbors = $derived.by(() => {
@@ -128,6 +133,8 @@
       }
       allNodes = graph.nodes ?? [];
       allEdges = graph.edges ?? [];
+      // Locally-added nodes are now in the server data, clear the tracking set
+      locallyAddedNodeIds.clear();
       initVisibleNodes();
       fetchPhotoImages(allNodes);
       fetchPersonImages(allNodes);
@@ -443,6 +450,7 @@
         allNodes = [...allNodes, node];
         existingNodeIds.add(node.id);
         changed = true;
+        locallyAddedNodeIds.add(node.id);
         if (node.labels?.includes('Photo') || node.properties?.entity_type === 'Photo' || node.id.includes('(Photo)')) {
           newPhotoNodeId = node.id;
         }
@@ -457,26 +465,26 @@
     }
 
     if (changed) {
-      // When a new Photo is attached, show only its cluster.
-      // Otherwise (e.g. SSE adding EXIF entities), expand the cluster.
+      // When a new Photo is attached, add it and its cluster to the visible set.
+      // Preserve existing visible nodes so the rest of the graph stays visible.
       if (newPhotoNodeId) {
-        const clusterIds = new Set<string>();
-        clusterIds.add(newPhotoNodeId);
+        const newVisible = new Set(visibleNodeIds);
+        newVisible.add(newPhotoNodeId);
         // Include all nodes connected to the photo via edges
         for (const edge of allEdges) {
-          if (edge.source === newPhotoNodeId) clusterIds.add(edge.target);
-          if (edge.target === newPhotoNodeId) clusterIds.add(edge.source);
+          if (edge.source === newPhotoNodeId) newVisible.add(edge.target);
+          if (edge.target === newPhotoNodeId) newVisible.add(edge.source);
         }
         // Also include any other newly-added nodes (they're likely related)
         for (const node of storeNodes) {
-          clusterIds.add(node.id);
+          newVisible.add(node.id);
         }
-        visibleNodeIds = clusterIds;
+        visibleNodeIds = newVisible;
         highlightedIds = new Set([newPhotoNodeId]);
-        activePhotoCluster = clusterIds;
+        activePhotoCluster = newVisible;
       } else if (activePhotoCluster) {
-        // SSE is adding EXIF/visual entities to the existing photo cluster
-        const expanded = new Set(activePhotoCluster);
+        // SSE is adding EXIF/visual entities to the existing photo cluster — merge into visible set
+        const expanded = new Set(visibleNodeIds);
         for (const node of storeNodes) {
           expanded.add(node.id);
         }
