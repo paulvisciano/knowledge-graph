@@ -1381,7 +1381,6 @@
       conversations = [...syncClient.conversations];
       if (conversations.length > 0 && !activeConversationId) {
         activeConversationId = conversations[0].id;
-        chatExpanded = true;
         const conv = conversations[0];
         if (conv.messages.length === 0) {
           syncClient.loadConversation(conv.id).then((loaded) => {
@@ -1408,9 +1407,21 @@
 
   let lastNavigatedId = '';
   let lastNavigateCount = 0;
+  let firstLoadSeen = false;
   $effect(() => {
     const storeId = conversationStore.activeConversationId;
     const count = conversationStore.navigateCount;
+    // Skip the initial auto-selection on load so the chat doesn't auto-expand.
+    // The first time a non-empty storeId appears (from init loading conversations),
+    // record it but don't call switchConversation (which expands the chat).
+    if (!firstLoadSeen) {
+      if (storeId) {
+        firstLoadSeen = true;
+        lastNavigatedId = storeId;
+        lastNavigateCount = count;
+      }
+      return;
+    }
     if (storeId && (storeId !== lastNavigatedId || count !== lastNavigateCount)) {
       lastNavigatedId = storeId;
       lastNavigateCount = count;
