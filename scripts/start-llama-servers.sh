@@ -14,12 +14,10 @@ EMBED_PORT="${EMBED_MODEL_PORT:-8081}"
 RERANK_PORT="${RERANKER_PORT:-8082}"
 
 LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/gemma4-12b-obliterated/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf}"
-LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-gemma-4-12B-it-qat-UD-Q4_K_XL}"
+LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
 EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/nomic-embed-v2/nomic-embed-text-v2-moe.Q6_K.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
-MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-qat/mmproj-BF16.gguf}"
-MTP_DRAFT_PATH="${MTP_DRAFT_PATH:-$MODEL_DIR/gemma4-12b-qat/mtp-gemma-4-12B-it.gguf}"
-
+MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-obliterated/mmproj-BF16.gguf}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"
@@ -34,9 +32,7 @@ if [[ ! -x "$LLAMA_SERVER" ]]; then
 fi
 
 MMPROJ_FLAG=""
-MTP_FLAGS=""
 [[ -f "$MMPROJ_PATH" ]] && MMPROJ_FLAG="--mmproj $MMPROJ_PATH"
-[[ -f "$MTP_DRAFT_PATH" ]] && MTP_FLAGS="--model-draft $MTP_DRAFT_PATH --spec-type draft-mtp --spec-draft-n-max 4"
 
 health_check() {
     local port=$1
@@ -67,7 +63,6 @@ echo "Starting LLM on port ${LLM_PORT}..."
     -m "$LLM_MODEL_PATH" \
     --alias "$LLM_MODEL_ALIAS" \
     $MMPROJ_FLAG \
-    $MTP_FLAGS \
     --image-max-tokens 280 --image-min-tokens 40 \
     -c 32768 -b 2048 -ub 2048 \
     -ctk q4_0 -ctv q4_0 \

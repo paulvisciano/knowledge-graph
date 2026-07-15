@@ -216,20 +216,18 @@ huggingface-cli download bartowski/Gemma-4-12B-OBLITERATED-GGUF \
   <p style="margin-top:0.75rem">Create directories and place files:</p>
 <pre><span class="muted"># Create model directories</span>
 mkdir -p ~/models/gemma4-12b-obliterated
-mkdir -p ~/models/gemma4-12b-qat
 mkdir -p ~/models/nomic-embed-v2
 mkdir -p ~/models/bge-reranker-v2-m3
 
 <span class="muted"># Move downloaded files into place</span>
 mv ~/Downloads/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf ~/models/gemma4-12b-obliterated/
-mv ~/Downloads/mmproj-BF16.gguf ~/models/gemma4-12b-qat/
+mv ~/Downloads/mmproj-BF16.gguf ~/models/gemma4-12b-obliterated/
 mv ~/Downloads/nomic-embed-text-v2-moe.Q6_K.gguf ~/models/nomic-embed-v2/
 mv ~/Downloads/bge-reranker-v2-m3-Q4_K_M.gguf ~/models/bge-reranker-v2-m3/</pre>
   <p style="margin-top:0.75rem">Expected directory layout:</p>
 <pre><span class="muted">~/models/</span>
 <span class="muted">├── gemma4-12b-obliterated/</span>
-<span class="muted">│   └── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</span>
-<span class="muted">├── gemma4-12b-qat/</span>
+<span class="muted">│   ├── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</span>
 <span class="muted">│   └── mmproj-BF16.gguf</span>
 <span class="muted">├── nomic-embed-v2/</span>
 <span class="muted">│   └── nomic-embed-text-v2-moe.Q6_K.gguf</span>

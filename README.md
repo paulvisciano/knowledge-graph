@@ -54,8 +54,7 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
 ```
 ~/models/
 ├── gemma4-12b-obliterated/
-│   └── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf
-├── gemma4-12b-qat/
+│   ├── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf
 │   └── mmproj-BF16.gguf
 ├── nomic-embed-v2/
 │   └── nomic-embed-text-v2-moe.Q6_K.gguf
@@ -63,7 +62,7 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
     └── bge-reranker-v2-m3-Q4_K_M.gguf
 ```
 
-**Optional:** The MTP draft model (`mtp-gemma-4-12B-it.gguf`) in `~/models/gemma4-12b-qat/` speeds up inference but is not required.
+
 
 ## Verify
 

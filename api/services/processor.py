@@ -27,7 +27,7 @@ logger = logging.getLogger("api.processor")
 
 LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 VLM_URL = os.environ.get("VLM_LLM_BINDING_HOST", "http://host.docker.internal:8080")
-VLM_MODEL = os.environ.get("VLM_LLM_MODEL", "gemma-4-12B-it-qat-UD-Q4_K_XL")
+VLM_MODEL = os.environ.get("VLM_LLM_MODEL", "Gemma-4-12B-OBLITERATED-Q4_K_M")
 VLM_API_KEY = os.environ.get("VLM_LLM_BINDING_API_KEY", "llama-server")
 FACE_DETECTOR = os.environ.get("FACE_DETECTOR_BACKEND", "mtcnn")
 FACE_ATTRIBUTES = os.environ.get("FACE_ATTRIBUTES", "age,gender,emotion,race").split(",")

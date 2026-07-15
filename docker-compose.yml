@@ -128,7 +128,7 @@ services:
       LIGHTRAG_URL: "http://lightrag:9621"
       KNOWN_FACES_PATH: "/app/known_faces"
       VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-gemma-4-12B-it-qat-UD-Q4_K_XL}"
+      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
       VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
       FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-mtcnn}"
       FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
