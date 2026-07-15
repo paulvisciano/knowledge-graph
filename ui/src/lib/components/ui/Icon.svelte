@@ -34,6 +34,8 @@
     mic: { path: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8', viewBox: '0 0 24 24' },
     'mic-off': { path: 'M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM1 10v2a7 7 0 0014 0v-2M12 19v4M8 23h8', viewBox: '0 0 24 24' },
     square: { path: 'M6 6h12v12H6z', viewBox: '0 0 24 24', fill: true },
+    play: { path: 'M8 5v14l11-7z', viewBox: '0 0 24 24', fill: true },
+    pause: { path: 'M6 4h4v16H6zM14 4h4v16h-4z', viewBox: '0 0 24 24', fill: true },
     download: { path: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3', viewBox: '0 0 24 24' },
     clock: { path: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2', viewBox: '0 0 24 24' },
   };

@@ -19,6 +19,7 @@
   import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
   import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
+  import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
   import { lightragClient } from '$lib/services/lightrag-client';
@@ -148,6 +149,10 @@
   let isRecording = $state(false);
   let isTranscribing = $state(false);
   let recordingSupported = $state(false);
+  let promptEditing = $state(false);
+  let promptDraft = $state('');
+  let promptSaving = $state(false);
+  let promptSaveStatus = $state<'idle' | 'saved' | 'error'>('idle');
 
   $effect(() => {
     recordingSupported = isAudioRecordingSupported();
@@ -169,7 +174,7 @@
         processingLabel = 'Processing audio...';
         const audioData = await blobToBase64(wavBlob);
         console.log('[audio] base64 length:', audioData.length, 'format: wav');
-        await handleSend(audioUrl, audioData, 'wav');
+        await handleSend(audioUrl, audioData, 'wav', true);
       } catch (e) {
         console.error('Audio processing failed:', e);
       } finally {
@@ -1593,6 +1598,17 @@
 
         <!-- Messages -->
         <div bind:this={messagesContainer} class="flex-1 overflow-y-auto px-4 py-3">
+          {#if configStore.systemPrompt.trim()}
+            <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
+              <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
+                <Icon name="terminal" size={13} color="var(--color-cyber-cyan)" />
+                <span class="font-medium">System Prompt</span>
+                <span class="text-cyber-text-dim/50">{configStore.systemPrompt.length} chars</span>
+                <svg class="ml-auto h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </summary>
+              <div class="prose-cyber max-h-64 overflow-y-auto border-t border-cyber-border/40 px-3 py-2.5 text-[12px] leading-relaxed text-cyber-text/90">{@html renderMarkdown(configStore.systemPrompt)}</div>
+            </details>
+          {/if}
           {#each messages as msg (msg.id)}
             <div class="group mb-4 animate-fade-in-up">
               {#if msg.role === 'user'}
@@ -1602,11 +1618,13 @@
                       <ImageGallery images={msg.imageUrls} alt="Uploaded image" />
                     {/if}
                     {#if msg.audioUrl}
-                      <audio src={msg.audioUrl} controls class="h-8 w-full max-w-[240px] rounded-lg" style="filter: invert(0.7) hue-rotate(180deg);" preload="metadata"></audio>
+                      <AudioPlayer src={msg.audioUrl} label="Voice message" />
                     {/if}
-                    <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20">
-                      {msg.content}
-                    </div>
+                    {#if msg.content}
+                      <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20">
+                        {msg.content}
+                      </div>
+                    {/if}
                   </div>
                 </div>
                 <div class="mt-0.5 flex items-center justify-end gap-2">
