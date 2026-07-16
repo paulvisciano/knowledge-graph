@@ -87,7 +87,7 @@ echo "Starting reranker on port ${RERANK_PORT}..."
 "$LLAMA_SERVER" \
     -m "$RERANK_MODEL_PATH" \
     --reranking --embedding --pooling rank \
-    -c 512 -b 512 -ub 512 \
+    -c 8192 -b 8192 -ub 8192 \
     -cram 0 -ngl 99 \
     --host 0.0.0.0 --port "$RERANK_PORT" \
     &>/tmp/llama-server-reranker.log &
