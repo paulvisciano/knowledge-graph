@@ -1,8 +1,47 @@
 <script lang="ts">
   import { graphStore } from '$lib/stores/graph.svelte';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
-  import { API } from '$lib/constants';
+  import { API, type KGNode } from '$lib/constants';
   import type GraphCanvas from './GraphCanvas.svelte';
+
+  const KG_API_PROXY_BASE = '/api/kg';
+
+  function isPersonNode(n: KGNode): boolean {
+    const et = n.properties?.entity_type;
+    if (typeof et === 'string') return et.toLowerCase() === 'person';
+    return n.labels?.some((l) => l.toLowerCase() === 'person') ?? false;
+  }
+
+  function getNodeName(n: KGNode): string {
+    return (n.properties?.name as string) ?? (n.properties?.title as string) ?? n.id;
+  }
+
+  function personFaceCropUrl(n: KGNode): string | null {
+    const faceId = n.properties?.face_id as string | undefined;
+    if (!faceId) return null;
+    return `${KG_API_PROXY_BASE}${API.kg.faceCropById(faceId)}`;
+  }
+
+  function personFallbackUrl(n: KGNode): string {
+    const base = '/api/kg';
+    return `${base}${API.kg.faceCrop(n.id)}`;
+  }
+
+  function resolvePersonThumbUrl(n: KGNode): string {
+    return personFaceCropUrl(n) ?? personFallbackUrl(n);
+  }
+
+  /** Person nodes connected to the current photo card via graph edges. */
+  let cardPersons = $derived.by<KGNode[]>(() => {
+    if (!cardNodeId) return [];
+    const nbrEdges = graphStore.edges.filter(
+      (e) => e.source === cardNodeId || e.target === cardNodeId
+    );
+    const nbrIds = new Set(
+      nbrEdges.flatMap((e) => [e.source, e.target]).filter((id) => id !== cardNodeId)
+    );
+    return graphStore.nodes.filter((n) => nbrIds.has(n.id) && isPersonNode(n));
+  });
 
   let {
     graphCanvas,
@@ -250,6 +289,22 @@
           {/each}
         </div>
       {/if}
+
+      {#if cardPersons.length > 0}
+        <div class="photo-card-faces">
+          {#each cardPersons as person (person.id)}
+            <div class="photo-card-face" title={getNodeName(person)}>
+              <img
+                src={resolvePersonThumbUrl(person)}
+                alt={getNodeName(person)}
+                class="photo-card-face-img"
+                onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              />
+              <span class="photo-card-face-name">{getNodeName(person)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -475,6 +530,38 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .photo-card-faces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-top: 1px solid rgba(0, 212, 255, 0.12);
+    padding-top: 5px;
+  }
+
+  .photo-card-face {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 100%;
+  }
+
+  .photo-card-face-img {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    flex-shrink: 0;
+  }
+
+  .photo-card-face-name {
+    font-size: 10px;
+    color: #c8d6e5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Fullscreen */

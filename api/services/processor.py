@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, AsyncGenerator
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
 
@@ -400,9 +400,12 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
 
     script = (
         "import json, sys, os\n"
-        "# Always use mtcnn in subprocess — retinaface/opencv Haar cascades OOM or fail in containers\n"
+        "# Always use mtcnn in subprocess — retinaface/opencv Haar cascades OOM or fail in containers.\n"
+        "# The subprocess is memory-isolated, so allow large input images (up to 3840px)\n"
+        "# for detection — aggressive downscaling (default 1920px) misses small/distant faces.\n"
         "os.environ['FACE_DETECTOR_BACKEND'] = 'mtcnn'\n"
-        "from processors.face_recognizer import analyze_attributes, identify_person\n"
+        "os.environ['FACE_DETECT_MAX_DIM'] = '3840'\n"
+        "from processors.face_recognizer import analyze_attributes, identify_person, detect_faces, extract_face_embeddings\n"
         "from pathlib import Path\n"
         f"image_path = {json.dumps(image_path)}\n"
         f"known_faces_path = {json.dumps(known_faces_path)}\n"
@@ -411,7 +414,7 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
         "try:\n"
         "    attributes = analyze_attributes(image_path, actions=face_attributes, detector_backend=face_detector)\n"
         "    if not isinstance(attributes, list) or not attributes:\n"
-        "        print(json.dumps({'status': 'ok', 'data': {'faces': []}}))\n"
+        "        print(json.dumps({'status': 'ok', 'data': {'faces': [], 'bboxes': [], 'embeddings': []}}))\n"
         "        sys.exit(0)\n"
         "    identifications = []\n"
         "    db_path = Path(known_faces_path)\n"
@@ -419,15 +422,46 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
         "        id_result = identify_person(image_path, known_faces_path)\n"
         "        if isinstance(id_result, list):\n"
         "            identifications = id_result\n"
-        "    combined = []\n"
-        "    for idx, face_attrs in enumerate(attributes):\n"
-        "        name = 'Unknown'\n"
-        "        if idx < len(identifications) and isinstance(identifications[idx], dict):\n"
-        "            identity = identifications[idx].get('identity', 'Unknown')\n"
-        "            if identity and identity != 'Unknown':\n"
-        "                name = identity\n"
-        "        combined.append({'name': name, 'age': face_attrs.get('age'), 'gender': face_attrs.get('gender'), 'emotion': face_attrs.get('emotion'), 'race': face_attrs.get('race')})\n"
-        "    print(json.dumps({'status': 'ok', 'data': {'faces': combined}}))\n"
+    "    # Bounding boxes with face_ids (same detector/image → same face ordering)\n"
+    "    bboxes = detect_faces(image_path)\n"
+    "    # Embeddings (optional — log warning on failure, don't fail the whole pipeline)\n"
+    "    embeddings = []\n"
+    "    try:\n"
+    "        emb_result = extract_face_embeddings(image_path, detector_backend=face_detector)\n"
+    "        if isinstance(emb_result, list):\n"
+    "            embeddings = emb_result\n"
+    "    except Exception as emb_exc:\n"
+    "        print('embedding extraction failed: ' + str(emb_exc), file=sys.stderr)\n"
+    "    # Build face_id -> embedding / bbox maps for robust alignment\n"
+    "    emb_map = {}\n"
+    "    for e in embeddings:\n"
+    "        if isinstance(e, dict) and e.get('face_id') and e.get('embedding') is not None:\n"
+    "            emb_map[e['face_id']] = e['embedding']\n"
+    "    bbox_map = {}\n"
+    "    for b in bboxes:\n"
+    "        if isinstance(b, dict) and b.get('face_id'):\n"
+    "            bbox_map[b['face_id']] = b\n"
+    "    # Only keep faces that have a valid bbox from detect_faces (filters out\n"
+    "    # tiny false positives that detect_faces rejects but analyze_attributes keeps)\n"
+    "    combined = []\n"
+    "    face_ids = []\n"
+    "    bbox_out = []\n"
+    "    emb_out = []\n"
+    "    for idx, face_attrs in enumerate(attributes):\n"
+    "        fid = face_attrs.get('face_id', '')\n"
+    "        b = bbox_map.get(fid)\n"
+    "        if not b:\n"
+    "            continue\n"
+    "        name = 'Unknown'\n"
+    "        if idx < len(identifications) and isinstance(identifications[idx], dict):\n"
+    "            identity = identifications[idx].get('identity', 'Unknown')\n"
+    "            if identity and identity != 'Unknown':\n"
+    "                name = identity\n"
+    "        combined.append({'name': name, 'age': face_attrs.get('age'), 'gender': face_attrs.get('gender'), 'emotion': face_attrs.get('emotion'), 'race': face_attrs.get('race')})\n"
+    "        face_ids.append(fid)\n"
+    "        bbox_out.append({'face_id': fid, 'bbox': b.get('bbox', []), 'confidence': b.get('confidence')})\n"
+    "        emb_out.append(emb_map.get(fid))\n"
+    "    print(json.dumps({'status': 'ok', 'data': {'faces': combined, 'bboxes': bbox_out, 'embeddings': emb_out}}))\n"
         "except Exception as exc:\n"
         "    print(json.dumps({'status': 'error', 'data': str(exc)}))\n"
     )
@@ -461,11 +495,23 @@ async def _run_face_detection_subprocess(image_path: str, known_faces_path: str)
         return None
 
 
-def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[str], source_id: str, bboxes: list[dict[str, Any]] | None = None) -> None:
-    """Save cropped face images with a person-to-crop mapping.
+def _save_face_crops(
+    image_path: str,
+    faces: list[dict[str, Any]],
+    names: list[str],
+    source_id: str,
+    bboxes: list[dict[str, Any]] | None = None,
+    face_ids: list[str] | None = None,
+    embeddings: list[list[float] | None] | None = None,
+) -> None:
+    """Save cropped face images keyed by face_id with a mapping file.
 
-    Crops are saved to FACES_CACHE_DIR as JPEG files named by the person name.
-    A mapping file (face_mapping.json) records the person→filename association.
+    Crops are saved to FACES_CACHE_DIR as JPEG files. When ``face_ids`` is
+    provided, files are named ``{face_id}.jpg`` and ``face_mapping.json`` is
+    keyed by ``face_id`` with value ``{source_id, face_index, bbox, name,
+    crop_file, embedding?}``. If ``face_ids`` is missing (legacy callers), the
+    function falls back to name-based keying (``{safe_name}.jpg`` and
+    ``mapping[name]``) for backward compatibility.
 
     Faces are sorted by area (largest first) to match the VLM's salience-based
     ordering: Person 1 = most prominent face, Person 2 = second, etc.
@@ -477,6 +523,11 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
         source_id: Source identifier (typically the filename).
         bboxes: Pre-computed bounding boxes from detect_faces(). If None,
             detect_faces() will be called (expensive — loads DeepFace model).
+        face_ids: Stable per-face identifiers from detect_faces(). When present,
+            crops and face_mapping.json are keyed by face_id.
+        embeddings: Optional per-face ArcFace embedding vectors aligned with
+            ``faces``/``names`` (None entries are skipped). Stored in
+            face_mapping.json under each face_id as ``embedding``.
     """
     from PIL import Image
 
@@ -498,6 +549,8 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
     bboxes.sort(key=lambda b: b.get("_area", 0), reverse=True)
     for b in bboxes:
         b.pop("_area", None)
+
+    use_face_id = bool(face_ids) and len(face_ids) == len(faces)
 
     try:
         img = Image.open(image_path)
@@ -532,8 +585,13 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
             max_dim = 256
             cropped.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
 
-            safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
-            crop_path = faces_cache_dir / f"{safe_name}.jpg"
+            if use_face_id:
+                fid = face_ids[idx] if idx < len(face_ids) else ""
+                crop_file = f"{fid}.jpg"
+            else:
+                safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
+                crop_file = f"{safe_name}.jpg"
+            crop_path = faces_cache_dir / crop_file
             cropped.save(str(crop_path), "JPEG", quality=85)
             logger.info("Saved face crop for '%s' → %s", name, crop_path.name)
         except Exception as exc:
@@ -549,12 +607,29 @@ def _save_face_crops(image_path: str, faces: list[dict[str, Any]], names: list[s
 
     for idx, face_info in enumerate(faces):
         name = names[idx] if idx < len(names) else f"Person {idx + 1}"
-        safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
-        mapping[name] = {
-            "source_id": source_id,
-            "face_index": idx,
-            "crop_file": f"{safe_name}.jpg",
-        }
+        bbox = bboxes[idx].get("bbox", []) if idx < len(bboxes) else []
+        emb = embeddings[idx] if embeddings and idx < len(embeddings) else None
+
+        if use_face_id:
+            fid = face_ids[idx] if idx < len(face_ids) else ""
+            crop_file = f"{fid}.jpg"
+            entry: dict[str, Any] = {
+                "source_id": source_id,
+                "face_index": idx,
+                "bbox": bbox,
+                "name": name,
+                "crop_file": crop_file,
+            }
+            if emb is not None:
+                entry["embedding"] = emb
+            mapping[fid] = entry
+        else:
+            safe_name = name.replace("/", "_").replace("\\", "_").replace("..", "")
+            mapping[name] = {
+                "source_id": source_id,
+                "face_index": idx,
+                "crop_file": f"{safe_name}.jpg",
+            }
 
     mapping_path.write_text(json.dumps(mapping, indent=2))
 
@@ -634,6 +709,33 @@ async def process_image(
             if face_data is None:
                 logger.warning("Face recognition subprocess failed for %s — continuing without faces", image_path)
                 face_data = None
+            else:
+                # Subprocess returns {faces, bboxes, embeddings}. Save per-face
+                # crops keyed by face_id (best-effort — failures don't abort the pipeline).
+                fd_faces = face_data.get("faces", []) if isinstance(face_data, dict) else []
+                fd_bboxes = face_data.get("bboxes", []) if isinstance(face_data, dict) else []
+                fd_embeddings = face_data.get("embeddings", []) if isinstance(face_data, dict) else []
+                if fd_faces:
+                    names_out = [f.get("name", f"Person {i + 1}") for i, f in enumerate(fd_faces)]
+                    face_ids_out = [b.get("face_id", "") for b in fd_bboxes if isinstance(b, dict)]
+                    bbox_list = [
+                        {"bbox": b.get("bbox", []), "confidence": b.get("confidence"), "face_id": b.get("face_id", "")}
+                        for b in fd_bboxes
+                        if isinstance(b, dict)
+                    ]
+                    try:
+                        await asyncio.to_thread(
+                            _save_face_crops,
+                            image_path,
+                            fd_faces,
+                            names_out,
+                            Path(image_path).name,
+                            bboxes=bbox_list,
+                            face_ids=face_ids_out if len(face_ids_out) == len(fd_faces) else None,
+                            embeddings=fd_embeddings if len(fd_embeddings) == len(fd_faces) else None,
+                        )
+                    except Exception as crop_exc:
+                        logger.warning("Saving face crops failed for %s: %s", image_path, crop_exc)
             logger.info("Face detection completed for %s: %s", image_path, "ok" if face_data else "none")
         except Exception as exc:
             logger.warning("Face recognition error for %s: %s — continuing without faces", image_path, exc)
@@ -862,10 +964,18 @@ async def insert_metadata_into_lightrag(
 
     def _post() -> dict[str, Any]:
         req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        with urlopen(req, timeout=30) as resp:
-            body = resp.read().decode("utf-8")
-            logger.info("LightRAG metadata insertion (%d): %s", resp.status, body[:500])
-            return json.loads(body)
+        try:
+            with urlopen(req, timeout=30) as resp:
+                body = resp.read().decode("utf-8")
+                logger.info("LightRAG metadata insertion (%d): %s", resp.status, body[:500])
+                return json.loads(body)
+        except HTTPError as he:
+            body = he.read().decode("utf-8", errors="replace")
+            if he.code == 409:
+                logger.info("LightRAG document already exists for %s — treating as success", file_source)
+                return {"status": "ok", "reason": "document_already_exists", "file_source": file_source}
+            logger.error("LightRAG metadata insertion failed (%d): %s", he.code, body[:500])
+            raise
 
     try:
         return await asyncio.to_thread(_post)
@@ -1149,7 +1259,76 @@ async def link_exif_to_visual_entities(
 
     logger.info("[EXIF Links] Linking complete for %s: %d visual links created",
                 file_source, len(results["visual_links_created"]))
+
+    try:
+        await _create_person_entities_from_faces(base_url, file_source, photo_name)
+    except Exception as exc:
+        logger.warning("[EXIF Links] Person entity creation failed for %s: %s", file_source, exc)
+
     return results
+
+
+async def _create_person_entities_from_faces(
+    lightrag_url: str,
+    file_source: str,
+    photo_name: str,
+) -> None:
+    """Create 'Person 1', 'Person 2', ... entities in LightRAG, one per detected face.
+
+    Each entity gets a face_id property linking it to its face crop. The user
+    labels these entities (e.g. 'Person 1' -> 'Jeff') via the UI.
+    """
+    faces_cache_dir = Path(os.environ.get("FACES_CACHE_DIR", str(Path(_PROJECT_ROOT) / "face_crops")))
+    mapping_path = faces_cache_dir / "face_mapping.json"
+    if not mapping_path.is_file():
+        return
+
+    try:
+        mapping = json.loads(mapping_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+
+    face_entries: list[tuple[str, dict[str, Any]]] = []
+    for fid, entry in mapping.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("source_id") == file_source:
+            face_entries.append((fid, entry))
+    face_entries.sort(key=lambda item: item[1].get("face_index", 0))
+
+    if not face_entries:
+        return
+
+    base_url = lightrag_url.rstrip("/")
+    logger.info("[Person] Creating %d person entities from faces for %s",
+                len(face_entries), file_source)
+
+    for idx, (face_id, entry) in enumerate(face_entries):
+        person_name = f"Person {idx + 1}"
+        entity_data = {
+            "entity_type": "person",
+            "face_id": face_id,
+            "file_path": file_source,
+            "description": f"Person {idx + 1} detected in {file_source}",
+        }
+        try:
+            result = await _create_entity_verified(base_url, person_name, entity_data)
+            logger.info("[Person] Created '%s' with face_id=%s: %s",
+                        person_name, face_id[:12], result.get("status"))
+        except Exception as exc:
+            logger.warning("[Person] Failed to create '%s': %s", person_name, exc)
+            continue
+
+        try:
+            link = await _create_relation_verified(
+                base_url, person_name, photo_name,
+                {"description": f"{person_name} appears in {file_source}",
+                 "keywords": "appears_in", "weight": 1.0},
+            )
+            logger.info("[Person] Linked '%s' -> '%s': %s",
+                        person_name, photo_name, link.get("status"))
+        except Exception as exc:
+            logger.warning("[Person] Failed to link '%s' to photo: %s", person_name, exc)
 
 
 async def wait_for_lightrag_processing(

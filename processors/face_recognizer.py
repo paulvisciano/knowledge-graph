@@ -289,8 +289,11 @@ def detect_faces(image_path: str | Path) -> list[dict[str, Any]]:
 
     try:
         logger.info(f"[FACE] Detecting faces in {image_path.name} ({image_path.stat().st_size / 1_048_576:.1f} MB)")
+        # Honor FACE_DETECTOR_BACKEND when set (e.g. the isolated detection subprocess
+        # forces mtcnn); otherwise use the module default (retinaface).
+        detector = os.environ.get("FACE_DETECTOR_BACKEND") or _DEFAULT_DETECTOR
         with _downscale_for_detection(image_path) as (eff_path, sx, sy):
-            raw_faces = _detect_with_fallback(deepface, eff_path)
+            raw_faces = _detect_with_fallback(deepface, eff_path, detector)
     except Exception as exc:
         logger.warning(f"[FACE] Face detection failed on {image_path.name}: {exc}")
         return []
@@ -310,6 +313,11 @@ def detect_faces(image_path: str | Path) -> list[dict[str, Any]]:
                 "w": int(facial_area.get("w", 0) * sx),
                 "h": int(facial_area.get("h", 0) * sy),
             }
+        fw = facial_area.get("w", 0)
+        fh = facial_area.get("h", 0)
+        if fw < 50 or fh < 50:
+            logger.info(f"[FACE] Skipping face {idx} ({fw}x{fh}px) — below 50px minimum")
+            continue
         fid = _face_id(image_path, idx, facial_area)
         bbox = _bbox_from_facial_area(facial_area)
         results.append(

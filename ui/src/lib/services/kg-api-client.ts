@@ -20,6 +20,14 @@ export interface JobInfo {
   updated_at: number;
 }
 
+export interface LabelFaceResult {
+  status: string;
+  face_id: string;
+  old_name: string;
+  new_name: string;
+  entity_renamed: boolean;
+}
+
 export class KgApiClient {
   private baseUrl: string;
 
@@ -276,6 +284,14 @@ export class KgApiClient {
   async deletePhotoEntities(fileSource: string): Promise<{ entities_deleted: { name: string; status: string }[]; errors: unknown[] }> {
     const path = API.kg.deletePhotoEntities(fileSource);
     return this.request(path, { method: 'DELETE' });
+  }
+
+  async labelFace(faceId: string, newName: string): Promise<LabelFaceResult> {
+    return this.request<LabelFaceResult>(API.kg.labelFace, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ face_id: faceId, new_name: newName }),
+    });
   }
 }
 

@@ -1296,7 +1296,21 @@
     requestAnimationFrame(() => {
       if (panelTextareaEl) panelTextareaEl.style.height = 'auto';
     });
-      handleSend(undefined, undefined, undefined, false);
+    handleSend(undefined, undefined, undefined, false);
+  }
+
+  function handleQueryAbout(node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) {
+    if (isActiveConversationStreaming) return;
+    const name = (node.properties?.name as string) ?? node.id;
+    chatInput = `Tell me about ${name}`;
+    chatExpanded = true;
+    requestAnimationFrame(() => {
+      if (textareaEl) {
+        textareaEl.style.height = 'auto';
+        textareaEl.style.height = Math.min(textareaEl.scrollHeight, (parseInt(getComputedStyle(textareaEl).lineHeight) || 24) * 6) + 'px';
+      }
+    });
+    handleSend(undefined, undefined, undefined, true);
   }
 
   async function fetchModels() {
@@ -1457,7 +1471,7 @@
   {/if}
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
-      <GraphView />
+      <GraphView onqueryAbout={handleQueryAbout} />
     </div>
 
     <!-- Floating chat input -->

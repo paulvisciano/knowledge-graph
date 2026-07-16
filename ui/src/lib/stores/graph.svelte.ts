@@ -167,7 +167,10 @@ class GraphStore {
       personNodes.map(async (node) => {
         if (this.personImages[node.id]) return;
         try {
-          const url = lightragClient.personPhotoUrl(node.id);
+          const faceId = node.properties?.face_id as string | undefined;
+          const url = faceId
+            ? `${'/api/kg'}${API.kg.faceCropById(faceId)}`
+            : lightragClient.personPhotoUrl(node.id);
           const resp = await fetch(url);
           if (!resp.ok) return;
           const blob = await resp.blob();

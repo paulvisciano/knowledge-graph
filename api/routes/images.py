@@ -500,6 +500,106 @@ async def get_photo_exif(file_source: str):
     return mapped
 
 
+def _load_face_mapping() -> dict[str, Any]:
+    mapping_path = FACES_CACHE_DIR / "face_mapping.json"
+    if not mapping_path.is_file():
+        return {}
+    try:
+        return json.loads(mapping_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+# Registered BEFORE the {name:path} route so the more specific by-id path wins.
+@router.get("/faces/crops/by-id/{face_id}")
+async def get_face_crop_by_id(face_id: str):
+    """Serve a cropped face image keyed by face_id.
+
+    Looks up ``face_id`` in ``face_mapping.json`` and serves the stored crop
+    file. Falls back to on-the-fly detection using the mapping's ``source_id``,
+    ``face_index`` and ``bbox`` when the crop file is missing.
+    """
+    from PIL import Image
+    from processors.face_recognizer import detect_faces
+
+    mapping = _load_face_mapping()
+    entry = mapping.get(face_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"face_id '{face_id}' not found in face mapping")
+
+    crop_file = entry.get("crop_file") or f"{face_id}.jpg"
+    crop_path = FACES_CACHE_DIR / crop_file
+    if crop_path.is_file():
+        return FileResponse(str(crop_path), media_type="image/jpeg")
+
+    source_id = entry.get("source_id", "")
+    if not source_id:
+        raise HTTPException(status_code=404, detail=f"No source image for face_id '{face_id}'")
+
+    image_path: Path | None = None
+    candidate = INPUT_DIR / source_id
+    if candidate.is_file():
+        image_path = candidate
+    else:
+        for ext in ["", ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
+            c = INPUT_DIR / f"{source_id}{ext}"
+            if c.is_file():
+                image_path = c
+                break
+    if image_path is None:
+        raise HTTPException(status_code=404, detail=f"Source image not found for face_id '{face_id}'")
+
+    bbox = entry.get("bbox", [])
+    if len(bbox) == 4:
+        try:
+            img = await asyncio.to_thread(Image.open, str(image_path))
+            img_w, img_h = img.size
+            x1, y1, x2, y2 = bbox
+            fw, fh = x2 - x1, y2 - y1
+            px, py = int(fw * 0.3), int(fh * 0.3)
+            cx1, cy1 = max(0, x1 - px), max(0, y1 - py)
+            cx2, cy2 = min(img_w, x2 + px), min(img_h, y2 + py)
+            cropped = img.crop((cx1, cy1, cx2, cy2))
+            cropped.thumbnail((256, 256), Image.Resampling.LANCZOS)
+            await asyncio.to_thread(cropped.save, str(crop_path), "JPEG", quality=85)
+            img_bytes = io.BytesIO()
+            cropped.save(img_bytes, format="JPEG", quality=85)
+            img_bytes.seek(0)
+            return Response(content=img_bytes.getvalue(), media_type="image/jpeg")
+        except Exception as exc:
+            logger.error("Failed to crop face for id '%s': %s", face_id, exc)
+
+    # Fall back to re-detection by face_index
+    face_index = entry.get("face_index", 0)
+    try:
+        faces = await asyncio.to_thread(detect_faces, str(image_path))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Face detection failed: {exc}")
+    if not faces or face_index >= len(faces):
+        raise HTTPException(status_code=404, detail=f"Face {face_index} not detected in source image")
+    fb = faces[face_index].get("bbox", [])
+    if len(fb) != 4:
+        raise HTTPException(status_code=404, detail="Invalid bounding box for face")
+    try:
+        img = await asyncio.to_thread(Image.open, str(image_path))
+        img_w, img_h = img.size
+        x1, y1, x2, y2 = fb
+        fw, fh = x2 - x1, y2 - y1
+        px, py = int(fw * 0.3), int(fh * 0.3)
+        cx1, cy1 = max(0, x1 - px), max(0, y1 - py)
+        cx2, cy2 = min(img_w, x2 + px), min(img_h, y2 + py)
+        cropped = img.crop((cx1, cy1, cx2, cy2))
+        cropped.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        await asyncio.to_thread(cropped.save, str(crop_path), "JPEG", quality=85)
+        img_bytes = io.BytesIO()
+        cropped.save(img_bytes, format="JPEG", quality=85)
+        img_bytes.seek(0)
+        return Response(content=img_bytes.getvalue(), media_type="image/jpeg")
+    except Exception as exc:
+        logger.error("Failed to crop face for id '%s': %s", face_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to crop face: {exc}")
+
+
 @router.get("/faces/crops/{name:path}")
 async def get_face_crop(name: str):
     """Serve a cropped face image for a person entity.
@@ -741,6 +841,120 @@ async def get_face_crop(name: str):
     except Exception as exc:
         logger.error("Failed to crop face for '%s': %s", name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to crop face: {exc}")
+
+
+@router.post("/faces/label")
+async def label_face(request: dict[str, Any]):
+    """Label a detected face: save a reference photo and rename the LightRAG entity.
+
+    Accepts JSON ``{face_id, new_name}``. Saves the existing crop to
+    ``known_faces/{new_name}/reference.jpg`` (making it a DeepFace reference),
+    renames the LightRAG person entity via ``POST /graph/entity/edit``, and
+    updates ``face_mapping.json`` with the new name.
+    """
+    import httpx
+
+    face_id = request.get("face_id")
+    new_name = request.get("new_name")
+    if not face_id or not new_name:
+        raise HTTPException(status_code=400, detail="face_id and new_name are required")
+    if not isinstance(face_id, str) or not isinstance(new_name, str):
+        raise HTTPException(status_code=400, detail="face_id and new_name must be strings")
+
+    safe_new = new_name.replace("/", "_").replace("\\", "_").replace("..", "").strip()
+    if not safe_new:
+        raise HTTPException(status_code=400, detail="new_name is invalid")
+
+    mapping = _load_face_mapping()
+    entry = mapping.get(face_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"face_id '{face_id}' not found in face mapping")
+
+    crop_file = entry.get("crop_file") or f"{face_id}.jpg"
+    crop_path = FACES_CACHE_DIR / crop_file
+    if not crop_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Crop file '{crop_file}' not found for face_id '{face_id}'")
+
+    known_root = Path(KNOWN_FACES_PATH)
+    ref_dir = known_root / safe_new
+    ref_path = ref_dir / "reference.jpg"
+    try:
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        import shutil
+        await asyncio.to_thread(shutil.copyfile, str(crop_path), str(ref_path))
+        logger.info("Saved reference photo for '%s' → %s", safe_new, ref_path)
+    except Exception as exc:
+        logger.error("Failed to save reference photo for '%s': %s", safe_new, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to save reference photo: {exc}")
+
+    # Find the LightRAG entity that has this face_id property
+    old_name = entry.get("name", "")
+    entity_renamed = False
+    lightag_entity_name: str | None = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{LIGHTRAG_URL}/graph/label/list")
+            labels = resp.json() if resp.status_code == 200 else []
+        for label in labels:
+            if label.endswith((" (Date)", " (Camera)", " (Location)", " (Photo)")):
+                continue
+            async with httpx.AsyncClient(timeout=10) as client:
+                lr = await client.get(
+                    f"{LIGHTRAG_URL}/graphs",
+                    params={"label": label},
+                )
+            if lr.status_code != 200:
+                continue
+            graph_data = lr.json()
+            for node in graph_data.get("nodes", []):
+                if node.get("id") != label:
+                    continue
+                props = node.get("properties", {})
+                et = props.get("entity_type", "")
+                if et.lower() not in ("person", "people"):
+                    continue
+                if props.get("face_id") == face_id:
+                    lightag_entity_name = label
+                    break
+            if lightag_entity_name:
+                break
+    except Exception as exc:
+        logger.warning("Failed to find LightRAG entity for face_id '%s': %s", face_id, exc)
+
+    if lightag_entity_name and lightag_entity_name != new_name:
+        payload = json.dumps({"entity_name": lightag_entity_name, "updated_data": {"entity_name": new_name}, "allow_rename": True}).encode("utf-8")
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{LIGHTRAG_URL}/graph/entity/edit",
+                    content=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+            if resp.status_code == 404:
+                logger.warning("Entity '%s' not found in LightRAG — skipping rename", lightag_entity_name)
+            elif resp.status_code >= 400:
+                logger.warning("LightRAG entity edit returned %d for '%s': %s", resp.status_code, lightag_entity_name, resp.text[:200])
+            else:
+                entity_renamed = True
+                logger.info("Renamed LightRAG entity '%s' → '%s'", lightag_entity_name, new_name)
+        except httpx.RequestError as exc:
+            logger.error("LightRAG entity edit request failed for '%s': %s", lightag_entity_name, exc)
+            raise HTTPException(status_code=502, detail=f"Failed to reach LightRAG: {exc}")
+    else:
+        logger.info("Skipping entity rename (entity not found or name unchanged)")
+
+    entry["name"] = new_name
+    mapping[face_id] = entry
+    mapping_path = FACES_CACHE_DIR / "face_mapping.json"
+    try:
+        tmp = mapping_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(mapping, indent=2))
+        tmp.replace(mapping_path)
+    except OSError as exc:
+        logger.error("Failed to update face_mapping.json: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to update face mapping: {exc}")
+
+    return {"status": "ok", "face_id": face_id, "old_name": lightag_entity_name or old_name, "new_name": new_name, "entity_renamed": entity_renamed}
 
 
 @router.delete("/photo-entities")

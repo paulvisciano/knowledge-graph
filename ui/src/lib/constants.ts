@@ -17,6 +17,8 @@ export const API = {
     photoExif: (fileSource: string) => `/images/exif/${encodeURIComponent(fileSource)}`,
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
     faceCrop: (name: string) => `/images/faces/crops/${encodeURIComponent(name)}`,
+    faceCropById: (faceId: string) => `/images/faces/crops/by-id/${encodeURIComponent(faceId)}`,
+    labelFace: '/images/faces/label',
     createJob: '/images/jobs',
     listJobs: '/images/jobs',
     jobStatus: (jobId: string) => `/images/jobs/${jobId}`,
