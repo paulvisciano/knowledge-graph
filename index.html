@@ -400,7 +400,7 @@ docker compose down</pre>
     <strong style="font-size:1.1rem">Enhanced Image Intelligence + Real-Time UI</strong>
   </div>
   <p>Connected knowledge graph with Photo node as central hub. EXIF metadata (Date, Location, Camera) and VLM-extracted visual entities (people, objects, scenes) all link to a single <code>filename (Photo)</code> node via typed edges (<code>taken_on</code>, <code>taken_at</code>, <code>taken_with</code>, <code>appears_in</code>). Photo nodes rendered as 3D textured planes. Person nodes rendered as oval face crops with VLM face descriptions for accurate person-to-face mapping. Real-time SSE pipeline streams every processing stage to the UI with live graph updates. Persistent job queue for reliable image processing. Document deletion cleans up orphaned Photo/EXIF entities. Image nodes spaced apart with per-type force repulsion. Cursor-centered 3D graph zoom.</p>
-  <p style="margin-top:0.5rem"><strong>Done:</strong> Combined VLM+metadata document ✓ — Context-aware VLM prompt (EXIF metadata prepended) ✓ — EXIF entity injection (<code>inject_exif_relations()</code>) ✓ — Visual entity linking (<code>link_exif_to_visual_entities()</code>) ✓ — Day-level Date nodes ✓ — Deduplication (fuzzy matching against existing labels) ✓ — URL encoding fix for labels with spaces ✓ — 400/409 duplicate handling ✓ — <code>POST /images/link-exif-entities</code> endpoint ✓ — SSE real-time pipeline with progressive graph updates ✓ — Photo image serving endpoint ✓ — Photo textures in 3D graph ✓ — PhotoOverlay with EXIF details ✓ — Persistent job queue ✓ — Document deletion cleanup ✓ — Photo node spacing (charge/link/cluster force tuning) ✓ — Face crop endpoint ✓ — Face mapping (<code>face_mapping.json</code>) ✓ — Person nodes as oval face crops in 3D graph ✓ — VLM face descriptions for person-to-face matching ✓ — Cursor-centered zoom ✓</p>
+  <p style="margin-top:0.5rem"><strong>Done:</strong> Combined VLM+metadata document ✓ — Context-aware VLM prompt (EXIF metadata prepended) ✓ — EXIF entity injection (<code>inject_exif_relations()</code>) ✓ — Visual entity linking (<code>link_exif_to_visual_entities()</code>) ✓ — Day-level Date nodes ✓ — Deduplication (fuzzy matching against existing labels) ✓ — URL encoding fix for labels with spaces ✓ — 400/409 duplicate handling ✓ — <code>POST /images/link-exif-entities</code> endpoint ✓ — SSE real-time pipeline with progressive graph updates ✓ — Photo image serving endpoint ✓ — Photo textures in 3D graph ✓ — PhotoOverlay with EXIF details ✓ — Persistent job queue ✓ — Document deletion cleanup ✓ — Photo node spacing (charge/link/cluster force tuning) ✓ — Face crop endpoint ✓ — Face crop by ID endpoint ✓ — Face mapping (<code>face_mapping.json</code>) ✓ — Person nodes as oval face crops in 3D graph ✓ — VLM face descriptions for person-to-face matching ✓ — Cursor-centered zoom ✓ — Fit-to-view on initial load ✓ — Tightened force simulation for faster first render ✓ — <code>photo_metadata</code> table with persisted EXIF ✓ — Full EXIF in photo card on reload ✓ — Granular image processing stages with visual stepper ✓ — Audio recording + playback in chat ✓ — Mic starts new conversation + system prompt banner ✓ — Mobile UI (viewport, chat input bar, adaptive search page size, larger tap targets) ✓ — Framework7 dependency removed ✓ — NodeDetail with createdAt + event bus + expand-neighbors ✓ — Face detection OOM fix (downscale before detection) + 120s timeout ✓ — <code>clear-graph.sh</code>, <code>merge_duplicate_entities.py</code>, <code>reprocess_faces.sh</code> utilities ✓ — llama.cpp v9750+ version requirement documented ✓ — Consolidated on Gemma 4 12B OBLITERATED as sole model ✓</p>
   <p style="margin-top:0.5rem"><strong>Remaining:</strong> Object detection — OCR — Scene classification — Multi-photo queries ("find all photos with Paul near the beach")</p>
   <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Real-time graph UI that shows entities appearing as they're processed. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
 </div>
@@ -431,7 +431,7 @@ docker compose down</pre>
   <span class="muted">  ├─ Job queue (SQLite) with persistent status tracking</span>
   <span class="muted">  ├─ SSE progress streaming (EXIF → entities → VLM → faces)</span>
    <span class="muted">  ├─ Photo image serving (GET /images/photo/:filename)</span>
-   <span class="muted">  ├─ Face crop serving (GET /images/face-crop/:person)</span>
+   <span class="muted">  ├─ Face crop serving (GET /images/face-crop/:person, GET /faces/crops/by-id/:face_id)</span>
    <span class="muted">  ├─ Face mapping (face_mapping.json → person-to-face matching)</span>
    <span class="muted">  ├─ EXIF extraction → reverse geocode</span>
   <span class="muted">  ├─ Face recognition (DeepFace)</span>
@@ -572,11 +572,15 @@ knowledge-graph/
 ├── processors/              <span class="muted"># standalone image processing modules</span>
 │   ├── exif_extractor.py   <span class="muted"># EXIF + GPS → reverse geocode</span>
 │   └── face_recognizer.py  <span class="muted"># DeepFace: detect, embed, cluster, identify</span>
+├── docs/                    <span class="muted"># generated reports (mobile audit, etc.)</span>
 ├── scripts/
 │   ├── start-llama-servers.sh  <span class="muted"># start LLM, embed, reranker (Metal GPU)</span>
 │   ├── start-api.sh           <span class="muted"># start FastAPI backend (host, Metal GPU for DeepFace)</span>
 │   ├── stop-all.sh              <span class="muted"># stop everything</span>
-│   └── process_image.py        <span class="muted"># CLI: EXIF → faces → LightRAG upload + metadata</span>
+│   ├── process_image.py        <span class="muted"># CLI: EXIF → faces → LightRAG upload + metadata</span>
+│   ├── clear-graph.sh          <span class="muted"># utility: clear LightRAG graph + PostgreSQL data</span>
+│   ├── merge_duplicate_entities.py <span class="muted"># utility: merge duplicate graph entities</span>
+│   └── reprocess_faces.sh      <span class="muted"># utility: re-run face recognition on existing images</span>
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
 ├── face_crops/              <span class="muted"># extracted face crops for person nodes (gitignored)</span>
 ├── inputs/                  <span class="muted"># images to process</span>
@@ -691,7 +695,8 @@ open http://localhost:9621
   <tr><td>API Backend (SSE)</td><td><a href="http://localhost:8000/images/health">http://localhost:8000</a></td><td>Image processing + real-time SSE + job queue</td></tr>
   <tr><td>API Backend Docs</td><td><a href="http://localhost:8000/docs">http://localhost:8000/docs</a></td><td>Swagger UI</td></tr>
   <tr><td>Photo Images</td><td><code>GET /images/photo/:filename</code></td><td>Serve processed photo images</td></tr>
-  <tr><td>Face Crops</td><td><code>GET /images/face-crop/:person</code></td><td>Serve face crop images for person nodes</td></tr>
+    <tr><td>Face Crops</td><td><code>GET /images/face-crop/:person</code></td><td>Serve face crop images for person nodes</td></tr>
+    <tr><td>Face Crops by ID</td><td><code>GET /faces/crops/by-id/:face_id</code></td><td>Serve cropped face image keyed by <code>face_mapping.json</code> with on-the-fly fallback detection</td></tr>
   <tr><td>Job Queue</td><td><code>GET /images/jobs</code>, <code>GET /images/jobs/:id</code></td><td>Persistent job status tracking</td></tr>
 </table>
 
@@ -741,6 +746,20 @@ open http://localhost:9621
     <tr><td>2025-07-11</td><td>Implemented cursor-centered zoom for 3D graph — zoom now focuses on the point under the cursor rather than the center of the viewport.</td></tr>
     <tr><td>2025-07-11</td><td>Used VLM face descriptions for accurate person-to-face matching. VLM describes each face in the image (position, appearance), which is matched to DeepFace-identified person names for correct person-to-face mapping.</td></tr>
     <tr><td>2025-07-13</td><td>Added KG API client (<code>kg-api-client.ts</code>) with job management methods: <code>createJob()</code>, <code>listJobs()</code>, <code>getJob()</code>, <code>streamJobEvents()</code>. Added drag-and-drop image upload to chat input. Added job resumption on page load (<code>resumeInProgressJobs()</code>). Fixed event data serialization in job manager (JSONB cast, string event data handling).</td></tr>
+    <tr><td>2026-07-15</td><td>Consolidated on Gemma 4 12B OBLITERATED as the sole model. Replaced all references to <code>gemma-4-12B-it-qat-UD-Q4_K_XL</code>, removed MTP draft model, and moved mmproj alongside the main model. Added llama.cpp v9750+ version requirement for <code>gemma4uv</code> projector compatibility (documented in README and index.html with EXIF-only fallback instructions).</td></tr>
+    <tr><td>2026-07-15</td><td>Added utility scripts: <code>merge_duplicate_entities.py</code>, <code>reprocess_faces.sh</code>, and <code>clear-graph.sh</code> for graph maintenance and reprocessing. Gitignored build artifacts and local files.</td></tr>
+    <tr><td>2026-07-15</td><td>Sped up graph initial render by tightening force simulation parameters, and fixed initial-load zoom jitter by optimizing the opacity RAF loop.</td></tr>
+    <tr><td>2026-07-15</td><td>Added <code>photo_metadata</code> table and persisted EXIF during processing. Photo card now shows full EXIF data on page reload. Fixed chat panel auto-expanding on initial page load.</td></tr>
+    <tr><td>2026-07-15</td><td>Added 120s timeout to in-process face detection fallback. Fixed face recognition OOM on large images by downscaling before detection (refactored <code>processors/face_recognizer.py</code>).</td></tr>
+    <tr><td>2026-07-15</td><td>Added granular image processing stages with a visual stepper in the SSE pipeline.</td></tr>
+    <tr><td>2026-07-15</td><td>Improved chat panel: mic button starts a new conversation, added system prompt banner, and added audio playback with a new <code>AudioPlayer.svelte</code> component.</td></tr>
+    <tr><td>2026-07-15</td><td>Fixed audio message resend and durability across reloads.</td></tr>
+    <tr><td>2026-07-15</td><td>Added mobile-friendliness audit report (<code>docs/ui-mobile-report.html</code>). Fixed mobile viewport accessibility and chat input bar positioning. Resolved high-priority mobile UI issues.</td></tr>
+    <tr><td>2026-07-15</td><td>Removed Framework7 dependency — it was imported but unused, and its CSS <code>button { width: 100% }</code> leaked globally and conflicted with Tailwind. Uninstalled <code>framework7</code> + <code>framework7-svelte</code> and removed f7-* variable overrides.</td></tr>
+    <tr><td>2026-07-15</td><td>Optimized graph search for mobile: adaptive page size and larger tap targets.</td></tr>
+    <tr><td>2026-07-15</td><td>Fixed 19 <code>svelte-check</code> TypeScript errors in graph and connection stores.</td></tr>
+    <tr><td>2026-07-16</td><td>Fit graph to view on initial load and centered image nodes. Improved <code>GraphCanvas.svelte</code> and <code>GraphView.svelte</code> layout handling.</td></tr>
+    <tr><td>2026-07-16</td><td>Added face crop endpoint (<code>GET /faces/crops/by-id/:face_id</code>) keyed by <code>face_mapping.json</code> with on-the-fly fallback detection. Increased face detection max dimension to 3840px and extracted face embeddings/bboxes in subprocess for better small/distant face recall. Reworked <code>NodeDetail.svelte</code> (createdAt formatting, graph store integration, <code>onselectNode</code> + event bus support). Extended <code>PhotoOverlay.svelte</code> with person-node helpers and KG API proxy base. Added <code>scripts/clear-graph.sh</code> utility.</td></tr>
   </table>
 </div>
 
@@ -771,7 +790,6 @@ open http://localhost:9621
     <a href="https://github.com/mrdoob/three.js" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/threedotjs/white" alt="" onerror="this.style.display='none'">Three.js</a>
     <a href="https://github.com/tailwindlabs/tailwindcss" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/tailwindcss/white" alt="" onerror="this.style.display='none'">Tailwind</a>
     <a href="https://github.com/vitejs/vite" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/vite/white" alt="" onerror="this.style.display='none'">Vite</a>
-    <a href="https://github.com/framework7io/framework7" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/framework7/white" alt="" onerror="this.style.display='none'">Framework7</a>
   </div>
   <div class="tech-row"><span class="tech-row-label">Infra</span>
     <a href="https://github.com/docker/compose" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/docker/white" alt="" onerror="this.style.display='none'">Docker Compose</a>
