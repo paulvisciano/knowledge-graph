@@ -12,6 +12,12 @@
 
   const client = new LightragClient();
 
+  let {
+    onqueryAbout = (_node: KGNode) => {}
+  }: {
+    onqueryAbout?: (node: KGNode) => void;
+  } = $props();
+
   let graphContainerEl: HTMLDivElement | undefined = $state();
   let photoOverlay: PhotoOverlay | undefined = $state();
 
@@ -24,6 +30,7 @@
   let selectedNode = $state<KGNode | null>(null);
   let hoveredNode = $state<KGNode | null>(null);
   let isLoading = $state(true);
+  let viewReady = $state(false);
   let error = $state<string | null>(null);
   let layout = $state<'force' | 'circular' | 'radial'>('force');
   let nodeSizeMode = $state<'degree' | 'uniform'>('degree');
@@ -111,6 +118,7 @@
 
   async function loadGraph() {
     isLoading = true;
+    viewReady = false;
     error = null;
     try {
       let graph: KGGraph;
@@ -138,6 +146,10 @@
       initVisibleNodes();
       fetchPhotoImages(allNodes);
       fetchPersonImages(allNodes);
+      // The loading backdrop stays up until the canvas fires oninitialFit
+      // (from onEngineStop after the force layout settles), which snaps the
+      // camera to the fit distance. Lifting the backdrop there — not on a
+      // timer — guarantees the user never sees the zoomed-in initial frame.
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load graph';
     } finally {
@@ -198,7 +210,10 @@
       personNodes.map(async (node) => {
         if (graphStore.personImages[node.id]) return;
         try {
-          const url = client.personPhotoUrl(node.id);
+          const faceId = node.properties?.face_id as string | undefined;
+          const url = faceId
+            ? `${'/api/kg'}${API.kg.faceCropById(faceId)}`
+            : client.personPhotoUrl(node.id);
           const resp = await fetch(url);
           if (!resp.ok) return;
           const blob = await resp.blob();
@@ -223,9 +238,6 @@
     const isPhoto = node.labels?.includes('Photo') || node.properties?.entity_type === 'Photo' || nodeId.includes('(Photo)');
     if (isPhoto) {
       photoOverlay?.showPhotoCard(nodeId);
-      if (graphStore.photoImages[nodeId]) {
-        fullscreenUrl = graphStore.photoImages[nodeId];
-      }
     } else {
       photoOverlay?.hidePhotoCard();
     }
@@ -285,7 +297,7 @@
         return;
       }
 
-      // Merge new nodes/edges into existing data (like handleExpandNeighbors)
+      // Merge new nodes/edges into existing data
       const existingNodeIds = new Set(allNodes.map((n) => n.id));
       const existingEdgeIds = new Set(allEdges.map((e) => e.id));
       const additionalNodes = graph.nodes.filter((n) => !existingNodeIds.has(n.id));
@@ -397,21 +409,8 @@
     visibleNodeIds = clusterIds;
   }
 
-  function handleQueryAbout(_node: KGNode) {}
-
-  async function handleExpandNeighbors(node: KGNode) {
-    try {
-      const graph: KGGraph = await client.getGraph(undefined, node.id, 1);
-      const newNodeIds = new Set(allNodes.map((n) => n.id));
-      const newEdgeIds = new Set(allEdges.map((e) => e.id));
-      const additionalNodes = graph.nodes.filter((n) => !newNodeIds.has(n.id));
-      const additionalEdges = graph.edges.filter((e) => !newEdgeIds.has(e.id));
-      allNodes = [...allNodes, ...additionalNodes];
-      allEdges = [...allEdges, ...additionalEdges];
-      expandedNodeIds = new Set([...expandedNodeIds, node.id]);
-    } catch {
-      // Expansion failed silently
-    }
+  function handleQueryAbout(node: KGNode) {
+    onqueryAbout(node);
   }
 
   function handleZoomIn() {
@@ -423,6 +422,10 @@
 
   function handleFitView() {
     graphCanvas?.fitView();
+  }
+
+  function handleInitialFit() {
+    viewReady = true;
   }
 
   function handleResetView() {
@@ -580,14 +583,7 @@
     </div>
   {/if}
 
-  {#if isLoading && allNodes.length === 0}
-    <div class="absolute inset-0 flex items-center justify-center z-30">
-      <div class="flex flex-col items-center gap-3 animate-fade-in-up">
-        <div class="w-10 h-10 border-2 border-cyber-cyan border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-sm text-cyber-text-dim">Loading knowledge graph...</p>
-      </div>
-    </div>
-  {:else}
+  {#if allNodes.length > 0}
     <GraphCanvas
       bind:this={graphCanvas}
       nodes={allNodes}
@@ -603,6 +599,7 @@
       onhoverNode={handleHoverNode}
       ondeselect={handleDeselect}
       onfitToView={handleFitView}
+      oninitialFit={handleInitialFit}
     />
 
     <GraphControls
@@ -621,8 +618,17 @@
       neighbors={neighbors}
       onclose={handleDeselect}
       onqueryAbout={handleQueryAbout}
-      onexpandNeighbors={handleExpandNeighbors}
+      onselectNode={handleSelectNode}
     />
+  {/if}
+
+  {#if !viewReady}
+    <div class="absolute inset-0 flex items-center justify-center z-30 bg-cyber-bg">
+      <div class="flex flex-col items-center gap-3 animate-fade-in-up">
+        <div class="w-10 h-10 border-2 border-cyber-cyan border-t-transparent rounded-full animate-spin"></div>
+        <p class="text-sm text-cyber-text-dim">Loading knowledge graph...</p>
+      </div>
+    </div>
   {/if}
 
   <PhotoOverlay bind:this={photoOverlay} bind:fullscreenUrl {graphCanvas} containerEl={graphContainerEl} />

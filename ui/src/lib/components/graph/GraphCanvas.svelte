@@ -64,7 +64,8 @@
     onselectNode = (_node: KGNode) => {},
     onhoverNode = (_node: KGNode | null) => {},
     ondeselect = () => {},
-    onfitToView = () => {}
+    onfitToView = () => {},
+    oninitialFit = () => {}
   }: {
     nodes: KGNode[];
     edges: KGEdge[];
@@ -79,6 +80,7 @@
     onhoverNode: (node: KGNode | null) => void;
     ondeselect: () => void;
     onfitToView: () => void;
+    oninitialFit: () => void;
   } = $props();
 
   let container: HTMLDivElement | undefined = $state();
@@ -97,6 +99,11 @@
   let currentSelectionRing: { parentObj: THREE.Object3D; ring: THREE.Mesh } | null = null;
   let activeHoverId = $state<string | null>(null);
   let rafId = 0;
+
+  // Whether the initial zoom-to-fit has run. onEngineStop fires zoomToFit only
+  // once (on first settle) so subsequent data updates / SSE merges don't snap
+  // the camera back and clobber the user's manual zoom.
+  let initialFitDone = false;
 
   // Track per-node opacity for fade animation
   // nodeId → current opacity (0 = hidden, 1 = visible)
@@ -269,15 +276,36 @@
       }
     }
 
-    // Position hubs first in a spread-out layout
+    // Position hubs first in a spread-out layout. Photo/image nodes are
+    // placed at the center (origin) so all related nodes circle around them.
     const hubPositions = new Map<string, { x: number; y: number; z: number }>();
     const hubs = Array.from(hubSet);
-    hubs.forEach((hubId, i) => {
+    // Build a set of photo hub ids for O(1) lookup
+    const photoHubSet = new Set<string>();
+    const nonPhotoHubs: string[] = [];
+    for (const hubId of hubs) {
+      const nodeObj = nodes.find(nn => nn.id === hubId);
+      if (nodeObj && isPhotoNode(nodeObj)) {
+        photoHubSet.add(hubId);
+      } else {
+        nonPhotoHubs.push(hubId);
+      }
+    }
+    // Photo hubs go to the center
+    for (const hubId of photoHubSet) {
       if (positionCache.has(hubId)) {
         hubPositions.set(hubId, positionCache.get(hubId)!);
       } else {
-        const angle = (2 * Math.PI * i) / hubs.length;
-        const radius = hubs.length <= 1 ? 0 : 100 + hubs.length * 10;
+        hubPositions.set(hubId, { x: 0, y: 0, z: 0 });
+      }
+    }
+    // Non-photo hubs arranged in a circle around the center
+    nonPhotoHubs.forEach((hubId, i) => {
+      if (positionCache.has(hubId)) {
+        hubPositions.set(hubId, positionCache.get(hubId)!);
+      } else {
+        const angle = (2 * Math.PI * i) / Math.max(nonPhotoHubs.length, 1);
+        const radius = nonPhotoHubs.length <= 1 ? 0 : 100 + nonPhotoHubs.length * 10;
         hubPositions.set(hubId, {
           x: radius * Math.cos(angle),
           y: radius * Math.sin(angle),
@@ -343,7 +371,13 @@
           const totalSatellites = satellitesPerHub.get(hubId) ?? 1;
           const hubSize = getNodeSize(hubId);
           let orbitRadius = hubSize + 8 + Math.sqrt(totalSatellites) * 10;
-          // Photo nodes get extra initial distance
+          // Photo hubs sit at the center, so satellites need a large orbit
+          // radius to spread out (otherwise zoomToFit zooms in on the photo).
+          const hubNodeObj = nodes.find(nn => nn.id === hubId);
+          if (hubNodeObj && isPhotoNode(hubNodeObj)) {
+            orbitRadius += 120 + Math.sqrt(degreeMap.get(hubId) ?? 1) * 15;
+          }
+          // Photo satellites get extra initial distance
           if (isPhotoNode(n)) orbitRadius += 25;
           if (isPersonNode(n)) orbitRadius += 10;
           const angle = (2 * Math.PI * idx) / totalSatellites;
@@ -429,11 +463,16 @@
           const hubSize = getNodeSize(hubId);
           let orbitRadius = hubSize + 8 + Math.sqrt(degreeMap.get(hubId) ?? 1) * 6;
 
-          // Increase orbit radius when the hub or satellite is a photo node
+          // Increase orbit radius when the hub or satellite is a photo node.
+          // Photo hubs sit at the center, so their satellites need a much
+          // larger orbit radius to spread out — otherwise the bounding box
+          // is tiny and zoomToFit zooms in way too tight on the photo.
           const isSatellitePhoto = photoNodeLookup.get(nodeId) ?? false;
           const isHubPhoto = photoNodeLookup.get(hubId) ?? false;
-          if (isSatellitePhoto || isHubPhoto) {
-            orbitRadius += 25; // extra distance for image nodes
+          if (isHubPhoto) {
+            orbitRadius += 120 + Math.sqrt(degreeMap.get(hubId) ?? 1) * 15;
+          } else if (isSatellitePhoto) {
+            orbitRadius += 25;
           }
           const isSatellitePerson = personNodeLookup.get(nodeId) ?? false;
           const isHubPerson = personNodeLookup.get(hubId) ?? false;
@@ -457,6 +496,25 @@
           }
         }
       }) as never);
+
+      // Pin photo/image hub nodes at the center (origin) so they don't drift
+      // via the center force or other forces — they stay in the middle while
+      // their related nodes circle around them.
+      graph.d3Force('pinPhotoCenter', ((alpha: number) => {
+        const currentData = graph?.graphData();
+        if (!currentData) return;
+        for (const node of currentData.nodes as GraphNode[]) {
+          const nodeId = String(node.id);
+          if (!photoNodeLookup.get(nodeId)) continue;
+          // Only pin if it's a hub (high-degree) photo node
+          if (!hubSet.has(nodeId)) continue;
+          // Pull strongly toward origin
+          const k = 0.3 * alpha;
+          node.vx = (node.vx ?? 0) - (node.x ?? 0) * k;
+          node.vy = (node.vy ?? 0) - (node.y ?? 0) * k;
+          node.vz = (node.vz ?? 0) - (node.z ?? 0) * k;
+        }
+      }) as never);
     }
   }
 
@@ -467,10 +525,22 @@
     if (!n) return;
 
     const nodesArr = data.nodes as GraphNode[];
-    nodesArr.forEach((node, i) => {
-      const phi = Math.acos(1 - (2 * (i + 0.5)) / n);
+    // Separate photo nodes (go to center) from the rest (circle around)
+    const photoNodes = nodesArr.filter(node => isPhotoNode(node));
+    const otherNodes = nodesArr.filter(node => !isPhotoNode(node));
+
+    // Photo nodes at the center
+    photoNodes.forEach((node) => {
+      node.x = 0;
+      node.y = 0;
+      node.z = 0;
+    });
+
+    // Other nodes in a circle around the center
+    otherNodes.forEach((node, i) => {
+      const phi = Math.acos(1 - (2 * (i + 0.5)) / otherNodes.length);
       const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      const radius = Math.max(n, 25);
+      const radius = Math.max(otherNodes.length, 25);
       node.x = radius * Math.cos(theta) * Math.sin(phi);
       node.y = radius * Math.sin(theta) * Math.sin(phi);
       node.z = radius * Math.cos(phi);
@@ -486,8 +556,18 @@
     if (!n) return;
 
     const nodesArr = data.nodes as GraphNode[];
+    // Photo nodes at center; others grouped by label in rings
+    const photoNodes = nodesArr.filter(node => isPhotoNode(node));
+    const otherNodes = nodesArr.filter(node => !isPhotoNode(node));
+
+    photoNodes.forEach((node) => {
+      node.x = 0;
+      node.y = 0;
+      node.z = 0;
+    });
+
     const groups = new Map<string, GraphNode[]>();
-    nodesArr.forEach((node) => {
+    otherNodes.forEach((node) => {
       const label = node.labels?.[0] ?? 'default';
       if (!groups.has(label)) groups.set(label, []);
       groups.get(label)!.push(node);
@@ -1026,11 +1106,19 @@
         fg.d3AlphaDecay(1);
         fg.d3VelocityDecay(1);
         fg.d3AlphaMin(0.5);
-        // Fit the camera to the settled layout. Doing this here (instead of
-        // a setTimeout race against the still-running force simulation)
-        // eliminates the initial-load jitter: the camera no longer animates
-        // while node positions are simultaneously converging.
-        fg.zoomToFit(500, 80);
+        // Fit the camera to the settled layout ONLY on the initial settle.
+        // Subsequent engine stops (from SSE data merges / refreshGraph) must
+        // not re-fit, or the 500ms zoomToFit tween will clobber the user's
+        // manual zoom every time new data arrives.
+        if (!initialFitDone) {
+          initialFitDone = true;
+          // Instant (0ms) so the camera snaps to fit distance with no visible
+          // zoom-out animation on initial load.
+          fg.zoomToFit(0, 80);
+          // Notify the parent so it can lift the loading backdrop only after
+          // the camera is positioned at the fit distance.
+          oninitialFit();
+        }
       })
       .onNodeClick((node: NodeObject) => {
         const gn = node as GraphNode;
@@ -1358,6 +1446,19 @@
     const camera = graph.camera();
     const controls = graph.controls() as unknown as TrackballControlsLike;
 
+    // Cancel any in-flight cameraPosition/zoomToFit tween. Otherwise its
+    // onUpdate callback (setCameraPos/setLookAt) runs on the next tick and
+    // overwrites the manual zoom we're about to apply — the primary cause of
+    // "zoom not working" right after load or while data is streaming in.
+    // cameraPosition(..., 0) calls povPosTween.end()/povTgtTween.end() inside
+    // three-render-objects, then snaps to the given pos/lookAt with no anim.
+    const controls0 = graph.controls() as unknown as TrackballControlsLike;
+    graph.cameraPosition(
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      { x: controls0.target.x, y: controls0.target.y, z: controls0.target.z },
+      0
+    );
+
     // Compute displacement: move camera along the point→camera line
     const dx = (1 - factor) * (camera.position.x - point.x);
     const dy = (1 - factor) * (camera.position.y - point.y);
@@ -1368,14 +1469,17 @@
     camera.position.y -= dy;
     camera.position.z -= dz;
 
-    // Move the controls' orbit target by the same delta to preserve orientation
-    controls.target.x -= dx;
-    controls.target.y -= dy;
-    controls.target.z -= dz;
+    // Move the controls' orbit target by the same delta to preserve orientation.
+    // cameraPosition() above reassigned controls.target to a fresh Vector3, so
+    // read it again here.
+    const target = graph.controls() as unknown as TrackballControlsLike;
+    target.target.x -= dx;
+    target.target.y -= dy;
+    target.target.z -= dz;
 
     // Keep the camera looking at the new target
-    camera.lookAt(controls.target);
-    controls.update();
+    camera.lookAt(target.target);
+    target.update();
   }
 
   /** Handle wheel events to zoom toward the cursor position. */
@@ -1453,9 +1557,11 @@
     }
   }
 
-  export function fitView() {
+  export function fitView(instant = false) {
     if (!graph) return;
-    graph.zoomToFit(500, 80);
+    // instant=true snaps the camera with no transition (0ms), used on initial
+    // load so the graph doesn't visibly animate from zoomed-in to zoomed-out.
+    graph.zoomToFit(instant ? 0 : 500, 80);
   }
 
   export function getGraph() {
