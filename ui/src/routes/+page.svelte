@@ -18,6 +18,7 @@
   import DOMPurify from 'dompurify';
   import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
   import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
+  import { extractReferenceImages } from '$lib/utils/extract-reference-images';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
@@ -495,6 +496,23 @@
         isStreaming: false,
         model: 'lightrag',
       }));
+
+      // Render image references from the `### References` section as inline carousel.
+      try {
+        const refNames = extractReferenceImages(accumulatedContent || '');
+        const refImageUrls: string[] = [];
+        for (const name of refNames) {
+          refImageUrls.push(lightragClient.photoImageUrl(name));
+        }
+        if (refImageUrls.length > 0) {
+          updateStreamMessage(assistantId, (m) => ({
+            ...m,
+            imageUrls: [...(m.imageUrls || []), ...refImageUrls],
+          }));
+        }
+      } catch (refErr) {
+        console.error('[kg-direct] reference image resolution failed:', refErr);
+      }
 
       saveMessagesToConversation();
     } catch (err: unknown) {
@@ -1718,9 +1736,6 @@
                           </button>
                         </span>
                       {/if}
-                      {#if msg.imageUrls && msg.imageUrls.length > 0}
-                        <ImageGallery images={msg.imageUrls} alt="Knowledge graph image" />
-                      {/if}
                       {#if msg.isStreaming && tokensPerSecond && msg.content}
                         <div class="mt-1.5 flex items-center gap-1.5 text-[10px]">
                           <span class="inline-flex items-center gap-1 rounded-full bg-cyber-green/10 px-1.5 py-0.5 font-mono text-cyber-green">
@@ -1730,6 +1745,10 @@
                         </div>
                       {/if}
                     </div>
+
+                    {#if msg.imageUrls && msg.imageUrls.length > 0}
+                      <ImageGallery images={msg.imageUrls} alt="Knowledge graph image" />
+                    {/if}
 
                     {#if !msg.isStreaming && msg.content}
                       <div class="flex items-center gap-2">
