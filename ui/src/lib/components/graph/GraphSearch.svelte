@@ -1,5 +1,6 @@
 <script lang="ts">
   import { lightragClient } from '$lib/services/lightrag-client';
+  import { isMobile } from '$lib/composables/use-breakpoint';
   import type { KGNode } from '$lib/constants';
 
   interface EnrichedResult {
@@ -22,7 +23,7 @@
 
   const DEFAULT_TYPE_COLOR = { bg: 'rgba(90, 107, 128, 0.1)', text: '#5a6b80', border: 'rgba(90, 107, 128, 0.3)' };
 
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = $derived($isMobile ? 20 : 50);
   const MAX_RELATED = 200;
 
   /** Sort priority for entity types: people → events → locations → images → other */
@@ -381,19 +382,19 @@
       <div class="absolute top-full left-0 right-0 mt-1 bg-cyber-surface/95 backdrop-blur-md border border-cyber-border rounded-xl overflow-hidden max-h-80 overflow-y-auto">
         {#each results as result, i (result.label)}
           {#if result.related && (i === 0 || !results[i-1].related)}
-            <div class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider border-t border-cyber-border/30 {i > 0 ? 'mt-1' : ''}" style="color: #00d4ff;">
+            <div class="gs-section px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider border-t border-cyber-border/30 {i > 0 ? 'mt-1' : ''}" style="color: #00d4ff;">
               Related entities
             </div>
           {/if}
           {#if result.related && i > 0 && results[i-1].related && entityTypeGroupLabel(result.entityType) !== entityTypeGroupLabel(results[i-1].entityType)}
-            <div class="px-3 py-1 text-[10px] uppercase tracking-wider text-cyber-text-dim border-t border-cyber-border/20">
+            <div class="gs-subsection px-3 py-1 text-[10px] uppercase tracking-wider text-cyber-text-dim border-t border-cyber-border/20">
               {entityTypeGroupLabel(result.entityType)}
             </div>
           {/if}
           {@const colors = getTypeColor(result.entityType)}
           <button
             onclick={() => handleSelect(result.label)}
-            class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-cyber-cyan/10 transition-colors text-left {result.related ? 'opacity-80' : ''}"
+            class="gs-card w-full flex items-center gap-2.5 px-3 py-2 hover:bg-cyber-cyan/10 transition-colors text-left {result.related ? 'opacity-80' : ''}"
           >
             {#if result.entityType.toLowerCase() === 'person'}
               <div class="shrink-0 w-9 h-9 rounded-full overflow-hidden border border-cyber-border bg-cyber-surface-2 flex items-center justify-center relative">
@@ -426,7 +427,7 @@
               <div class="flex items-center gap-1.5">
                 <span class="text-sm text-cyber-text truncate font-medium">{result.label}</span>
                 <span
-                  class="shrink-0 inline-block px-1.5 py-px text-[10px] uppercase tracking-wider rounded-full border font-medium leading-none"
+                  class="gs-badge shrink-0 inline-block px-1.5 py-px text-[10px] uppercase tracking-wider rounded-full border font-medium leading-none"
                   style="color: {colors.text}; border-color: {colors.border}; background: {colors.bg};"
                 >
                   {getTypeBadgeLabel(result.entityType)}
@@ -459,3 +460,24 @@
     {/if}
   </div>
 </div>
+
+<style>
+  @media (max-width: 768px) {
+    .gs-card {
+      padding: 0.75rem 0.875rem;
+      min-height: 44px;
+    }
+    .gs-badge {
+      font-size: 11px;
+      padding: 0.125rem 0.375rem;
+    }
+    .gs-section {
+      font-size: 12px;
+      padding: 0.5rem 0.875rem;
+    }
+    .gs-subsection {
+      font-size: 11px;
+      padding: 0.375rem 0.875rem;
+    }
+  }
+</style>
