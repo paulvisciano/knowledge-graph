@@ -7,6 +7,12 @@
   import { graphStore } from '$lib/stores/graph.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
 
+  interface TrackballControlsLike {
+    target: THREE.Vector3;
+    noZoom: boolean;
+    update(): void;
+  }
+
   const FALLBACK_COLORS = ['#5a6b80', '#7c8da5', '#4a6fa5', '#6b8f71', '#8b7ec8', '#c77d5a'];
   const TYPE_COLORS: Record<string, string> = {
     person: '#00ffff',
@@ -1106,7 +1112,7 @@
     // positions are still converging (the primary cause of initial-load jitter).
 
     // Override default TrackballControls scroll zoom with cursor-centered zoom
-    const controls = fg.controls();
+    const controls = fg.controls() as unknown as TrackballControlsLike;
     controls.noZoom = true; // disable default scroll zoom (TrackballControls uses noZoom, not enableZoom)
 
     // Attach wheel handler to the canvas (not the container div) so that
@@ -1350,7 +1356,7 @@
   function zoomToward(point: { x: number; y: number; z: number }, factor: number) {
     if (!graph) return;
     const camera = graph.camera();
-    const controls = graph.controls();
+    const controls = graph.controls() as unknown as TrackballControlsLike;
 
     // Compute displacement: move camera along the point→camera line
     const dx = (1 - factor) * (camera.position.x - point.x);
@@ -1410,7 +1416,7 @@
       zoomToward(targetPoint, 1 / 1.2);
     } else {
       // Fallback: simple camera move
-      const controls = graph.controls();
+      const controls = graph.controls() as unknown as TrackballControlsLike;
       const factor = 1 / 1.2;
       camera.position.x *= factor;
       camera.position.y *= factor;
@@ -1434,7 +1440,7 @@
     if (targetPoint) {
       zoomToward(targetPoint, 1.2);
     } else {
-      const controls = graph.controls();
+      const controls = graph.controls() as unknown as TrackballControlsLike;
       const factor = 1.2;
       camera.position.x *= factor;
       camera.position.y *= factor;

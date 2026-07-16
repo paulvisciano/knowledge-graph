@@ -1,6 +1,7 @@
 import { lightragClient } from '$lib/services/lightrag-client';
 import { llamaClient } from '$lib/services/llama-client';
 import { kgApiClient } from '$lib/services/kg-api-client';
+import { mcpClient } from '$lib/services/mcp-client.svelte';
 import { eventBus } from './event-bus.svelte';
 
 class ConnectionStore {
@@ -37,6 +38,14 @@ class ConnectionStore {
     } catch {
       this.kgApiConnected = false;
     }
+  }
+
+  async connectMcp(url?: string) {
+    await mcpClient.connect(url);
+  }
+
+  async disconnectMcp() {
+    await mcpClient.disconnect();
   }
 
   async pollAll() {

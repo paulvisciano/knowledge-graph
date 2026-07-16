@@ -510,7 +510,7 @@
 
     // Auto-focus: zoom to fit the full cluster instead of zooming into the photo node
     if (newPhotoNodeId) {
-      setTimeout(() => graphCanvas?.fitToView(), 300);
+      setTimeout(() => graphCanvas?.fitView(), 300);
     }
   });
 
