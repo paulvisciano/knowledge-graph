@@ -763,6 +763,231 @@ open http://localhost:9621
   </table>
 </div>
 
+<!-- ─── Improvement: BGE-M3 Embeddings ───────────────────────────────────── -->
+<h2>Improvement — Switching to BGE-M3 (1024-dim) Embeddings</h2>
+
+<div class="card accent">
+  <p>The stack currently embeds documents and queries with <code>nomic-embed-text-v2-moe</code> (768-dim, 8&nbsp;K context, English-oriented) while reranking with <code>bge-reranker-v2-m3</code>. Replacing the embedding model with <strong>BGE-M3</strong> (<a href="https://huggingface.co/BAAI/bge-m3" target="_blank" rel="noopener">BAAI/bge-m3</a>) — a 1024-dim, 8&nbsp;K context, 100+-language model built on XLM-RoBERTa-large — aligns the embedding and reranker on the same M3 family and adds real multilingual + long-document retrieval capacity. GGUF builds are available (<a href="https://huggingface.co/gpustack/bge-m3-GGUF" target="_blank" rel="noopener">gpustack/bge-m3-GGUF</a>, <a href="https://huggingface.co/doof-ferb/bge-m3-gguf" target="_blank" rel="noopener">doof-ferb/bge-m3-gguf</a>) and run on llama.cpp with <code>--embedding --pooling cls</code> (no <code>--override-kv</code> hack needed, unlike nomic's MoE context-length patch).</p>
+</div>
+
+<h3>Why BGE-M3 over nomic-embed-text-v2-moe</h3>
+<div class="card">
+  <table>
+    <tr><th>Property</th><th>Current — nomic-embed-v2-moe</th><th>Proposed — BGE-M3</th><th>Benefit for this stack</th><th>In plain English</th></tr>
+    <tr>
+      <td>Dense dimensions</td>
+      <td>768</td>
+      <td><strong>1024</strong></td>
+      <td>33% more semantic capacity per vector → finer-grained neighbor discrimination in the HNSW index, fewer near-collision false positives across photo/people/place entities</td>
+      <td>More numbers describe each piece of content, so the system is less likely to confuse two similar-but-different things (e.g. your friend Paul vs. Paul the city).</td>
+    </tr>
+    <tr>
+      <td>Max context</td>
+      <td>8,192 tokens</td>
+      <td>8,192 tokens</td>
+      <td>Equal — no regression on long combined VLM+EXIF documents</td>
+      <td>Same amount of text fits in one go — no downside.</td>
+    </tr>
+    <tr>
+      <td>Language coverage</td>
+      <td>English-oriented (strong en, limited multilingual)</td>
+      <td><strong>100+ languages</strong> (XLM-RoBERTa-large base, trained on MIRACL + MKQA)</td>
+      <td>Whisper transcriptions and VLM descriptions arrive in the user's spoken language — BGE-M3 embeds query and docs in the <em>same</em> cross-lingual space instead of forcing English-only retrieval</td>
+      <td>You can ask a question in any language and it still matches the right photos and notes — today it mostly only "understands" English.</td>
+    </tr>
+    <tr>
+      <td>Retrieval functions</td>
+      <td>Dense only</td>
+      <td><strong>Dense + Sparse (lexical) + ColBERT (multi-vector)</strong> in one forward pass</td>
+      <td>Dense catches semantics; sparse catches exact proper nouns ("Paul", "Nikon Z6", "Saint Petersburg") that dense models blur; ColBERT gives token-level matching — LightRAG's hybrid query can use any combination</td>
+      <td>It can match by meaning <em>and</em> by exact name. So searching "Nikon Z6" finds the camera even if the description said "my camera" — today meaning-only matching can miss exact names.</td>
+    </tr>
+    <tr>
+      <td>Architecture</td>
+      <td>MoE encoder</td>
+      <td>XLM-RoBERTa-large (568M params, 24 layers)</td>
+      <td>Standard, well-supported in llama.cpp — no MoE-specific <code>--override-kv</code> flagging</td>
+      <td>Uses a common, well-tested design — less fiddly to run, fewer model-specific quirks to work around.</td>
+    </tr>
+    <tr>
+      <td>Family match with reranker</td>
+      <td><span class="badge red">mismatch</span> nomic embed + bge reranker</td>
+      <td><span class="badge green">match</span> bge-m3 embed + bge-reranker-v2-m3</td>
+      <td>Same M3 family → consistent tokenization and representation space between retriever and reranker, so the reranker re-scores candidates the embedder already ranked well instead of fighting it</td>
+      <td>The "first pass" search and the "second pass" reorder now speak the same language — they agree on what's relevant instead of pulling in different directions.</td>
+    </tr>
+    <tr>
+      <td>Model file (GGUF)</td>
+      <td>~379 MB (Q6_K)</td>
+      <td>~1.1 GB (Q4_K_M) / ~1.4 GB (Q6_K)</td>
+      <td>~3-4× larger; still trivial vs the 6.9 GB LLM. Metal GPU handles it easily on 8 GB+ RAM</td>
+      <td>Bigger file, but still small next to the 6.9 GB main model — your Mac won't notice.</td>
+    </tr>
+    <tr>
+      <td>llama.cpp flags</td>
+      <td><code>--embedding --pooling cls</code> + <code>--override-kv nomic-bert-moe.context_length=int:8192</code></td>
+      <td><code>--embedding --pooling cls</code> (that's it)</td>
+      <td>Drops the nomic-specific context-length override — cleaner start script, no per-model kv hack</td>
+      <td>Less special-case config to maintain — it "just works" with standard settings.</td>
+    </tr>
+    <tr>
+      <td>Long-document recall</td>
+      <td>Dense single-vector; long docs rely on chunking</td>
+      <td>Dense + sparse + ColBERT jointly trained; sparse/ColBERT preserve exact-match signal over long spans</td>
+      <td>Better recall on long combined photo documents (EXIF + VLM description in one insert) where an exact entity ("Nikon Z6") must survive a 1500-token chunk</td>
+      <td>When a photo's write-up is long, exact names like "Nikon Z6" still get found instead of getting diluted away in a wall of text.</td>
+    </tr>
+  </table>
+  <p class="muted" style="margin-top:0.5rem"><strong>Cost of switching:</strong> all existing vectors in PostgreSQL must be regenerated (768-dim → 1024-dim), the pgvector HNSW index rebuilt, <code>EMBEDDING_DIM=1024</code> set in <code>.env</code>, the model file swapped in <code>~/models/bge-m3/</code>, and <code>start-llama-servers.sh</code> updated to point <code>EMBED_MODEL_PATH</code> at the new GGUF. A <code>scripts/clear-graph.sh</code> + reprocess is the clean path; a targeted re-embed-only script is feasible since LightRAG stores raw docs in <code>PGDocStatusStorage</code>.</p>
+</div>
+
+<h3>End-to-End Workflow: Audio Message → Response (with BGE-M3)</h3>
+<div class="card purple">
+  <p>Describes both the <strong>current</strong> audio path (traced from source) and the <strong>proposed</strong> path that routes voice messages through the knowledge graph with BGE-M3. Today, audio bypasses the RAG pipeline entirely — Gemma answers from its own knowledge. The proposed path wires audio into LightRAG so the embedding model gates retrieval.</p>
+</div>
+
+<div class="card warning" style="margin-bottom:1rem">
+  <h3>Current Path — What Actually Happens Today</h3>
+  <p class="muted">Traced through <code>ui/src/routes/+page.svelte</code>, <code>ui/src/lib/utils/audio-recording.ts</code>, <code>docker/nginx/nginx.conf</code>. Audio <strong>does not</strong> go through LightRAG, the embedding model, vector search, or the reranker.</p>
+<pre>
+<span class="badge blue">1. Capture</span>  User taps mic in Nexus UI <span class="arrow">→</span> AudioRecorder (AudioWorklet) captures PCM samples
+            <span class="muted">ui/src/lib/utils/audio-recording.ts — PCMProcessor worklet → Float32Array chunks</span>
+
+<span class="badge blue">2. Encode</span>  PCM chunks <span class="arrow">→</span> <code>audioBufferToWav()</code> <span class="arrow">→</span> WAV blob <span class="arrow">→</span> <code>blobToBase64()</code> <span class="arrow">→</span> base64 data URL
+            <span class="muted">persisted as <code>audioData</code> in the message store via sync-client (durable across reloads)</span>
+
+<span class="badge yellow">3. Send to Gemma</span> <code>handleSend(audioUrl, audioData, 'wav')</code> <span class="arrow">→</span> <code>streamAssistantResponse()</code>
+            <span class="arrow">→</span> builds <code>{ type: 'input_audio', input_audio: { data, format: 'wav' } }</code> content part
+            <span class="arrow">→</span> POST <code>/v1/chat/completions</code> <span class="arrow">→</span> nginx <span class="arrow">→</span> llama-server <code>:8080</code> (Gemma 4 12B)
+            <span class="muted">+page.svelte line 1053: <code>if ($chatMode === 'kg-direct' &amp;&amp; !audioData)</code> — audioData forces streamAssistantResponse,
+            never streamKGChatResponse. No transcription step — Gemma handles the audio modality natively.</span>
+            <span class="muted">Note: <code>transcribeAudio()</code> and the <code>/v1/audio/transcriptions</code> endpoint constant exist in the codebase
+            but are dead code — never called. No Whisper model is loaded by start-llama-servers.sh.</span>
+
+<span class="badge yellow">4. Generate</span> Gemma processes audio + system prompt + conversation history <span class="arrow">→</span> streams text response tokens
+            <span class="muted">answers from Gemma's own knowledge — no knowledge-graph context, no retrieved chunks</span>
+
+<span class="badge blue">5. Render</span> streamed tokens <span class="arrow">→</span> chat panel via <code>requestAnimationFrame</code> throttled flush
+            <span class="arrow">→</span> AudioPlayer.svelte shows the original voice message alongside the response
+</pre>
+  <p class="muted" style="margin-top:0.5rem"><strong>Gap:</strong> voice messages never query the knowledge graph. A user asking "show me photos of Paul at the beach" by voice gets a generic Gemma answer, not a graph-grounded one. The embedding model, vector search, and reranker are not involved.</p>
+</div>
+
+<div class="card success">
+  <h3>Proposed Path — Audio Routed Through the Knowledge Graph (with BGE-M3)</h3>
+  <p class="muted">Requires two code changes: (a) Gemma transcribes the audio to text, (b) the transcript routes through <code>streamKGChatResponse()</code> (LightRAG query) instead of <code>streamAssistantResponse()</code> only. Steps 6-8 are where BGE-M3 replaces nomic-embed-v2.</p>
+<pre>
+<span class="badge blue">1. Capture</span>  User taps mic in Nexus UI <span class="arrow">→</span> AudioRecorder (AudioWorklet) captures PCM samples
+            <span class="muted">ui/src/lib/utils/audio-recording.ts — PCMProcessor worklet → Float32Array chunks</span>
+
+<span class="badge blue">2. Encode</span>  PCM chunks <span class="arrow">→</span> <code>audioBufferToWav()</code> <span class="arrow">→</span> WAV blob <span class="arrow">→</span> base64 data URL
+            <span class="muted">persisted as <code>audioData</code> in the message store via sync-client (durable across reloads)</span>
+
+<span class="badge yellow">3. Transcribe</span> WAV <span class="arrow">→</span> <code>{ type: 'input_audio', input_audio: { data, format: 'wav' } }</code> <span class="arrow">→</span> POST <code>/v1/chat/completions</code>
+            <span class="arrow">→</span> Gemma 4 12B on <code>:8080</code> handles audio natively <span class="arrow">→</span> returns transcript text (may be <strong>any language</strong>)
+            <span class="muted">no separate Whisper model — Gemma's audio modality produces the transcript directly</span>
+
+<span class="badge yellow">4. Query LightRAG</span> transcript <span class="arrow">→</span> <code>streamKGChatResponse()</code> <span class="arrow">→</span> Nexus /api/lightrag/query/stream <span class="arrow">→</span> LightRAG <code>:9621</code>
+            <span class="muted">Nexus proxies through nginx to LightRAG's streaming query endpoint</span>
+
+<span class="badge green">5. Extract keywords</span> LightRAG sends transcript to Gemma (<code>:8080</code>) with a keyword-extraction prompt
+            <span class="arrow">→</span> returns high-level + low-level keywords
+            <span class="muted">operate.py → extract_keywords_only()</span>
+
+<span class="badge green">6. Embed query</span> LightRAG calls EMBEDDING_BINDING_HOST (<code>:8081</code>) <span class="arrow">→</span> <strong>BGE-M3</strong> embeds the transcript + keywords
+            <span class="arrow">→</span> <strong>1024-dim</strong> dense vectors (batched: query + ll_keywords + hl_keywords in one call)
+            <span class="badge green">★ BGE-M3 benefit</span> <span class="muted">cross-lingual: a Russian/Spanish transcript embeds in the same
+            space as the multilingual VLM descriptions and EXIF place names — no English-only bottleneck</span>
+
+<span class="badge green">7. Vector search</span> 1024-dim query vectors <span class="arrow">→</span> pgvector HNSW over PostgreSQL
+            <span class="arrow">→</span> top-k candidate entities, relations, and chunks (combined photo docs, EXIF nodes, VLM descriptions)
+            <span class="badge green">★ BGE-M3 benefit</span> <span class="muted">1024 dims → finer neighbor ranking; sparse/ColBERT functions
+            preserve exact proper nouns ("Paul", "Nikon Z6", "Backyard") that 768-dim dense-only blurs</span>
+
+<span class="badge green">8. Rerank</span> candidates <span class="arrow">→</span> bge-reranker-v2-m3 on <code>:8082</code> (Jina /v1/rerank)
+            <span class="arrow">→</span> re-scored and reordered
+            <span class="badge green">★ BGE-M3 benefit</span> <span class="muted">same M3 family as the embedder → tokenizer and
+            representation space agree, so the reranker refines an ordering the embedder already
+            produced instead of re-tokenizing against a mismatched vocabulary</span>
+
+<span class="badge yellow">9. Generate</span> top reranked chunks + conversation history <span class="arrow">→</span> Gemma 4 12B on <code>:8080</code>
+            <span class="arrow">→</span> streamed answer tokens grounded in retrieved knowledge-graph context
+            <span class="muted">better-grounded context (steps 6-8) → fewer hallucinated entities, correct photo/person/place references</span>
+
+<span class="badge blue">10. Render</span> answer stream <span class="arrow">→</span> Nexus chat panel; AudioPlayer.svelte shows the original voice message
+            <span class="muted">SSE/streaming response proxied back through nginx <code>:5180</code></span>
+</pre>
+</div>
+
+<div class="card success">
+  <h3>Net Effect on the Audio → Response Path</h3>
+  <p><strong>Today:</strong> audio messages bypass the knowledge graph entirely — Gemma answers from its own knowledge with no retrieved context. The embedding model is not involved. Voice queries like "show me photos of Paul at the beach" get generic answers, not graph-grounded ones.</p>
+  <p style="margin-top:0.5rem"><strong>After the two changes (route audio through LightRAG + switch to BGE-M3):</strong> Gemma transcribes the audio natively (no Whisper needed), the transcript enters the LightRAG query pipeline, and BGE-M3 embeds it in a 100+-language 1024-dim space. Vector search returns language-consistent, exact-entity-matching candidates; the reranker (bge-reranker-v2-m3) refines them on a consistent M3 tokenization; and Gemma generates a graph-grounded answer. The UI, audio capture, and Gemma's audio modality are unchanged — the gains come from (a) routing audio into RAG at all, and (b) better retrieval quality at steps 6-8.</p>
+</div>
+
+<h3>How the Embedding Model Fits Into the Query Pipeline</h3>
+<div class="card accent">
+  <p>This table describes the <strong>LightRAG text-query pipeline</strong> — the path taken when a user types a query (or when audio is routed through LightRAG per the proposed path above). The LLM (Gemma 4 12B on <code>:8080</code>) and the embedding model (nomic on <code>:8081</code>) do different jobs. Gemma is called <strong>twice</strong> — once to parse the query into keywords, once to write the final answer. The embedding model is called <strong>once</strong> — but that single call decides what Gemma sees. The reranker (<code>:8082</code>) is called once to re-score candidates. Traced through the LightRAG source (<code>lightrag/operate.py</code>, <code>lightrag/kg/postgres_impl.py</code>, <code>lightrag/utils.py</code>):</p>
+  <table style="margin-top:0.75rem">
+    <tr><th>Step</th><th>Model</th><th>Port</th><th>Source</th><th>What happens</th></tr>
+    <tr>
+      <td>1. Keyword extraction</td>
+      <td><span class="badge yellow">Gemma</span> (LLM)</td>
+      <td><code>:8080</code></td>
+      <td><code>operate.py</code> → <code>extract_keywords_only()</code></td>
+      <td>Sends the query to Gemma with a keyword-extraction prompt → returns high-level + low-level keywords (e.g. "photos of Paul at the beach" → hl: ["beach","summer"], ll: ["Paul"])</td>
+    </tr>
+    <tr>
+      <td>2. Batch embed</td>
+      <td><span class="badge yellow">nomic</span> (embedding)</td>
+      <td><code>:8081</code></td>
+      <td><code>operate.py</code> → <code>_perform_kg_search()</code></td>
+      <td>Embeds up to 3 texts in ONE call: the raw query (→ <code>query_embedding</code>), <code>ll_keywords</code> (→ <code>ll_embedding</code>), <code>hl_keywords</code> (→ <code>hl_embedding</code>). Batched to avoid 2-3 sequential round-trips.</td>
+    </tr>
+    <tr>
+      <td>3. Vector search</td>
+      <td><span class="badge purple">pgvector HNSW</span></td>
+      <td>PostgreSQL</td>
+      <td><code>postgres_impl.py</code> → <code>PGVectorStorage.query()</code></td>
+      <td>Three separate HNSW cosine searches using those embeddings: entities VDB (by <code>ll_embedding</code>), relationships VDB (by <code>hl_embedding</code>), chunks VDB (by <code>query_embedding</code>, mix mode only). The embedding model's output IS the search key — SQL: <code>ORDER BY content_vector &lt;=&gt; $4</code>.</td>
+    </tr>
+    <tr>
+      <td>4. Graph traversal</td>
+      <td><span class="badge blue">NetworkX</span></td>
+      <td>—</td>
+      <td><code>operate.py</code> → <code>_get_node_data()</code> / <code>_get_edge_data()</code></td>
+      <td>From the top-k entity nodes found by vector search, fetches node metadata, degrees, and related edges from the NetworkX graph. NO embedding or LLM call — pure graph hops.</td>
+    </tr>
+    <tr>
+      <td>5. Rerank</td>
+      <td><span class="badge yellow">bge-reranker-v2-m3</span></td>
+      <td><code>:8082</code></td>
+      <td><code>utils.py</code> → <code>apply_rerank_if_enabled()</code></td>
+      <td>Takes the merged candidate chunks + the original query and asks the reranker to re-score them. A SEPARATE model from the embedder — it scores query↔document relevance directly (cross-encoder).</td>
+    </tr>
+    <tr>
+      <td>6. Context build</td>
+      <td><span class="badge blue">none</span></td>
+      <td>—</td>
+      <td><code>operate.py</code> → <code>_apply_token_truncation</code> → <code>_merge_all_chunks</code> → <code>_build_context_str</code></td>
+      <td>Truncates to fit the LLM context window, builds a formatted context string with entities, relations, and chunks. NO model calls — pure data assembly.</td>
+    </tr>
+    <tr>
+      <td>7. Answer generation</td>
+      <td><span class="badge yellow">Gemma</span> (LLM)</td>
+      <td><code>:8080</code></td>
+      <td><code>operate.py</code> → <code>kg_query()</code></td>
+      <td>Sends the system prompt (with assembled context) + user query to Gemma → streams the answer back.</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card warning">
+  <h3>The Key Takeaway</h3>
+  <p><strong>The embedding model is the retrieval gatekeeper.</strong> Gemma extracts keywords, but nomic decides which entities, relations, and chunks get retrieved from PostgreSQL. The LLM never sees the raw document store — it only sees what the embedding model's vector search surfaced (step 3). So if nomic returns poor matches (wrong language, blurred proper nouns), Gemma gets bad context and produces a bad answer regardless of how good the LLM is.</p>
+  <p style="margin-top:0.5rem">This is exactly why the BGE-M3 switch matters: <strong>steps 2-3 are where retrieval quality is decided</strong>, and that's purely the embedding model's job. Gemma runs identically before and after — but it receives better-ranked input. With BGE-M3, step 2 embeds in a 100+-language 1024-dim space (vs nomic's English-oriented 768-dim), and step 3's HNSW search returns more accurate, language-consistent candidates — so step 7's answer is grounded in better context with no LLM change.</p>
+</div>
+
 <!-- ─── Powered By ────────────────────────────────────────────────────────── -->
 <div class="tech-footer">
   <h2>Powered By</h2>
