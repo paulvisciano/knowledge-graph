@@ -192,7 +192,7 @@ cp .env.example .env</pre>
   <table>
     <tr><th>Model</th><th>File</th><th>Size</th><th>HuggingFace Search</th></tr>
     <tr><td>LLM (Gemma 4 12B)</td><td><code>Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</code></td><td>~6.9 GB</td><td>Search "Gemma-4-12B OBLITERATED GGUF" on <a href="https://huggingface.co/models?search=gemma-4-12b-obliterated+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
-    <tr><td>Embedding (nomic-embed-v2)</td><td><code>nomic-embed-text-v2-moe.Q6_K.gguf</code></td><td>~379 MB</td><td>Search "nomic-embed-text-v2-moe GGUF" on <a href="https://huggingface.co/models?search=nomic-embed-text-v2-moe+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
+    <tr><td>Embedding (BGE-M3)</td><td><code>bge-m3-Q4_K_M.gguf</code></td><td>~1.1 GB</td><td>Search "bge-m3 GGUF" on <a href="https://huggingface.co/models?search=bge-m3+gguf" target="_blank" rel="noopener">HuggingFace</a> (e.g. <a href="https://huggingface.co/gpustack/bge-m3-GGUF" target="_blank" rel="noopener">gpustack/bge-m3-GGUF</a>, <a href="https://huggingface.co/doof-ferb/bge-m3-gguf" target="_blank" rel="noopener">doof-ferb/bge-m3-gguf</a>)</td></tr>
     <tr><td>Reranker (bge-reranker-v2-m3)</td><td><code>bge-reranker-v2-m3-Q4_K_M.gguf</code></td><td>~418 MB</td><td>Search "bge-reranker-v2-m3 GGUF" on <a href="https://huggingface.co/models?search=bge-reranker-v2-m3+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
     <tr><td>Vision projection (mmproj)</td><td><code>mmproj-BF16.gguf</code></td><td>~2.3 GB</td><td>Search "Gemma 4 12B mmproj GGUF" on <a href="https://huggingface.co/models?search=gemma-4+mmproj+gguf" target="_blank" rel="noopener">HuggingFace</a></td></tr>
   </table>
@@ -217,21 +217,21 @@ huggingface-cli download bartowski/Gemma-4-12B-OBLITERATED-GGUF \
   <p style="margin-top:0.75rem">Create directories and place files:</p>
 <pre><span class="muted"># Create model directories</span>
 mkdir -p ~/models/gemma4-12b-obliterated
-mkdir -p ~/models/nomic-embed-v2
+mkdir -p ~/models/bge-m3
 mkdir -p ~/models/bge-reranker-v2-m3
 
 <span class="muted"># Move downloaded files into place</span>
 mv ~/Downloads/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf ~/models/gemma4-12b-obliterated/
 mv ~/Downloads/mmproj-BF16.gguf ~/models/gemma4-12b-obliterated/
-mv ~/Downloads/nomic-embed-text-v2-moe.Q6_K.gguf ~/models/nomic-embed-v2/
+mv ~/Downloads/bge-m3-Q4_K_M.gguf ~/models/bge-m3/
 mv ~/Downloads/bge-reranker-v2-m3-Q4_K_M.gguf ~/models/bge-reranker-v2-m3/</pre>
   <p style="margin-top:0.75rem">Expected directory layout:</p>
 <pre><span class="muted">~/models/</span>
 <span class="muted">├── gemma4-12b-obliterated/</span>
 <span class="muted">│   ├── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf</span>
 <span class="muted">│   └── mmproj-BF16.gguf</span>
-<span class="muted">├── nomic-embed-v2/</span>
-<span class="muted">│   └── nomic-embed-text-v2-moe.Q6_K.gguf</span>
+<span class="muted">├── bge-m3/</span>
+<span class="muted">│   └── bge-m3-Q4_K_M.gguf</span>
 <span class="muted">└── bge-reranker-v2-m3/</span>
 <span class="muted">    └── bge-reranker-v2-m3-Q4_K_M.gguf</span></pre>
   <p class="muted" style="margin-top:0.25rem">The <code>models/</code> directory in the repo is gitignored. The start scripts expect <code>~/models/</code> by default — adjust <code>MODEL_DIR</code> in <code>.env</code> if your models live elsewhere.</p>
@@ -446,7 +446,7 @@ docker compose down</pre>
         <span class="arrow">↓</span>
   <span class="badge purple">PostgreSQL</span> <span class="muted">KV + Vector + DocStatus</span>
   <span class="badge yellow">llama-server :8080</span> <span class="muted">LLM (Gemma 4 12B)</span>
-  <span class="badge yellow">llama-server :8081</span> <span class="muted">Embedding (nomic-embed-v2)</span>
+  <span class="badge yellow">llama-server :8081</span> <span class="muted">Embedding (BGE-M3)</span>
   <span class="badge yellow">llama-server :8082</span> <span class="muted">Reranker (bge-reranker-v2-m3)</span>
 </pre>
 </div>
@@ -493,8 +493,8 @@ docker compose down</pre>
     <td><span class="badge yellow">Embedding</span></td>
     <td>Host (Metal)</td>
     <td><code>8081</code></td>
-    <td>nomic-embed-text-v2-moe Q6_K</td>
-    <td>379 MB</td>
+    <td>bge-m3 Q4_K_M</td>
+    <td>1.1 GB</td>
   </tr>
   <tr>
     <td><span class="badge yellow">Reranker</span></td>
@@ -523,8 +523,8 @@ docker compose down</pre>
   <div class="card">
     <h3>Embedding & Reranking</h3>
     <table>
-      <tr><td>Embedding model</td><td>nomic-embed-text-v2-moe Q6_K</td></tr>
-      <tr><td>Dimensions</td><td>768</td></tr>
+      <tr><td>Embedding model</td><td>bge-m3 Q4_K_M</td></tr>
+      <tr><td>Dimensions</td><td>1024</td></tr>
       <tr><td>Context</td><td>8,192 tokens</td></tr>
       <tr><td>Reranker</td><td>bge-reranker-v2-m3 Q4_K_M</td></tr>
       <tr><td>Rerank binding</td><td>jina (llama-server /v1/rerank)</td></tr>
@@ -760,6 +760,7 @@ open http://localhost:9621
     <tr><td>2026-07-15</td><td>Fixed 19 <code>svelte-check</code> TypeScript errors in graph and connection stores.</td></tr>
     <tr><td>2026-07-16</td><td>Fit graph to view on initial load and centered image nodes. Improved <code>GraphCanvas.svelte</code> and <code>GraphView.svelte</code> layout handling.</td></tr>
     <tr><td>2026-07-16</td><td>Added face crop endpoint (<code>GET /faces/crops/by-id/:face_id</code>) keyed by <code>face_mapping.json</code> with on-the-fly fallback detection. Increased face detection max dimension to 3840px and extracted face embeddings/bboxes in subprocess for better small/distant face recall. Reworked <code>NodeDetail.svelte</code> (createdAt formatting, graph store integration, <code>onselectNode</code> + event bus support). Extended <code>PhotoOverlay.svelte</code> with person-node helpers and KG API proxy base. Added <code>scripts/clear-graph.sh</code> utility.</td></tr>
+    <tr><td>2026-07-17</td><td>Migrated embedding model from <code>nomic-embed-text-v2-moe</code> (768-dim) to <strong>BGE-M3</strong> (1024-dim, multilingual). Updated <code>.env</code>, <code>docker-compose.yml</code>, and <code>start-llama-servers.sh</code> (dropped the <code>--override-kv nomic-bert-moe.context_length</code> hack — BGE-M3 needs only <code>--embedding --pooling cls</code>). Existing vectors must be regenerated via <code>scripts/clear-graph.sh</code> + reprocess.</td></tr>
   </table>
 </div>
 
@@ -927,7 +928,7 @@ open http://localhost:9621
 
 <h3>How the Embedding Model Fits Into the Query Pipeline</h3>
 <div class="card accent">
-  <p>This table describes the <strong>LightRAG text-query pipeline</strong> — the path taken when a user types a query (or when audio is routed through LightRAG per the proposed path above). The LLM (Gemma 4 12B on <code>:8080</code>) and the embedding model (nomic on <code>:8081</code>) do different jobs. Gemma is called <strong>twice</strong> — once to parse the query into keywords, once to write the final answer. The embedding model is called <strong>once</strong> — but that single call decides what Gemma sees. The reranker (<code>:8082</code>) is called once to re-score candidates. Traced through the LightRAG source (<code>lightrag/operate.py</code>, <code>lightrag/kg/postgres_impl.py</code>, <code>lightrag/utils.py</code>):</p>
+  <p>This table describes the <strong>LightRAG text-query pipeline</strong> — the path taken when a user types a query (or when audio is routed through LightRAG per the proposed path above). The LLM (Gemma 4 12B on <code>:8080</code>) and the embedding model (BGE-M3 on <code>:8081</code>) do different jobs. Gemma is called <strong>twice</strong> — once to parse the query into keywords, once to write the final answer. The embedding model is called <strong>once</strong> — but that single call decides what Gemma sees. The reranker (<code>:8082</code>) is called once to re-score candidates. Traced through the LightRAG source (<code>lightrag/operate.py</code>, <code>lightrag/kg/postgres_impl.py</code>, <code>lightrag/utils.py</code>):</p>
   <table style="margin-top:0.75rem">
     <tr><th>Step</th><th>Model</th><th>Port</th><th>Source</th><th>What happens</th></tr>
     <tr>
@@ -939,7 +940,7 @@ open http://localhost:9621
     </tr>
     <tr>
       <td>2. Batch embed</td>
-      <td><span class="badge yellow">nomic</span> (embedding)</td>
+      <td><span class="badge yellow">BGE-M3</span> (embedding)</td>
       <td><code>:8081</code></td>
       <td><code>operate.py</code> → <code>_perform_kg_search()</code></td>
       <td>Embeds up to 3 texts in ONE call: the raw query (→ <code>query_embedding</code>), <code>ll_keywords</code> (→ <code>ll_embedding</code>), <code>hl_keywords</code> (→ <code>hl_embedding</code>). Batched to avoid 2-3 sequential round-trips.</td>
@@ -984,7 +985,7 @@ open http://localhost:9621
 
 <div class="card warning">
   <h3>The Key Takeaway</h3>
-  <p><strong>The embedding model is the retrieval gatekeeper.</strong> Gemma extracts keywords, but nomic decides which entities, relations, and chunks get retrieved from PostgreSQL. The LLM never sees the raw document store — it only sees what the embedding model's vector search surfaced (step 3). So if nomic returns poor matches (wrong language, blurred proper nouns), Gemma gets bad context and produces a bad answer regardless of how good the LLM is.</p>
+  <p><strong>The embedding model is the retrieval gatekeeper.</strong> Gemma extracts keywords, but BGE-M3 decides which entities, relations, and chunks get retrieved from PostgreSQL. The LLM never sees the raw document store — it only sees what the embedding model's vector search surfaced (step 3). So if BGE-M3 returns poor matches (wrong language, blurred proper nouns), Gemma gets bad context and produces a bad answer regardless of how good the LLM is.</p>
   <p style="margin-top:0.5rem">This is exactly why the BGE-M3 switch matters: <strong>steps 2-3 are where retrieval quality is decided</strong>, and that's purely the embedding model's job. Gemma runs identically before and after — but it receives better-ranked input. With BGE-M3, step 2 embeds in a 100+-language 1024-dim space (vs nomic's English-oriented 768-dim), and step 3's HNSW search returns more accurate, language-consistent candidates — so step 7's answer is grounded in better context with no LLM change.</p>
 </div>
 

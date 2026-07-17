@@ -44,7 +44,7 @@ You need four GGUF files in `~/models/` (or set `MODEL_DIR` in `.env`):
 |-------|------|------|
 | LLM (Gemma 4 12B) | `Gemma-4-12B-OBLITERATED-Q4_K_M.gguf` | ~6.9 GB |
 | Vision projection (mmproj) | `mmproj-BF16.gguf` | ~2.3 GB |
-| Embedding (nomic-embed-v2) | `nomic-embed-text-v2-moe.Q6_K.gguf` | ~379 MB |
+| Embedding (BGE-M3) | `bge-m3-Q4_K_M.gguf` | ~1.1 GB |
 | Reranker (bge-reranker-v2-m3) | `bge-reranker-v2-m3-Q4_K_M.gguf` | ~418 MB |
 
 > **Why mmproj?** Gemma 4 has a vision architecture, but in llama.cpp the vision encoder weights are a separate file. The base GGUF contains only the language model — `mmproj-BF16.gguf` is the vision projection that maps image pixels into the model's embedding space. Without it, `llama-server` cannot process images. The start script passes it via `--mmproj`.
@@ -58,8 +58,8 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
 ├── gemma4-12b-obliterated/
 │   ├── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf
 │   └── mmproj-BF16.gguf
-├── nomic-embed-v2/
-│   └── nomic-embed-text-v2-moe.Q6_K.gguf
+├── bge-m3/
+│   └── bge-m3-Q4_K_M.gguf
 └── bge-reranker-v2-m3/
     └── bge-reranker-v2-m3-Q4_K_M.gguf
 ```

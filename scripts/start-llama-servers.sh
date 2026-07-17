@@ -15,7 +15,7 @@ RERANK_PORT="${RERANKER_PORT:-8082}"
 
 LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/gemma4-12b-obliterated/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf}"
 LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
-EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/nomic-embed-v2/nomic-embed-text-v2-moe.Q6_K.gguf}"
+EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-obliterated/mmproj-BF16.gguf}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
@@ -77,7 +77,6 @@ echo "Starting embedding server on port ${EMBED_PORT}..."
     -m "$EMBED_MODEL_PATH" \
     --embedding --pooling cls \
     -c 8192 -b 8192 -ub 2048 \
-    --override-kv nomic-bert-moe.context_length=int:8192 \
     -cram 0 -ngl 99 \
     --host 0.0.0.0 --port "$EMBED_PORT" \
     &>/tmp/llama-server-embed.log &
