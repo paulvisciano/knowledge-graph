@@ -20,6 +20,13 @@
     setTimeout(() => { lightboxIndex = null; }, 200);
   }
 
+  /** Upgrade a thumbnail URL to its full-res form for the lightbox view.
+   *  Only affects backend photo URLs carrying `?w=<int>`; other URLs
+   *  (data URLs, document-content URLs, MCP image URLs) pass through. */
+  function fullResUrl(url: string): string {
+    return url.replace(/([?&]w=)\d+\b/, '$1full');
+  }
+
   function goNext() {
     if (lightboxIndex !== null && images.length > 0) {
       lightboxIndex = (lightboxIndex + 1) % images.length;
@@ -100,7 +107,7 @@
     aria-label="Image gallery"
   >
     <img
-      src={images[lightboxIndex]}
+      src={fullResUrl(images[lightboxIndex])}
       alt="{alt} {lightboxIndex + 1}"
       class="absolute inset-0 h-full w-full object-contain"
     />

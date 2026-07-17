@@ -217,6 +217,7 @@
 {#if cardVisible && cardNodeId}
   {@const status = imageProcessingStore.statuses[cardNodeId]}
   {@const imageUrl = graphStore.photoImages[cardNodeId]}
+  {@const fullUrl = imageUrl ? imageUrl.replace(/([?&]w=)\d+\b/, '$1full') : imageUrl}
   {@const exifRows = fetchedExifNodeId === cardNodeId ? fetchedExifRows : []}
   {@const fileName = status?.fileName ?? cardNodeId.replace(' (Photo)', '') ?? 'Photo'}
   {@const isProcessing = status && status.stage !== 'complete' && status.stage !== 'error'}
@@ -230,7 +231,7 @@
     <!-- Thumbnail -->
     <div class="photo-card-thumb" style="pointer-events: auto;">
       {#if imageUrl}
-        <button class="photo-card-thumb-btn" onclick={() => openFullscreen(imageUrl)} aria-label="View full image">
+        <button class="photo-card-thumb-btn" onclick={() => openFullscreen(fullUrl)} aria-label="View full image">
           <img src={imageUrl} alt={fileName} />
         </button>
       {:else}

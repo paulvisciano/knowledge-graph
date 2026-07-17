@@ -354,7 +354,11 @@ export class LightragClient {
   }
 
   photoImageUrl(filename: string): string {
-    return `/api/kg${API.kg.photoImage(filename)}`;
+    return `/api/kg${API.kg.photoImageThumb(filename)}`;
+  }
+
+  photoImageFullUrl(filename: string): string {
+    return `/api/kg${API.kg.photoImageFull(filename)}`;
   }
 
   documentContentUrl(docId: string): string {
