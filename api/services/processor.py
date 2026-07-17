@@ -1244,7 +1244,14 @@ async def link_exif_to_visual_entities(
             normalized_path = file_path.replace("\u202f", " ").replace("\u00a0", " ")
             normalized_source = file_source.replace("\u202f", " ").replace("\u00a0", " ")
             logger.info("[EXIF Links] Checking '%s': file_path='%s' vs file_source='%s'", label, file_path, file_source)
-            if normalized_path != normalized_source:
+            # LightRAG joins file_path values from multiple source documents
+            # with GRAPH_FIELD_SEP ("<SEP>").  An entity that appears in several
+            # photos therefore has a file_path like
+            # "IMG_001.jpg<SEP>IMG_002.jpg" and a naive equality check would
+            # skip it, leaving the entity unlinked (orphan).  Split on <SEP> and
+            # treat the match as a membership test instead.
+            path_parts = [p.strip() for p in normalized_path.split("<SEP>") if p.strip()]
+            if normalized_source not in path_parts:
                 continue
 
             link_result = await _create_relation_verified(
@@ -1338,108 +1345,85 @@ async def wait_for_lightrag_processing(
     poll_interval: float = 3.0,
     timeout: float = 300.0,
 ) -> str:
-    """Poll LightRAG until document processing finishes.
+    """Poll LightRAG until *this* document reaches a terminal state.
 
-    Checks the pipeline status endpoint until it is no longer busy,
-    then verifies the specific document reached a terminal state
-    (``PROCESSED`` or ``FAILED``).
+    The previous implementation polled the global ``pipeline_status["busy"]``
+    flag, which is shared across all concurrent jobs.  With
+    ``MAX_CONCURRENT_JOBS > 1`` the pipeline can briefly go idle between jobs,
+    causing a premature "processed" return before our document was actually
+    handled.  Worse, the fallbacks assumed "processed" when the document
+    couldn't be found — leaving visual entities unlinked (orphans).
+
+    Now we poll the per-document status directly and only return once *our*
+    document is PROCESSED or FAILED.  The global busy flag is used only as a
+    secondary signal to avoid missing the "picked up" transition.
 
     Returns the final status string ("processed" or "failed").
     Raises ``TimeoutError`` if the timeout is exceeded.
     """
     base_url = lightrag_url.rstrip("/")
     start = time.monotonic()
+    terminal_statuses = {"processed", "failed"}
 
-    # Phase 0: wait for pipeline to become busy (document picked up)
-    saw_busy = False
-    while not saw_busy:
-        elapsed = time.monotonic() - start
-        if elapsed >= timeout:
-            logger.warning("[LightRAG Wait] Pipeline never became busy after %.1fs; assuming processed", elapsed)
-            return "processed"
-        try:
-            def _poll_pipeline() -> dict:
-                req = Request(
-                    f"{base_url}/documents/pipeline_status",
-                    headers={"Content-Type": "application/json"},
-                )
-                with urlopen(req, timeout=15) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
+    def _fetch_pipeline_status() -> dict:
+        req = Request(
+            f"{base_url}/documents/pipeline_status",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
-            pipeline_status = await asyncio.to_thread(_poll_pipeline)
-            busy = pipeline_status.get("busy", False)
-            if busy:
-                saw_busy = True
-                logger.info("[LightRAG Wait] Pipeline is now busy, waiting for completion")
-        except Exception as exc:
-            logger.warning("[LightRAG Wait] Pipeline status poll failed: %s", exc)
-        if not saw_busy:
-            await asyncio.sleep(poll_interval)
+    def _fetch_documents() -> list[dict]:
+        req = Request(
+            f"{base_url}/documents",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
-    # Phase 1: wait for pipeline to become idle
     while True:
         elapsed = time.monotonic() - start
         if elapsed >= timeout:
             raise TimeoutError(
-                f"Timed out waiting for LightRAG pipeline to become idle after {timeout}s"
+                f"Timed out waiting for LightRAG to process '{file_source}' after {timeout}s"
             )
 
         try:
-            def _poll_pipeline() -> dict:
-                req = Request(
-                    f"{base_url}/documents/pipeline_status",
-                    headers={"Content-Type": "application/json"},
-                )
-                with urlopen(req, timeout=15) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
+            docs = await asyncio.to_thread(_fetch_documents)
+            doc_list = docs if isinstance(docs, list) else docs.get("documents", docs.get("data", []))
 
-            pipeline_status = await asyncio.to_thread(_poll_pipeline)
-            busy = pipeline_status.get("busy", True)
+            for doc in doc_list:
+                if not isinstance(doc, dict):
+                    continue
+                doc_name = doc.get("file_path") or doc.get("filename") or doc.get("name") or ""
+                if doc_name == file_source or doc_name.endswith(file_source):
+                    status = str(doc.get("status", "")).lower()
+                    logger.info(
+                        "[LightRAG Wait] Document '%s' status: %s (elapsed=%.1fs)",
+                        file_source, status, elapsed,
+                    )
+                    if status in terminal_statuses:
+                        return status
+                    break
+            else:
+                logger.warning(
+                    "[LightRAG Wait] Document '%s' not yet in documents list (elapsed=%.1fs)",
+                    file_source, elapsed,
+                )
+        except Exception as exc:
+            logger.warning("[LightRAG Wait] Document list fetch failed: %s", exc)
+
+        try:
+            pipeline_status = await asyncio.to_thread(_fetch_pipeline_status)
+            busy = pipeline_status.get("busy", False)
             logger.info(
-                "[LightRAG Wait] Pipeline poll — busy=%s, elapsed=%.1fs, file=%s",
+                "[LightRAG Wait] Pipeline busy=%s, elapsed=%.1fs, file=%s",
                 busy, elapsed, file_source,
             )
-            if not busy:
-                break
         except Exception as exc:
             logger.warning("[LightRAG Wait] Pipeline status poll failed: %s", exc)
 
         await asyncio.sleep(poll_interval)
-
-    # Phase 2: confirm document status
-    try:
-        def _get_docs() -> list[dict]:
-            req = Request(
-                f"{base_url}/documents",
-                headers={"Content-Type": "application/json"},
-            )
-            with urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-
-        docs = await asyncio.to_thread(_get_docs)
-        # docs may be a list or a dict with a "documents" key
-        doc_list = docs if isinstance(docs, list) else docs.get("documents", docs.get("data", []))
-
-        for doc in doc_list:
-            if not isinstance(doc, dict):
-                continue
-            # Match by file_source against potential field names
-            doc_name = doc.get("file_path") or doc.get("filename") or doc.get("name") or ""
-            if doc_name == file_source or doc_name.endswith(file_source):
-                status = str(doc.get("status", "")).lower()
-                logger.info(
-                    "[LightRAG Wait] Document '%s' final status: %s", file_source, status,
-                )
-                return status
-
-        logger.warning(
-            "[LightRAG Wait] Could not find document '%s' in documents list; assuming processed",
-            file_source,
-        )
-        return "processed"
-    except Exception as exc:
-        logger.warning("[LightRAG Wait] Failed to fetch documents list: %s", exc)
-        return "processed"
 
 
 async def delete_photo_entities(

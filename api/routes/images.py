@@ -205,31 +205,12 @@ async def _process_and_stream(
         )
 
     # Phase 5: Link LLM-extracted visual entities to the photo node
-    # Poll until LightRAG has finished processing and visual entities appear
+    # wait_for_lightrag_processing already confirmed our document reached a
+    # terminal state, so visual entities should exist.  The previous code
+    # polled the *global* label count which races with concurrent jobs —
+    # another job creating entities could trigger an early break before our
+    # document's entities exist.  Just proceed to linking directly.
     photo_name = f"{file_source} (Photo)"
-    exif_dim_count = 0
-    if exif_data:
-        if exif_data.get("date_taken_friendly"):
-            exif_dim_count += 1
-        if exif_data.get("location"):
-            exif_dim_count += 1
-        if exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model"):
-            exif_dim_count += 1
-    initial_label_count = exif_dim_count + 1 if exif_dim_count > 0 else 0
-    for _poll in range(30):
-        await asyncio.sleep(3.0)
-        try:
-            import urllib.request as _urllib_request
-            def _count_labels() -> int:
-                req = _urllib_request.Request(f"{LIGHTRAG_URL}/graph/label/list", headers={"Content-Type": "application/json"})
-                with _urllib_request.urlopen(req, timeout=10) as resp:
-                    return len(json.loads(resp.read().decode("utf-8")))
-            label_count = await asyncio.to_thread(_count_labels)
-            if label_count > initial_label_count:
-                await asyncio.sleep(2.0)
-                break
-        except Exception:
-            pass
 
     try:
         visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
