@@ -20,10 +20,10 @@ export const CHUNK_FADE_MARGIN = 1;
 export const MAX_VELOCITY = 3.2;
 
 /** Absolute depth (world units) at which the far depth-fade ramp begins. */
-export const DEPTH_FADE_START = 600;
+export const DEPTH_FADE_START = 1200;
 
 /** Absolute depth (world units) at which planes are fully hidden by depth fade. */
-export const DEPTH_FADE_END = 1200;
+export const DEPTH_FADE_END = 2000;
 
 /** Oposity below which a plane is considered invisible (mesh.visible = false). */
 export const INVIS_THRESHOLD = 0.01;
@@ -38,7 +38,7 @@ export const VELOCITY_LERP = 0.16;
 export const VELOCITY_DECAY = 0.9;
 
 /** Initial camera Z (distance from the z=0 plane of the canvas). */
-export const INITIAL_CAMERA_Z = 50;
+export const INITIAL_CAMERA_Z = 250;
 
 /** Minimum camera Z — prevents flying through the canvas. */
 export const MIN_CAMERA_Z = 5;

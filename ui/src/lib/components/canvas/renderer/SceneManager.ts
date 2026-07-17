@@ -20,6 +20,11 @@ import {
   VELOCITY_DECAY,
   VELOCITY_LERP,
 } from './constants';
+
+/** Drag-to-keyboard pan scale factor (matches drag panScale of z*0.002 per pixel). */
+const DRAG_PAN_SCALE = 0.002;
+/** Pixels-equivalent moved per held-key frame — makes arrow keys pan at the same world-speed as dragging. */
+const KEYBOARD_PAN_PIXELS = 20;
 import { ChunkManager } from './ChunkManager';
 import type { CanvasNode } from './types';
 
@@ -64,6 +69,8 @@ export class SceneManager {
   private _disposed = false;
   private _userMoved = false;
   private _lastHoverTime = 0;
+  private _hoveredNodeId: string | null = null;
+  private _cursorMode: 'idle' | 'grabbing' | 'pointer' = 'idle';
 
   /** Optional callback fired when the camera crosses a chunk boundary. */
   onChunkChange?: (cx: number, cy: number, cz: number) => void;
@@ -111,6 +118,7 @@ export class SceneManager {
     this._resizeObserver.observe(container);
 
     this.bindEvents();
+    this._renderer.domElement.style.cursor = 'grab';
   }
 
   /** The perspective camera. */
@@ -143,27 +151,20 @@ export class SceneManager {
     this._chunkManager.setLayout(nodes);
   }
 
-  /** Moves the camera to the world-space centroid of the node layout. */
+  /** Moves the camera to face the origin chunk at a comfortable viewing distance. */
   private centerOnLayout(nodes: CanvasNode[]): void {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of nodes) {
-      const wx = n.cellX * CHUNK_SIZE + n.localX;
-      const wy = n.cellY * CHUNK_SIZE + n.localY;
-      if (wx < minX) minX = wx;
-      if (wy < minY) minY = wy;
-      if (wx > maxX) maxX = wx;
-      if (wy > maxY) maxY = wy;
+    if (nodes.length === 0) {
+      this._camera.position.set(0, 0, INITIAL_CAMERA_Z);
+      return;
     }
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const spanX = maxX - minX;
-    const spanY = maxY - minY;
-    const span = Math.max(spanX, spanY, CHUNK_SIZE);
-    // Fit the layout in view: z = span / (2 * tan(fov/2)), clamped to camera limits.
-    const fovRad = (this._camera.fov * Math.PI) / 180;
-    const fitZ = span / (2 * Math.tan(fovRad / 2));
-    const z = Math.max(MIN_CAMERA_Z, Math.min(MAX_CAMERA_Z, fitZ));
-    this._camera.position.set(cx, cy, z);
+    // Center on the first photo's chunk rather than the full-layout centroid.
+    // Time-bucket layouts are wide; the centroid lands in empty space between
+    // clusters. The first node is in the earliest time bucket (cellX=0), which
+    // is the densest origin area the user should see first.
+    const first = nodes[0];
+    const targetX = first.cellX * CHUNK_SIZE + first.localX;
+    const targetY = first.cellY * CHUNK_SIZE + first.localY;
+    this._camera.position.set(targetX, targetY, INITIAL_CAMERA_Z);
   }
 
   /** Begins the RAF loop. Safe to call once; idempotent if already running. */
@@ -236,14 +237,15 @@ export class SceneManager {
   /** Applies held keyboard keys to the velocity vector. */
   private applyKeyboard(): void {
     const k = this._keys;
-    const step = KEYBOARD_SPEED;
+    const panStep = KEYBOARD_PAN_PIXELS * this._camera.position.z * DRAG_PAN_SCALE;
+    const zoomStep = KEYBOARD_SPEED;
     let moved = false;
-    if (k.has('ArrowLeft') || k.has('a')) { this._velocity.x -= step; moved = true; }
-    if (k.has('ArrowRight') || k.has('d')) { this._velocity.x += step; moved = true; }
-    if (k.has('ArrowUp') || k.has('w')) { this._velocity.y += step; moved = true; }
-    if (k.has('ArrowDown') || k.has('s')) { this._velocity.y -= step; moved = true; }
-    if (k.has('q')) { this._velocity.z += step; moved = true; }
-    if (k.has('e')) { this._velocity.z -= step; moved = true; }
+    if (k.has('ArrowLeft') || k.has('a')) { this._velocity.x -= panStep; moved = true; }
+    if (k.has('ArrowRight') || k.has('d')) { this._velocity.x += panStep; moved = true; }
+    if (k.has('ArrowUp') || k.has('w')) { this._velocity.y += panStep; moved = true; }
+    if (k.has('ArrowDown') || k.has('s')) { this._velocity.y -= panStep; moved = true; }
+    if (k.has('q')) { this._velocity.z += zoomStep; moved = true; }
+    if (k.has('e')) { this._velocity.z -= zoomStep; moved = true; }
     if (moved) this._userMoved = true;
   }
 
@@ -281,6 +283,7 @@ export class SceneManager {
     this._pointer.downStartY = e.clientY;
     this._pointer.dragged = false;
     this._userMoved = true;
+    this.updateCursor();
   };
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -293,10 +296,11 @@ export class SceneManager {
       if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
         this._pointer.dragged = true;
       }
-      const panScale = this._camera.position.z * 0.002;
+      const panScale = this._camera.position.z * DRAG_PAN_SCALE;
       this._camera.position.x -= dx * panScale;
       this._camera.position.y += dy * panScale;
       this._userMoved = true;
+      this.updateCursor();
     } else {
       this.hoverRaycast(e);
     }
@@ -307,11 +311,13 @@ export class SceneManager {
       this.clickRaycast(e);
     }
     this._pointer.down = false;
+    this.updateCursor();
   };
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    this._camera.position.z -= e.deltaY * WHEEL_ZOOM_STEP;
+    // Inverted: scroll up (deltaY < 0) zooms in (z decreases), scroll down zooms out.
+    this._camera.position.z += e.deltaY * WHEEL_ZOOM_STEP;
     if (this._camera.position.z < MIN_CAMERA_Z) this._camera.position.z = MIN_CAMERA_Z;
     if (this._camera.position.z > MAX_CAMERA_Z) this._camera.position.z = MAX_CAMERA_Z;
     this._pointer.dragged = true;
@@ -327,7 +333,12 @@ export class SceneManager {
     if (now - this._lastHoverTime < 33) return;
     this._lastHoverTime = now;
     const hit = this.raycast(e);
-    this.onHoverNode?.(hit ?? null);
+    const id = hit ?? null;
+    if (id !== this._hoveredNodeId) {
+      this._hoveredNodeId = id;
+      this.updateCursor();
+    }
+    this.onHoverNode?.(id);
   }
 
   /** Raycasts on click and fires `onSelectNode` with the hit id (or null). */
@@ -364,6 +375,24 @@ export class SceneManager {
       this._rafId = requestAnimationFrame(this.onFrame);
     }
   };
+
+  /** Updates the canvas cursor based on interaction state. */
+  private updateCursor(): void {
+    let mode: 'idle' | 'grabbing' | 'pointer';
+    if (this._pointer.down) {
+      mode = 'grabbing';
+    } else if (this._hoveredNodeId !== null) {
+      mode = 'pointer';
+    } else {
+      mode = 'idle';
+    }
+    if (mode === this._cursorMode) return;
+    this._cursorMode = mode;
+    const el = this._renderer.domElement;
+    if (mode === 'grabbing') el.style.cursor = 'grabbing';
+    else if (mode === 'pointer') el.style.cursor = 'pointer';
+    else el.style.cursor = 'grab';
+  }
 
   private bindEvents(): void {
     window.addEventListener('keydown', this.onKeyDown);

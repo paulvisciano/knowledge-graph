@@ -40,15 +40,15 @@
 
   let conversations = $state<Conversation[]>([]);
 
-  /** Graph view mode: 'canvas' (infinite canvas, Phase 1) or 'graph' (force graph, default). */
-  let graphViewMode = $state<'graph' | 'canvas'>('graph');
+  /** Graph view mode: 'canvas' (infinite canvas, default) or 'graph' (force graph). */
+  let graphViewMode = $state<'graph' | 'canvas'>('canvas');
 
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'canvas') graphViewMode = 'canvas';
+    if (params.get('view') === 'graph') graphViewMode = 'graph';
     window.addEventListener('popstate', () => {
       const p = new URLSearchParams(window.location.search);
-      graphViewMode = p.get('view') === 'canvas' ? 'canvas' : 'graph';
+      graphViewMode = p.get('view') === 'graph' ? 'graph' : 'canvas';
     });
   }
 

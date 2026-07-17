@@ -30,6 +30,10 @@
     selectedNodeId ? graphStore.nodes.find((n) => n.id === selectedNodeId) ?? null : null,
   );
 
+  let hoveredNodeId = $state<string | null>(null);
+  let tooltipX = $state(0);
+  let tooltipY = $state(0);
+
   function clearSelection(): void {
     selectedNodeId = null;
     selectedCanvasNode = null;
@@ -46,6 +50,9 @@
       } else {
         clearSelection();
       }
+    };
+    sm.onHoverNode = (nodeId) => {
+      hoveredNodeId = nodeId;
     };
   }
 
@@ -70,6 +77,13 @@
       pendingTimer = null;
       rebuildLayout();
     }, delay);
+  }
+
+  function onContainerPointerMove(e: PointerEvent): void {
+    if (!containerEl) return;
+    const rect = containerEl.getBoundingClientRect();
+    tooltipX = e.clientX - rect.left;
+    tooltipY = e.clientY - rect.top;
   }
 
   /** Initial graph fetch — mirrors GraphView's popular-labels fallback. */
@@ -102,10 +116,11 @@
         sceneManager.start();
         firstLayoutApplied = true;
     } else {
-      // No data yet — kick off the initial load. The $effect below will mount
-      // the renderer once graphStore.nodes populates.
-      loadGraph();
+        // No data yet — kick off the initial load. The $effect below will mount
+        // the renderer once graphStore.nodes populates.
+        loadGraph();
     }
+    containerEl?.addEventListener('pointermove', onContainerPointerMove);
   });
 
   onDestroy(() => {
@@ -113,6 +128,7 @@
       clearTimeout(pendingTimer);
       pendingTimer = null;
     }
+    containerEl?.removeEventListener('pointermove', onContainerPointerMove);
     sceneManager?.stop();
     sceneManager?.dispose();
     sceneManager = undefined;
@@ -163,6 +179,12 @@
   <span class="badge-label">Canvas view (Phase 2)</span>
   <a class="badge-link" href="?view=graph">← back to force graph</a>
 </div>
+
+{#if hoveredNodeId && !selectedNodeId}
+  <div class="hover-tooltip" style="left: {tooltipX + 14}px; top: {tooltipY + 14}px;">
+    Click to view details
+  </div>
+{/if}
 
 <NodeOverlay node={selectedCanvasNode} kgNode={selectedKgNode} onClose={clearSelection} />
 
@@ -244,5 +266,21 @@
   .badge-link:hover {
     opacity: 1;
     text-decoration: underline;
+  }
+
+  .hover-tooltip {
+    position: absolute;
+    z-index: 20;
+    padding: 0.3rem 0.6rem;
+    background: rgba(10, 14, 23, 0.92);
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    border-radius: 6px;
+    color: #00d4ff;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    transition: opacity 0.12s ease;
   }
 </style>
