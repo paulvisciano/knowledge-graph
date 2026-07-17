@@ -407,7 +407,7 @@ CHUNK_OFFSETS     = run(() =&gt; {
       <thead><tr><th>Phase</th><th>Scope</th><th>Risk</th><th>Ships independently?</th></tr></thead>
       <tbody>
         <tr class="done"><td><strong>0. Image pipeline</strong> <span class="tag green">✓ done</span></td><td>Add <code>?w=</code> thumbnails; switch <code>fetchPhotoImages</code> to URLs; global <code>TextureCache</code>. Keep force graph.</td><td class="ok">Low — backend-only + small store change.</td><td>Yes — shipped <span class="meta">(commits f564472, 3ae455f, 5e2852a)</span></td></tr>
-        <tr><td><strong>1. Canvas skeleton</strong></td><td><code>SceneManager</code> + <code>ChunkManager</code> + flat layout behind a feature flag. No filter, no chat bridge yet.</td><td class="ok">Medium — new rendering path.</td><td>Yes — route flag <code>?view=canvas</code>.</td></tr>
+        <tr class="done"><td><strong>1. Canvas skeleton</strong> <span class="tag green">✓ done</span></td><td><code>SceneManager</code> + <code>ChunkManager</code> + flat layout behind a feature flag. No filter, no chat bridge yet.</td><td class="ok">Medium — new rendering path.</td><td>Yes — route flag <code>?view=canvas</code>. <span class="meta">(commits 02e86e2, a0ba7fd, 5e66743)</span></td></tr>
         <tr><td><strong>2. Layout &amp; selection</strong></td><td>Knowledge-aware layout (time/cluster/depth), raycast selection, ported <code>NodeOverlay</code>.</td><td>Medium</td><td>Yes.</td></tr>
         <tr><td><strong>3. Filter &amp; detail</strong></td><td><code>FilterBar</code>, match-mask fade, facet chips, focus camera.</td><td>Low</td><td>Yes.</td></tr>
         <tr><td><strong>4. Chat bridge</strong></td><td>Reference → highlight → flyTo; bidirectional links; streaming parse.</td><td class="ok">Low — additive.</td><td>Yes.</td></tr>
@@ -426,13 +426,26 @@ CHUNK_OFFSETS     = run(() =&gt; {
       </ul>
     </div>
 
+    <div class="card" style="border-left: 4px solid var(--green);">
+      <h4>Phase 1 — complete ✓</h4>
+      <p class="meta">Shipped in commits <code>02e86e2</code> (renderer engine), <code>a0ba7fd</code> (Layout + CanvasView), <code>5e66743</code> (route flag wiring).</p>
+      <ul>
+        <li><strong>Renderer engine</strong> (<span class="file">ui/src/lib/components/canvas/renderer/</span>): 6 TS modules porting the reference's chunk/culling pattern to plain Three.js. <code>SceneManager</code> owns the WebGLRenderer, PerspectiveCamera, RAF loop, direct drag/wheel/keyboard controls (no OrbitControls), ResizeObserver, visibility-change pause, and WebGL context-loss handling. <code>ChunkManager</code> mounts ~125 nearby chunks (Chebyshev <code>RENDER_DISTANCE + CHUNK_FADE_MARGIN</code>), throttled by zoom velocity (500/400/100ms). <code>NodePlane</code> handles per-frame distance + depth fade and loads textures via the existing <code>TextureCache</code> singleton. <code>Chunk</code> groups planes per cell. Shared 1×1 <code>PlaneGeometry</code> for the whole canvas.</li>
+        <li><strong>Layout</strong> (<span class="file">Layout.ts</span>): Pure deterministic <code>KGNode[] → CanvasNode[]</code> mapping. <code>cellX</code> = per-photo time bucket (auto-granularity: per-photo when span ≤2 days, day when ≤180 days, month beyond). <code>cellY</code> = 4 Y-bands for vertical spread. <code>cellZ</code> = 5 Z-layers for parallax depth. Only photo nodes rendered in Phase 1 (non-photo nodes deferred to Phase 2). Thumbnail URLs built with <code>/api/kg</code> prefix matching the store.</li>
+        <li><strong>CanvasView</strong> (<span class="file">CanvasView.svelte</span>): Svelte 5 runes component. Loads graph data via <code>graphStore.loadGraph()</code> with the same popular-labels fallback as <code>GraphView</code>. Throttle-rebuilds layout on SSE updates (200ms coalescing). Camera auto-centers on the layout bounding box on first load (FOV-based fit-Z), then respects user pan/zoom. Empty-state and error-retry UI. Phase 1 badge with <code>?view=graph</code> back-link.</li>
+        <li><strong>Route flag</strong> (<span class="file">+page.svelte</span>): <code>?view=canvas</code> mounts <code>CanvasView</code>; default (no param or <code>?view=graph</code>) mounts <code>GraphView</code>. Popstate listener keeps the flag reactive. Force graph path untouched.</li>
+        <li><strong>Tuning during integration</strong>: <code>CHUNK_SIZE</code>=160 (fits 4:3 photos with margin), <code>RENDER_DISTANCE</code>=4, <code>DEPTH_FADE_START</code>=600 / <code>DEPTH_FADE_END</code>=1200 (tuned for zoomed-out fit-Z camera), <code>MAX_CAMERA_Z</code>=1000, wheel zoom applied directly to camera Z (bypasses velocity model for responsiveness), drag pan scaled by camera Z distance, thumbnail resolution 512px, plane size 140×105.</li>
+        <li><strong>Bugs fixed during integration</strong>: <code>new Array(n)</code> + <code>push</code> hole-bug in Layout (destructure crash); sparse <code>hashStr % 1024</code> cluster bands scattering nodes 1000+ chunks from camera (replaced with dense indices, then <code>cellY=0</code> for photo-only Phase 1); camera not centered on layout (added <code>centerOnLayout</code> with FOV-based fit-Z); thumbnail URLs missing <code>/api/kg</code> prefix (404 textures); depth fade tuned for close-up reference camera caused all planes to vanish at fit-Z distance.</li>
+      </ul>
+    </div>
+
     <h2 id="effort">Effort &amp; risk</h2>
     <div class="grid2">
       <div class="card">
         <h4>Estimated effort</h4>
         <ul>
           <li>Phase 0 — image pipeline: <strong>~1 day</strong> (port the existing face-crop PIL pattern). <span class="tag green">✓ shipped</span></li>
-          <li>Phase 1 — canvas skeleton: <strong>~2–3 days</strong> (port constants/utils/texture-manager to TS; Svelte RAF loop).</li>
+          <li>Phase 1 — canvas skeleton: <strong>~2–3 days</strong> (port constants/utils/texture-manager to TS; Svelte RAF loop). <span class="tag green">✓ shipped</span></li>
           <li>Phase 2 — layout &amp; selection: <strong>~2 days</strong>.</li>
           <li>Phase 3 — filter &amp; detail: <strong>~1–2 days</strong> (reuse <code>filteredNodes</code> + <code>PhotoOverlay</code>).</li>
           <li>Phase 4 — chat bridge: <strong>~1 day</strong> (small, additive).</li>
