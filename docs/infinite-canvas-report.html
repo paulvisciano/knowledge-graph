@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Knowledge Graph — Infinite Canvas Replacement Report</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #121826;
+    --surface-2: #1a2236;
+    --border: #283449;
+    --text: #e6edf3;
+    --text-dim: #8b97a8;
+    --cyan: #00d4ff;
+    --purple: #c084fc;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); padding: 0.1em 0.4em; border-radius: 4px; }
+  pre {
+    font-family: var(--mono);
+    font-size: 0.82em;
+    line-height: 1.5;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+  .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); max-width: 1180px; margin: 0 auto; gap: 32px; padding: 0 24px; }
+  aside {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    padding: 24px 0; font-size: 13px;
+  }
+  aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin: 16px 0 6px; }
+  aside a { color: var(--text-dim); display: block; padding: 3px 0; }
+  aside a:hover { color: var(--cyan); text-decoration: none; }
+  main { padding: 40px 0 80px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 48px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 28px 0 10px; }
+  h4 { font-size: 14px; margin: 20px 0 8px; color: var(--text); }
+  p { margin: 10px 0; }
+  ul, ol { padding-left: 20px; }
+  li { margin: 5px 0; }
+  .lede { font-size: 17px; color: var(--text-dim); margin: 8px 0 24px; }
+  .tag { display: inline-block; font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim); margin-right: 6px; }
+  .tag.cyan { color: var(--cyan); border-color: rgba(0,212,255,0.35); background: rgba(0,212,255,0.08); }
+  .tag.purple { color: var(--purple); border-color: rgba(192,132,252,0.35); background: rgba(192,132,252,0.08); }
+  .tag.green { color: var(--green); border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); }
+  .tag.red { color: var(--red); border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.08); }
+  .tag.amber { color: var(--amber); border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.08); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } aside { position: static; height: auto; } .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .card h4 { margin-top: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-family: var(--mono); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .dot.amber { background: var(--amber); }
+  .dot.green { background: var(--green); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .bad { color: var(--red); }
+  .ok { color: var(--green); }
+  .file { font-family: var(--mono); font-size: 12px; color: var(--cyan); }
+  .meta { color: var(--text-dim); font-size: 13px; }
+  blockquote { margin: 12px 0; padding: 10px 14px; border-left: 3px solid var(--cyan); background: rgba(0,212,255,0.05); border-radius: 0 8px 8px 0; }
+  .ascii { font-family: var(--mono); font-size: 12px; line-height: 1.4; white-space: pre; overflow-x: auto; color: var(--text-dim); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h3>Report</h3>
+    <a href="#summary">Summary</a>
+    <a href="#current">Current architecture</a>
+    <a href="#bottlenecks">Bottlenecks</a>
+    <a href="#reference">Reference: infinite-canvas</a>
+    <a href="#gap">Gap analysis</a>
+    <a href="#proposal">Proposed architecture</a>
+    <a href="#data">Data model</a>
+    <a href="#culling">Chunk &amp; culling</a>
+    <a href="#images">Image pipeline</a>
+    <a href="#filter">Filter &amp; detail</a>
+    <a href="#chat">Chat → canvas</a>
+    <a href="#migration">Migration plan</a>
+    <a href="#effort">Effort &amp; risk</a>
+    <a href="#appendix">Appendix</a>
+  </aside>
+  <main>
+    <h1>Replacing the 3D Force Graph with an Infinite Canvas</h1>
+    <p class="lede">A performance-focused architecture report for the knowledge-graph UI, modeled on <a href="https://github.com/edoardolunardi/infinite-canvas" target="_blank" rel="noopener">edoardolunardi/infinite-canvas</a>.</p>
+    <p>
+      <span class="tag cyan">SvelteKit</span>
+      <span class="tag purple">Three.js</span>
+      <span class="tag amber">3d-force-graph</span>
+      <span class="tag green">React Three Fiber (reference)</span>
+      <span class="tag red">Performance</span>
+    </p>
+
+    <h2 id="summary">Executive summary</h2>
+    <p>The site renders its knowledge graph with <code>3d-force-graph</code> on top of Three.js, building a custom <code>THREE.Object3D</code> per node. Performance is bad for three compounding reasons:</p>
+    <ol>
+      <li><strong>Every node is in the scene at once.</strong> There is no virtualization, frustum culling, or distance-based culling. The whole graph (all nodes + all edges) is handed to <code>graph.graphData(buildGraphData())</code> on every refresh.</li>
+      <li><strong>Photo nodes use full-resolution images as GPU textures.</strong> The <code>/photo/{filename}</code> endpoint serves raw files via <code>FileResponse</code> with no resizing; the client converts them to base64 data URLs and uploads them as textures. A 4–12&nbsp;MB JPEG becomes a 4–12&nbsp;MB GPU texture per photo node.</li>
+      <li><strong>Force simulation + <code>scene.traverse()</code></strong> run continuously while the user pans/zooms. The codebase already carries comments acknowledging that traversing the full scene every frame was "a major source of frame drops on initial load."</li>
+    </ol>
+    <p>The reference repo <strong>infinite-canvas</strong> solves exactly this with <strong>chunk-based rendering + distance-based culling</strong>: the infinite 3D space is divided into <code>CHUNK_SIZE</code> cubes, only chunks within <code>RENDER_DISTANCE</code> of the camera are mounted, and each plane fades/skips updates by camera distance. Five planes per chunk, an LRU plane cache, throttled chunk updates during zoom, and a texture cache with on-demand loading keep it smooth at any dataset size.</p>
+    <p>This report proposes replacing the force-graph view with an infinite-canvas built on the same chunk/culling pattern, adapted to Svelte + the existing Three.js dependency, with a thumbnail image pipeline, a filter/detail system, and a chat-to-canvas bridge so AI-referenced images surface on the canvas in real time.</p>
+
+    <h2 id="current">Current architecture</h2>
+    <div class="grid2">
+      <div class="card">
+        <h4>Stack</h4>
+        <ul>
+          <li><strong>UI</strong>: SvelteKit (<code>ui/</code>, package name "nexus"), Svelte 5 runes, Vite, Tailwind v4.</li>
+          <li><strong>Graph lib</strong>: <code>3d-force-graph</code> + <code>d3-force</code> / <code>d3-zoom</code> / <code>d3-selection</code>.</li>
+          <li><strong>3D</strong>: <code>three</code> 0.185 (already a direct dependency).</li>
+          <li><strong>Backend</strong>: FastAPI (<code>api/</code>) over a LightRAG fork (<code>lightrag/</code>) storing a Neo4j-style graph.</li>
+          <li><strong>Images</strong>: served from <code>inputs/</code> via FastAPI; face crops are PIL-thumbnail 256×256; photos are served raw.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>Key files</h4>
+        <ul>
+          <li><span class="file">ui/src/lib/components/graph/GraphCanvas.svelte</span> — the Three.js/force-graph renderer (~1640 lines).</li>
+          <li><span class="file">ui/src/lib/components/graph/GraphView.svelte</span> — wrapper, search/filter, photo-cluster focus, PhotoOverlay host.</li>
+          <li><span class="file">ui/src/lib/components/graph/PhotoOverlay.svelte</span> — detail card for a selected photo node (neighbors, face crops, fullscreen).</li>
+          <li><span class="file">ui/src/lib/stores/graph.svelte.ts</span> — reactive store: nodes, edges, photoImages (nodeId→dataURL), filteredNodes.</li>
+          <li><span class="file">ui/src/lib/utils/extract-reference-images.ts</span> — parses <code>### References</code> image filenames from AI responses.</li>
+          <li><span class="file">ui/src/routes/+page.svelte</span> — main page; chat + reference-image carousel (line ~499–514).</li>
+          <li><span class="file">api/routes/images.py</span> — <code>/photo/{filename}</code> (line 437), face-crop thumbnails (line ~530+).</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>How nodes reach the screen today</h3>
+    <pre><code>GraphView.loadGraph()
+  └─ graphStore.loadGraph()                  // stores/graph.svelte.ts
+       └─ lightragClient.getGraph()           // API call
+       └─ fetchPhotoImages(nodes)             // for each Photo node:
+            ├─ fetch(/api/kg/photo/{source_id}) // raw FileResponse, no resize
+            ├─ resp.blob() → FileReader → dataURL
+            └─ photoImages[nodeId] = dataURL   // stored in memory AND as GPU texture
+  └─ &lt;GraphCanvas&gt; mounts 3d-force-graph
+       └─ .graphData({ nodes, links })
+            └─ .nodeThreeObject(createNodeThreeObject)  // builds a THREE.Group per node
+                 ├─ Photo  → PlaneGeometry + MeshBasicMaterial(map=fullTex)
+                 ├─ Person → CanvasTexture oval (128²) + face crop
+                 └─ Other  → SphereGeometry / label sprite
+       └─ .onEngineStop → zoomToFit (once), then pauseAnimation
+</code></pre>
+    <p class="meta">Source: <span class="file">GraphCanvas.svelte:1159-1163</span> (<code>nodeThreeObject</code> / <code>graphData</code>), <span class="file">graph.svelte.ts:72-105</span> (<code>fetchPhotoImages</code>), <span class="file">images.py:437-451</span> (<code>get_photo</code>).</p>
+
+    <h2 id="bottlenecks">Bottlenecks (with evidence)</h2>
+    <table>
+      <thead><tr><th>#</th><th>Bottleneck</th><th>Where</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><strong>No culling / no virtualization.</strong> All nodes &amp; edges are in the WebGL scene simultaneously. No frustum culling flag, no distance gating, no chunking. <code>buildGraphData()</code> returns the entire graph each refresh.</td>
+          <td><span class="file">GraphCanvas.svelte</span> <code>buildGraphData</code>, <code>.graphData(buildGraphData())</code> at 1163/1316/1335/1349/1382/1528/1610</td>
+          <td class="bad">Frame time scales with <em>total</em> node count, not visible count. The scene graph grows unbounded as new nodes stream in over SSE.</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><strong>Full-resolution images as GPU textures.</strong> <code>/photo/{filename}</code> returns the raw file (<code>FileResponse</code>, no PIL resize). Client turns it into a base64 data URL, then a <code>THREE.Texture</code>. Only face crops are thumbnailed to 256×256.</td>
+          <td><span class="file">images.py:437-451</span>; <span class="file">graph.svelte.ts:83-102</span>; <span class="file">GraphCanvas.svelte:603-631</span> (<code>loadPhotoTexture</code>)</td>
+          <td class="bad">VRAM blowup (each multi-MB JPEG → uncompressed texture), decode stalls on the main thread, GC pressure from many <code>Image</code>+dataURL objects.</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><strong>Per-frame <code>scene.traverse()</code> + manual opacity RAF loop.</strong> The codebase added "dirty flags" to <em>avoid</em> traversing every frame, which confirms traversing was a measured hotspot.</td>
+          <td><span class="file">GraphCanvas.svelte:120-125</span> (comments), opacity RAF loop</td>
+          <td class="bad">Competes with the force-graph render loop and <code>zoomToFit</code> camera tween during initial load — the documented cause of initial frame drops.</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><strong>Force simulation keeps running / restarting.</strong> Every data merge calls <code>graph.graphData(buildGraphData())</code> then <code>resumeAnimation()</code>, re-cooking the whole layout.</td>
+          <td><span class="file">GraphCanvas.svelte:1316-1338</span>, 1610-1637</td>
+          <td class="amber">O(n) physics tick over all nodes on every incremental update; visible "jitter" and CPU spikes during SSE merges.</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><strong>Per-node object creation is expensive.</strong> <code>createNodeThreeObject</code> allocates new <code>PlaneGeometry</code>, <code>EdgesGeometry</code>, <code>MeshBasicMaterial</code>, and a 128² <code>CanvasTexture</code> (person) per node. No geometry/material reuse.</td>
+          <td><span class="file">GraphCanvas.svelte:709-…</span></td>
+          <td class="amber">Allocation + disposal churn as nodes are added/removed; draw calls scale 1:1 with nodes.</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td><strong>No image LOD / progressive loading.</strong> The first photo fetch loads the full image; there is no small-thumb-then-full-replace pattern like the reference's texture-progress loader.</td>
+          <td><span class="file">graph.svelte.ts:72-105</span></td>
+          <td class="amber">Long time-to-first-image on large galleries; bandwidth wasted on off-screen photos.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="reference">Reference: infinite-canvas (how it stays fast)</h2>
+    <p>Repo: <a href="https://github.com/edoardolunardi/infinite-canvas" target="_blank" rel="noopener">edoardolunardi/infinite-canvas</a> — React 19 + React Three Fiber + Three.js 0.182, MIT. It explores thousands of artworks on an endless 3D grid while staying smooth. The performance strategy is concentrated in three files:</p>
+
+    <div class="grid2">
+      <div class="card">
+        <h4><span class="file">src/infinite-canvas/constants.ts</span></h4>
+        <pre><code>CHUNK_SIZE        = 110   // world units per chunk cube
+RENDER_DISTANCE   = 2     // chunks in each axis kept mounted
+CHUNK_FADE_MARGIN = 1     // extra ring that fades out
+DEPTH_FADE_START  = 140
+DEPTH_FADE_END    = 260
+INVIS_THRESHOLD   = 0.01
+CHUNK_OFFSETS     = run(() =&gt; {
+  // precomputed list of (dx,dy,dz,dist) within
+  // RENDER_DISTANCE + CHUNK_FADE_MARGIN  → ~125 chunks max
+})</code></pre>
+      </div>
+      <div class="card">
+        <h4><span class="file">src/infinite-canvas/utils.ts</span></h4>
+        <ul>
+          <li><code>generateChunkPlanesCached</code> — 5 planes/chunk, LRU-cached (<code>MAX_PLANE_CACHE = 256</code>).</li>
+          <li><code>getChunkUpdateThrottleMs</code> — 500&nbsp;ms while zooming fast, 400&nbsp;ms while zooming, 100&nbsp;ms idle.</li>
+          <li><code>shouldThrottleUpdate</code> — gates React state updates so <code>setChunks</code> doesn't fire every frame.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4><span class="file">src/infinite-canvas/texture-manager.ts</span></h4>
+        <ul>
+          <li>Global <code>Map&lt;url, THREE.Texture&gt;</code> cache — each image loaded once.</li>
+          <li><code>TextureLoader</code> with mipmap + anisotropy + sRGB on load.</li>
+          <li>Per-key callback set so multiple planes sharing a texture all get notified.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4><span class="file">src/infinite-canvas/scene.tsx</span> (the loop)</h4>
+        <ul>
+          <li><code>useFrame</code> moves camera by velocity (drag/wheel/keys/touch), then computes <code>cx,cy,cz = floor(pos / CHUNK_SIZE)</code>.</li>
+          <li>On chunk change, <code>setChunks(CHUNK_OFFSETS.map(...))</code> mounts only nearby chunks (throttled).</li>
+          <li>Each <code>MediaPlane</code> does its own <code>useFrame</code> fade: <code>opacity</code> target is <code>1</code> if <code>dist &lt;= RENDER_DISTANCE</code>, else a fade ramp; <code>mesh.visible=false</code> + <code>depthWrite=false</code> when below <code>INVIS_THRESHOLD</code>.</li>
+          <li>Depth fade (<code>absDepth &gt; DEPTH_FADE_END</code>) hides far planes entirely.</li>
+        </ul>
+      </div>
+    </div>
+
+    <blockquote>Net effect: only ~125 chunks × 5 planes = ~625 meshes exist at any time, and most are invisible or fading. Dataset size is irrelevant to frame time. Textures load on demand with a global progress bar (<code>useProgress</code>).</blockquote>
+
+    <h2 id="gap">Gap analysis</h2>
+    <table>
+      <thead><tr><th>Concern</th><th>Current (force graph)</th><th>Reference (infinite canvas)</th><th>Needed for us</th></tr></thead>
+      <tbody>
+        <tr><td>Rendering</td><td>Whole graph in one scene</td><td>Chunk-mounted subset</td><td>Chunk + distance culling <span class="tag red">must adopt</span></td></tr>
+        <tr><td>Image size</td><td>Full-res raw file → dataURL → texture</td><td>Single source URL, texture cache</td><td>Thumbnail LOD pipeline <span class="tag red">must add</span></td></tr>
+        <tr><td>Texture reuse</td><td>Per-node <code>photoTextureCache</code> (keyed by nodeId, not image)</td><td>Global cache keyed by URL</td><td>Key by image URL <span class="tag amber">improve</span></td></tr>
+        <tr><td>Geometry/material</td><td>New per node</td><td>Shared <code>PLANE_GEOMETRY</code> (1×1, scaled per mesh)</td><td>Shared geometry/material <span class="tag green">adopt</span></td></tr>
+        <tr><td>Layout</td><td>Force simulation (continuous)</td><td>Deterministic seeded grid</td><td>Hybrid: place by knowledge structure, not physics <span class="tag amber">redesign</span></td></tr>
+        <tr><td>Filter</td><td><code>filteredNodes</code> string-match in store</td><td>None (it's a gallery)</td><td>Filter chips + detail panel <span class="tag red">must add</span></td></tr>
+        <tr><td>Detail view</td><td><code>PhotoOverlay</code> card with neighbors</td><td>None</td><td>Keep PhotoOverlay, adapt to canvas selection <span class="tag green">reuse</span></td></tr>
+        <tr><td>Chat → image</td><td>Inline carousel in chat bubble</td><td>N/A</td><td>Chat surfaces images ON the canvas <span class="tag red">new feature</span></td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="proposal">Proposed architecture</h2>
+    <p>Replace <code>GraphCanvas.svelte</code> with a new <code>CanvasView.svelte</code> that renders the knowledge graph as an infinite 2.5D canvas (mostly-flat 3D planes with parallax depth), reusing the reference's chunk/culling pattern. Keep Svelte + the existing <code>three</code> dependency — no React, no R3F needed.</p>
+
+    <h3>Layer map</h3>
+    <pre><code>ui/src/lib/components/canvas/
+├─ CanvasView.svelte        // mounts renderer, hosts controls + overlay
+├─ renderer/
+│  ├─ SceneManager.ts        // THREE.Scene/Camera/Renderer, resize, RAF loop
+│  ├─ ChunkManager.ts       // computes cx,cy,cz, throttles setChunks
+│  ├─ Chunk.ts              // 5–N planes per chunk (shared geometry/material)
+│  ├─ NodePlane.ts          // one plane: position/scale/texture/fade
+│  ├─ TextureCache.ts       // global url→THREE.Texture (port of texture-manager)
+│  └─ Layout.ts             // assigns graph nodes to chunk-cell positions
+├─ filter/
+│  ├─ FilterBar.svelte      // chips: type, date, person, location, search
+│  └─ filter-store.svelte.ts
+└─ detail/
+   └─ NodeOverlay.svelte    // evolved PhotoOverlay (works for any node type)
+</code></pre>
+
+    <h3>Why 2.5D, not the 3D force graph</h3>
+    <ul>
+      <li>Photos are 2D objects; a flat plane grid maps naturally. The reference proves a near-flat Z with parallax depth reads well and culls cheaply.</li>
+      <li>Removing the force simulation eliminates bottleneck #3 and #4 entirely. Layout becomes a pure function of the graph (see <a href="#data">Data model</a>).</li>
+      <li>Chunk coordinates become meaningful (a node lives at a stable <code>(cx,cy,cz)</code>) instead of drifting every time physics re-runs.</li>
+    </ul>
+
+    <h2 id="data">Data model &amp; layout</h2>
+    <h4>Canvas node (front-end only — no backend change)</h4>
+    <pre><code>type CanvasNode = {
+  id: string;                 // KGNode.id
+  labels: string[];
+  properties: Record&lt;string, unknown&gt;;
+  kind: 'photo' | 'person' | 'location' | 'event' | 'concept';
+  imageUrl?: string;          // resolved thumbnail URL (LOD)
+  fullUrl?: string;           // full-res URL (for overlay)
+  // assigned by Layout.ts:
+  cellX: number; cellY: number; cellZ: number; // chunk coords
+  localX: number; localY: number; localZ: number; // offset within chunk
+  width: number; height: number; // plane size
+};
+</code></pre>
+
+    <h4>Layout strategy (replaces force simulation)</h4>
+    <ul>
+      <li><strong>Primary dimension = time.</strong> Chunk X = ordered ingestion time bucket. New photos naturally scroll in from the right.</li>
+      <li><strong>Y within chunk = cluster.</strong> Group by the photo's dominant cluster/person/event from the graph; clusters form horizontal bands. Reuse the existing <code>hubMap</code> grouping logic in <code>GraphCanvas.svelte:92-94</code>.</li>
+      <li><strong>Z = relationship depth.</strong> The selected/focused node's neighbors sit at the camera plane; 2-hop nodes drop back in Z (parallax), giving the "focus and get more details" depth feel.</li>
+      <li>Positions are <strong>stable</strong> (assigned once per node, stored in a <code>Map</code>) so panning back doesn't re-lay-out.</li>
+    </ul>
+
+    <h2 id="culling">Chunk &amp; culling (ported from the reference)</h2>
+    <p>Port these primitives almost verbatim into TS (no React needed):</p>
+    <div class="grid2">
+      <div class="card">
+        <h4>From <code>constants.ts</code></h4>
+        <p>Keep <code>CHUNK_SIZE</code>, <code>RENDER_DISTANCE</code>, <code>CHUNK_FADE_MARGIN</code>, <code>INVIS_THRESHOLD</code>, <code>DEPTH_FADE_*</code>, and the precomputed <code>CHUNK_OFFSETS</code>. Tune <code>CHUNK_SIZE</code> for photo aspect ratios (e.g. 160 so a 4:3 plane fits with margin).</p>
+      </div>
+      <div class="card">
+        <h4>From <code>scene.tsx</code> loop</h4>
+        <ul>
+          <li>One <code>requestAnimationFrame</code> loop: apply velocity → compute <code>cx,cy,cz</code> → if changed, queue a throttled chunk update.</li>
+          <li>Throttle by zoom speed (port <code>getChunkUpdateThrottleMs</code>): 500/400/100&nbsp;ms.</li>
+          <li>Mount/unmount chunk <code>THREE.Group</code>s; reuse a pool to avoid GC.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>From <code>MediaPlane</code> fade</h4>
+        <ul>
+          <li>Per-plane: target opacity = <code>dist &lt;= RENDER_DISTANCE ? 1 : fade(dist)</code>.</li>
+          <li>Below <code>INVIS_THRESHOLD</code>: <code>mesh.visible=false</code>, <code>material.depthWrite=false</code>.</li>
+          <li>Depth fade hides far planes outright.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>From <code>utils.ts</code></h4>
+        <ul>
+          <li><code>generateChunkPlanesCached</code> LRU — but seeded by our <code>Layout.ts</code> assignment, not random.</li>
+          <li>Plane pool: shared 1×1 <code>PlaneGeometry</code> (the reference's <code>PLANE_GEOMETRY</code> constant) scaled per mesh → one geometry for the whole canvas.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 id="images">Image pipeline (fixes bottleneck #2)</h2>
+    <p>This is the highest-ROI change and is independent of the canvas rewrite — it can land first.</p>
+    <ol>
+      <li><strong>Add a thumbnail endpoint.</strong> New <code>GET /api/kg/photo/{filename}?w=256</code> in <span class="file">api/routes/images.py</span> that returns a PIL-resized JPEG (port the existing face-crop <code>thumbnail((256,256), LANCZOS)</code> pattern). Cache to disk under <code>dist/thumbs/</code>. Serve full-res only on explicit <code>?w=full</code>.</li>
+      <li><strong>Two-stage LOD on the canvas.</strong> Each <code>NodePlane</code> loads the 256 thumbnail first (instant), then the full image swaps in when the plane is hovered/selected (the detail overlay already needs full-res).</li>
+      <li><strong>Global <code>TextureCache</code> keyed by URL</strong> (port of <span class="file">texture-manager.ts</span>), not by nodeId. Multiple nodes referencing the same image share one texture. Delete the per-node <code>photoTextureCache</code> in <span class="file">GraphCanvas.svelte:598</span>.</li>
+      <li><strong>Drop data URLs.</strong> Stop <code>FileReader.readAsDataURL</code> in <span class="file">graph.svelte.ts:93-97</span>. Serve a real URL and let <code>TextureLoader</code> fetch it — frees main-thread decode time and ~33% memory (base64 overhead).</li>
+      <li><strong>Lazy load only mounted chunks.</strong> Because chunks are culled, off-screen photos are never fetched. Today every photo is fetched eagerly on graph load.</li>
+    </ol>
+
+    <h2 id="filter">Filter &amp; detail</h2>
+    <h4>Filter bar (<code>FilterBar.svelte</code>)</h4>
+    <ul>
+      <li><strong>Type chips</strong>: Photo / Person / Location / Event / Organization / Concept — maps to existing <code>TYPE_COLORS</code> in <span class="file">GraphCanvas.svelte:17-24</span>.</li>
+      <li><strong>Text search</strong>: reuse <code>graphStore.filteredNodes</code> logic (already does label + properties + id substring match) — but instead of filtering the data array, set a <code>matchMask</code> per node. Non-matching planes fade to <code>opacity 0.08</code> and become non-interactive (the reference's fade primitive makes this trivial).</li>
+      <li><strong>Facets</strong>: date range (from EXIF <code>date_taken</code>, already in the graph), person (from <code>personImages</code> set), location (GPS cluster). Derived from node properties client-side.</li>
+      <li><strong>Focus mode</strong>: a filter that also re-centers the camera on the matching nodes' bounding box (replaces <code>graphCanvas.fitView()</code> at <span class="file">GraphView.svelte:516</span>).</li>
+    </ul>
+    <h4>Detail overlay (<code>NodeOverlay.svelte</code>)</h4>
+    <ul>
+      <li>Evolve <span class="file">PhotoOverlay.svelte</span> to be node-type-aware (it already computes neighbor persons via edges at lines 35–44 — generalize to all neighbor types).</li>
+      <li>Triggered on plane click/raycast. <strong>Full-res image</strong> loads on open (the LOD second stage). Metadata panel shows EXIF, people, locations, events from graph properties.</li>
+      <li>"Show on canvas" action that flies the camera to the node's chunk and highlights its neighborhood (the requested "get more details on a given image" experience).</li>
+    </ul>
+
+    <h2 id="chat">Chat → canvas bridge (the new feature)</h2>
+    <p>Today the chat extracts image filenames from an assistant's <code>### References</code> section (<span class="file">extract-reference-images.ts</span>) and renders them as an inline carousel in the chat bubble (<span class="file">+page.svelte:499-514</span>). The user wants referenced images to <em>come up on the canvas</em> as the AI mentions them.</p>
+    <h4>Proposed flow</h4>
+    <pre><code>assistant stream → on '### References' detected:
+  refNames = extractReferenceImages(content)
+  for name in refNames:
+    node = graphStore.findPhotoByFilename(name)   // new helper
+    canvas.highlight(node.id)                     // sets opacity 1 + cyan ring
+    canvas.flyTo(node.id)                          // camera tween to chunk
+    chat.pushRefCard(node.id)                      // chat shows a compact "📷 shown on canvas" card
+</code></pre>
+    <ul>
+      <li><strong>Streaming-aware</strong>: parse references incrementally as tokens arrive (the regex in <code>extract-reference-images.ts</code> is already line-oriented and safe to run on partial content).</li>
+      <li><strong>Camera tween</strong>: reuse the reference's velocity model — set <code>targetVel</code> toward the target chunk and let the existing damping bring the camera there smoothly (no jarring <code>zoomToFit</code>).</li>
+      <li><strong>Persistent highlight</strong>: referenced planes get a selection ring (the codebase already builds <code>EdgesGeometry</code> rings at <span class="file">GraphCanvas.svelte:745-748</span> — reuse for referenced images).</li>
+      <li><strong>Two-way</strong>: clicking a plane that the AI referenced also scrolls the chat to the matching message (link by <code>messageId ↔ nodeId</code>).</li>
+    </ul>
+
+    <h2 id="migration">Migration plan</h2>
+    <table>
+      <thead><tr><th>Phase</th><th>Scope</th><th>Risk</th><th>Ships independently?</th></tr></thead>
+      <tbody>
+        <tr><td><strong>0. Image pipeline</strong></td><td>Add <code>?w=</code> thumbnails; switch <code>fetchPhotoImages</code> to URLs; global <code>TextureCache</code>. Keep force graph.</td><td class="ok">Low — backend-only + small store change.</td><td>Yes — immediate win even before canvas.</td></tr>
+        <tr><td><strong>1. Canvas skeleton</strong></td><td><code>SceneManager</code> + <code>ChunkManager</code> + flat layout behind a feature flag. No filter, no chat bridge yet.</td><td class="ok">Medium — new rendering path.</td><td>Yes — route flag <code>?view=canvas</code>.</td></tr>
+        <tr><td><strong>2. Layout &amp; selection</strong></td><td>Knowledge-aware layout (time/cluster/depth), raycast selection, ported <code>NodeOverlay</code>.</td><td>Medium</td><td>Yes.</td></tr>
+        <tr><td><strong>3. Filter &amp; detail</strong></td><td><code>FilterBar</code>, match-mask fade, facet chips, focus camera.</td><td>Low</td><td>Yes.</td></tr>
+        <tr><td><strong>4. Chat bridge</strong></td><td>Reference → highlight → flyTo; bidirectional links; streaming parse.</td><td class="ok">Low — additive.</td><td>Yes.</td></tr>
+        <tr><td><strong>5. Cut over</strong></td><td>Make canvas the default, delete <code>GraphCanvas.svelte</code> force-graph path and <code>3d-force-graph</code> dependency.</td><td class="amber">Medium — removes ~1600 lines + a dep.</td><td>Last.</td></tr>
+      </tbody>
+    </table>
+    <p>Each phase is independently shippable and reversible. Phase 0 alone should recover most of the lost performance on the current UI.</p>
+
+    <h2 id="effort">Effort &amp; risk</h2>
+    <div class="grid2">
+      <div class="card">
+        <h4>Estimated effort</h4>
+        <ul>
+          <li>Phase 0 — image pipeline: <strong>~1 day</strong> (port the existing face-crop PIL pattern).</li>
+          <li>Phase 1 — canvas skeleton: <strong>~2–3 days</strong> (port constants/utils/texture-manager to TS; Svelte RAF loop).</li>
+          <li>Phase 2 — layout &amp; selection: <strong>~2 days</strong>.</li>
+          <li>Phase 3 — filter &amp; detail: <strong>~1–2 days</strong> (reuse <code>filteredNodes</code> + <code>PhotoOverlay</code>).</li>
+          <li>Phase 4 — chat bridge: <strong>~1 day</strong> (small, additive).</li>
+          <li>Phase 5 — cut over: <strong>~0.5 day</strong>.</li>
+        </ul>
+        <p class="meta">Total: ~1.5–2 weeks of focused work.</p>
+      </div>
+      <div class="card">
+        <h4>Key risks</h4>
+        <ul>
+          <li><strong>Stable layout under streaming SSE.</strong> Force graph absorbs new nodes by re-cooking; a static layout must assign cells to new nodes without shifting existing ones. Mitigation: time-bucket X coordinate + append-only.</li>
+          <li><strong>Raycasting through many planes.</strong> Use Three's <code>Raycaster.intersectObjects</code> against the mounted-chunk meshes only (~hundreds), not all nodes. Cheap.</li>
+          <li><strong>VRAM from many visible photos.</strong> Mitigated by thumbnails + chunk culling; the reference caps ~625 meshes.</li>
+          <li><strong>Mobile.</strong> The reference supports touch; reuse <code>use-swipe.ts</code>/<code>use-breakpoint.ts</code> already in the repo.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 id="appendix">Appendix</h2>
+    <h3>Reference repo file map</h3>
+    <pre><code>src/
+├─ app/index.tsx                  // mounts Frame + PageLoader + InfiniteCanvas
+├─ frame/index.tsx                // chrome (title, links)
+├─ artworks/manifest.json         // 65KB list of {url,width,height}
+└─ infinite-canvas/
+   ├─ index.tsx                   // lazy + Suspense wrapper
+   ├─ scene.tsx                   // 565 lines: Canvas, useFrame loop, chunk mounting
+   ├─ constants.ts                // CHUNK_SIZE=110, RENDER_DISTANCE=2, offsets
+   ├─ utils.ts                    // generateChunkPlanesCached (LRU 256), throttle
+   ├─ texture-manager.ts          // global Map&lt;url,Texture&gt; + TextureLoader
+   └─ types.ts                    // MediaItem, ChunkData, PlaneData, Props
+</code></pre>
+    <h3>Current repo hot-path citations</h3>
+    <ul>
+      <li>No culling: <span class="file">GraphCanvas.svelte</span> <code>buildGraphData()</code> + <code>.graphData(buildGraphData())</code> (lines 1163, 1316, 1335, 1349, 1382, 1528, 1610).</li>
+      <li>Full-res photo: <span class="file">images.py:437-451</span>; dataURL conversion <span class="file">graph.svelte.ts:93-97</span>; texture upload <span class="file">GraphCanvas.svelte:603-631</span>.</li>
+      <li>Per-node allocation: <span class="file">GraphCanvas.svelte:709</span> (<code>createNodeThreeObject</code>), 128² canvas texture for persons.</li>
+      <li>Force re-run on merge: <span class="file">GraphCanvas.svelte:1316-1338, 1610-1637</span> (<code>graphData</code> + <code>resumeAnimation</code>).</li>
+      <li>Scene-traverse hotspot admission: <span class="file">GraphCanvas.svelte:120-125</span> comments.</li>
+      <li>Chat reference images: <span class="file">extract-reference-images.ts</span>, consumed at <span class="file">+page.svelte:501-514</span>.</li>
+    </ul>
+    <hr>
+    <p class="meta">Generated for the knowledge-graph project. Reference: <a href="https://github.com/edoardolunardi/infinite-canvas" target="_blank" rel="noopener">edoardolunardi/infinite-canvas</a> (MIT). All line numbers reflect the repo state at analysis time.</p>
+  </main>
+</div>
+</body>
+</html>
