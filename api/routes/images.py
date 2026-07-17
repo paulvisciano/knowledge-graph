@@ -39,6 +39,8 @@ KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve
 INPUT_DIR = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
 FACES_CACHE_DIR = Path(os.environ.get("FACES_CACHE_DIR", str(Path(__file__).resolve().parent.parent.parent / "face_crops")))
 FACES_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+THUMBS_CACHE_DIR = Path(os.environ.get("THUMBS_CACHE_DIR", str(Path(__file__).resolve().parent.parent.parent / "dist" / "thumbs")))
+THUMBS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -435,7 +437,7 @@ async def link_exif_entities(
 
 
 @router.get("/photo/{filename:path}")
-async def get_photo(filename: str):
+async def get_photo(filename: str, w: Optional[str] = None):
     """Serve a photo image file from the inputs directory.
 
     Used by the UI to display photo textures in the 3D graph on page reload.
@@ -448,7 +450,39 @@ async def get_photo(filename: str):
         file_path.resolve().relative_to(INPUT_DIR.resolve())
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid path")
-    return FileResponse(str(file_path))
+
+    if w is None or w == "full" or w == "":
+        return FileResponse(str(file_path))
+
+    try:
+        w_int = int(w)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="w must be a positive integer or 'full'")
+    if w_int <= 0:
+        raise HTTPException(status_code=400, detail="w must be a positive integer or 'full'")
+
+    safe_filename = filename.replace("/", "_").replace("\\", "_").replace("..", "")
+    cache_path = THUMBS_CACHE_DIR / f"{safe_filename}_{w_int}.jpg"
+
+    cache_headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+    if cache_path.is_file():
+        return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
+
+    try:
+        from PIL import Image, ImageOps
+
+        img = await asyncio.to_thread(Image.open, str(file_path))
+        img = await asyncio.to_thread(ImageOps.exif_transpose, img)
+        img = img.copy()
+        img.thumbnail((w_int, w_int), Image.Resampling.LANCZOS)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        await asyncio.to_thread(img.save, str(cache_path), "JPEG", quality=85)
+        return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
+    except Exception as exc:
+        logger.warning("Thumbnail generation failed for '%s' (w=%s): %s — serving raw", filename, w, exc)
+        return FileResponse(str(file_path))
 
 
 @router.get("/exif/{file_source:path}")
