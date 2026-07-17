@@ -1,8 +1,11 @@
 import { writable } from 'svelte/store';
+import type { ChatMode } from '$lib/constants';
 
 export type TabId = 'graph' | 'ingestion' | 'activity';
 
 export const activeTab = writable<TabId>('graph');
+
+export const chatMode = writable<ChatMode>('kg-direct');
 
 export const lightragStatus = writable<'connected' | 'disconnected' | 'busy' | 'error'>('disconnected');
 export const llamaStatus = writable<'connected' | 'disconnected' | 'busy' | 'error'>('disconnected');

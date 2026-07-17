@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { ChatMessage, MCPToolCall, ChatMode, OllamaMessage } from '$lib/constants';
+  import type { ChatMessage, MCPToolCall, OllamaMessage } from '$lib/constants';
   import { API } from '$lib/constants';
   import { eventBus } from '$lib/stores/event-bus.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
-  import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
+  import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen, chatMode } from '$lib/stores/ui';
   import { mcpClient } from '$lib/services/mcp-client.svelte';
   import { connectionStore } from '$lib/stores/connection.svelte';
   import { configStore } from '$lib/stores/config.svelte';
@@ -54,7 +54,6 @@
   let chatInput = $state('');
   let panelChatInput = $state('');
   let chatExpanded = $state(false);
-  let chatMode = $state<ChatMode>('kg-direct');
   let availableModels = $state<string[]>([]);
   let selectedModel = $state('');
   let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -1038,7 +1037,7 @@
 
     // Images are now processed immediately on attach via processSingleImage
     // Audio requires multimodal content parts, so always route through LLM path
-    if (chatMode === 'kg-direct' && !audioData) {
+    if ($chatMode === 'kg-direct' && !audioData) {
       await streamKGChatResponse();
     } else {
       await streamAssistantResponse(sentAttachments);
@@ -1188,7 +1187,7 @@
     // Audio is multimodal and must route through streamAssistantResponse even in
     // kg-direct mode (matches handleSend routing), otherwise audioData is dropped
     // and the model receives an empty user message -> "[no-context]".
-    if (chatMode === 'kg-direct' && !msg.audioData) {
+    if ($chatMode === 'kg-direct' && !msg.audioData) {
       streamKGChatResponse();
     } else {
       streamAssistantResponse();
@@ -1544,21 +1543,12 @@
             onPickImage={openImagePicker}
             onPickDocument={openDocumentPicker}
           />
-          <button
-            onclick={() => { chatMode = chatMode === 'kg-direct' ? 'llm-mcp' : 'kg-direct'; }}
-            class="flex h-10 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium uppercase tracking-wide transition-all duration-200 {chatMode === 'kg-direct' ? 'bg-cyber-cyan/15 text-cyber-cyan ring-1 ring-cyber-cyan/30' : 'bg-cyber-surface-2/50 text-cyber-text-dim/60 hover:bg-cyber-cyan/10 hover:text-cyber-cyan'}"
-            title={chatMode === 'kg-direct' ? 'Direct KG chat — LightRAG handles retrieval and generation' : 'LLM + MCP — LLM calls KG tools via MCP'}
-            disabled={isActiveConversationStreaming}
-          >
-            <Icon name={chatMode === 'kg-direct' ? 'database' : 'cpu'} size={16} />
-            <span class="hidden sm:inline">{chatMode === 'kg-direct' ? 'KG' : 'LLM'}</span>
-          </button>
           <textarea
             bind:this={textareaEl}
             bind:value={chatInput}
             oninput={autoResize}
             onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, true); } }}
-            placeholder={chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
+            placeholder={$chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
             rows="1"
             data-testid="chat-input"
             class="max-h-[144px] min-h-[24px] flex-1 resize-none bg-transparent text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40"
