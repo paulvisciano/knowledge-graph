@@ -608,11 +608,24 @@
     />
   {/if}
 
-  {#if !viewReady}
+  {#if isLoading || (allNodes.length > 0 && !viewReady)}
     <div class="absolute inset-0 flex items-center justify-center z-30 bg-cyber-bg">
       <div class="flex flex-col items-center gap-3 animate-fade-in-up">
         <div class="w-10 h-10 border-2 border-cyber-cyan border-t-transparent rounded-full animate-spin"></div>
         <p class="text-sm text-cyber-text-dim">Loading knowledge graph...</p>
+      </div>
+    </div>
+  {/if}
+  {#if !isLoading && allNodes.length === 0 && !error}
+    <div class="absolute inset-0 flex items-center justify-center z-30 bg-cyber-bg">
+      <div class="flex flex-col items-center gap-4 max-w-md text-center px-6 animate-fade-in-up">
+        <div class="w-14 h-14 rounded-2xl bg-cyber-cyan/10 flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
+        <h3 class="text-cyber-cyan font-semibold text-lg">No knowledge graph yet</h3>
+        <p class="text-sm text-cyber-text-dim leading-relaxed">
+          Attach an image to the chat below to start building your knowledge graph. Extracted entities and relationships will appear here.
+        </p>
       </div>
     </div>
   {/if}
