@@ -14,6 +14,8 @@ export const API = {
     imagesReprocess: '/images/reprocess',
     imagesHealth: '/images/health',
     photoImage: (filename: string) => `/images/photo/${encodeURIComponent(filename)}`,
+    photoImageFull: (filename: string) => `/images/photo/${encodeURIComponent(filename)}?w=full`,
+    photoImageThumb: (filename: string, w = 256) => `/images/photo/${encodeURIComponent(filename)}?w=${w}`,
     photoExif: (fileSource: string) => `/images/exif/${encodeURIComponent(fileSource)}`,
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
     faceCrop: (name: string) => `/images/faces/crops/${encodeURIComponent(name)}`,

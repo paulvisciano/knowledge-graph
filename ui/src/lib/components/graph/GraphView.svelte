@@ -177,26 +177,12 @@
     const photoNodes = nodes.filter(isPhotoNode);
     if (photoNodes.length === 0) return;
     const updates: Record<string, string> = {};
-    await Promise.all(
-      photoNodes.map(async (node) => {
-        if (graphStore.photoImages[node.id]) return;
-        const sourceId = node.properties?.source_id ?? node.properties?.file_path;
-        if (!sourceId || sourceId === 'manual_creation') return;
-        try {
-          const url = `${KG_API_BASE}${API.kg.photoImage(String(sourceId))}`;
-          const resp = await fetch(url);
-          if (!resp.ok) return;
-          const blob = await resp.blob();
-          const dataUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-          updates[node.id] = dataUrl;
-        } catch {
-        }
-      })
-    );
+    for (const node of photoNodes) {
+      if (graphStore.photoImages[node.id]) continue;
+      const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+      if (!sourceId || sourceId === 'manual_creation') continue;
+      updates[node.id] = `${KG_API_BASE}${API.kg.photoImageThumb(String(sourceId))}`;
+    }
     if (Object.keys(updates).length > 0) {
       graphStore.photoImages = { ...graphStore.photoImages, ...updates };
     }

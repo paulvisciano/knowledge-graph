@@ -12,7 +12,7 @@ class GraphStore {
   hoveredNode: KGNode | null = $state(null);
   searchQuery = $state('');
   isLoading = $state(false);
-  /** nodeId → dataUrl for Photo node images */
+  /** nodeId → thumbnail URL for Photo node images (loaded on demand, not base64) */
   photoImages = $state<Record<string, string>>({});
   /** nodeId → dataUrl for Person face-crop images */
   personImages = $state<Record<string, string>>({});
@@ -68,7 +68,7 @@ class GraphStore {
     }
   }
 
-  /** Fetch images for Photo nodes from the API and populate photoImages. */
+  /** Resolve thumbnail URLs for Photo nodes (no fetch — loaded on demand by TextureLoader/<img>). */
   private async fetchPhotoImages(nodes: KGNode[]) {
     const photoNodes = nodes.filter((n) =>
       n.labels?.some((l) => /^(Photo|Image)$/i.test(l))
@@ -80,26 +80,12 @@ class GraphStore {
     if (photoNodes.length === 0) return;
 
     const updates: Record<string, string> = {};
-    await Promise.all(
-      photoNodes.map(async (node) => {
-        if (this.photoImages[node.id]) return;
-        const sourceId = node.properties?.source_id ?? node.properties?.file_path;
-        if (!sourceId || sourceId === 'manual_creation') return;
-        try {
-          const url = `${KG_API_BASE}${API.kg.photoImage(String(sourceId))}`;
-          const resp = await fetch(url);
-          if (!resp.ok) return;
-          const blob = await resp.blob();
-          const dataUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-          updates[node.id] = dataUrl;
-        } catch {
-        }
-      })
-    );
+    for (const node of photoNodes) {
+      if (this.photoImages[node.id]) continue;
+      const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+      if (!sourceId || sourceId === 'manual_creation') continue;
+      updates[node.id] = `${KG_API_BASE}${API.kg.photoImageThumb(String(sourceId))}`;
+    }
     if (Object.keys(updates).length > 0) {
       this.photoImages = { ...this.photoImages, ...updates };
     }
@@ -146,8 +132,8 @@ class GraphStore {
     this.edges = [...this.edges.filter((e) => e.id !== id), edge];
   }
 
-  setPhotoImage(nodeId: string, dataUrl: string) {
-    this.photoImages = { ...this.photoImages, [nodeId]: dataUrl };
+  setPhotoImage(nodeId: string, url: string) {
+    this.photoImages = { ...this.photoImages, [nodeId]: url };
   }
 
   setPersonImage(nodeId: string, dataUrl: string) {

@@ -5,6 +5,7 @@
   import * as THREE from 'three';
   import { onMount } from 'svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
+  import { textureCache } from '$lib/services/TextureCache';
   import { isMobile } from '$lib/composables/use-breakpoint';
 
   interface TrackballControlsLike {
@@ -595,25 +596,15 @@
     graph.graphData(data);
   }
 
-  const photoTextureCache = new Map<string, THREE.Texture>();
   const photoNodeMaterials = new Map<string, THREE.MeshBasicMaterial>();
   const personTextureCache = new Map<string, THREE.Texture>();
   const personNodeMaterials = new Map<string, THREE.MeshBasicMaterial>();
 
   function loadPhotoTexture(nodeId: string): THREE.Texture | undefined {
-    const dataUrl = graphStore.photoImages[nodeId];
-    if (!dataUrl) return undefined;
-    const cached = photoTextureCache.get(nodeId);
-    if (cached) return cached;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    const texture = new THREE.Texture(img);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.needsUpdate = false;
-    photoTextureCache.set(nodeId, texture);
-    img.onload = () => {
-      texture.needsUpdate = true;
-      // Apply texture to the material if the node was already created with a cyan fallback
+    const url = graphStore.photoImages[nodeId];
+    if (!url) return undefined;
+    if (textureCache.has(url)) return textureCache.get(url)!;
+    textureCache.load(url, (texture) => {
       const mat = photoNodeMaterials.get(nodeId);
       if (mat && mat.map !== texture) {
         mat.color.set(0xffffff);
@@ -621,13 +612,8 @@
         mat.opacity = 1;
         mat.needsUpdate = true;
       }
-    };
-    img.src = dataUrl;
-    // Data URLs may load synchronously
-    if (img.complete && img.naturalWidth > 0) {
-      texture.needsUpdate = true;
-    }
-    return texture;
+    });
+    return undefined;
   }
 
   /** Apply photo textures to existing node meshes. Called when photoImages updates. */
@@ -640,14 +626,19 @@
       const nodeId = String(node.id);
       const mat = photoNodeMaterials.get(nodeId);
       if (!mat) continue;
-      const dataUrl = graphStore.photoImages[nodeId];
-      if (!dataUrl) continue;
-      const texture = loadPhotoTexture(nodeId);
-      if (!texture) continue;
-      mat.color.set(0xffffff);
-      mat.map = texture;
-      mat.opacity = 1;
-      mat.needsUpdate = true;
+      const url = graphStore.photoImages[nodeId];
+      if (!url) continue;
+      if (textureCache.has(url)) {
+        const texture = textureCache.get(url)!;
+        if (mat.map !== texture) {
+          mat.color.set(0xffffff);
+          mat.map = texture;
+          mat.opacity = 1;
+          mat.needsUpdate = true;
+        }
+      } else {
+        loadPhotoTexture(nodeId);
+      }
     }
   }
 
@@ -1327,7 +1318,6 @@
   /** Re-register nodeThreeObject so photo nodes get recreated with up-to-date textures. */
   export function refreshNodeObjects() {
     if (!graph) return;
-    photoTextureCache.clear();
     photoNodeMaterials.clear();
     personTextureCache.clear();
     personNodeMaterials.clear();
