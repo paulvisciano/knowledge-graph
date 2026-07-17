@@ -81,6 +81,8 @@
   .ok { color: var(--green); }
   .file { font-family: var(--mono); font-size: 12px; color: var(--cyan); }
   .meta { color: var(--text-dim); font-size: 13px; }
+  tr.done { background: rgba(74,222,128,0.04); }
+  tr.done td:first-child { border-left: 3px solid var(--green); }
   blockquote { margin: 12px 0; padding: 10px 14px; border-left: 3px solid var(--cyan); background: rgba(0,212,255,0.05); border-radius: 0 8px 8px 0; }
   .ascii { font-family: var(--mono); font-size: 12px; line-height: 1.4; white-space: pre; overflow-x: auto; color: var(--text-dim); }
   hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
@@ -404,7 +406,7 @@ CHUNK_OFFSETS     = run(() =&gt; {
     <table>
       <thead><tr><th>Phase</th><th>Scope</th><th>Risk</th><th>Ships independently?</th></tr></thead>
       <tbody>
-        <tr><td><strong>0. Image pipeline</strong></td><td>Add <code>?w=</code> thumbnails; switch <code>fetchPhotoImages</code> to URLs; global <code>TextureCache</code>. Keep force graph.</td><td class="ok">Low — backend-only + small store change.</td><td>Yes — immediate win even before canvas.</td></tr>
+        <tr class="done"><td><strong>0. Image pipeline</strong> <span class="tag green">✓ done</span></td><td>Add <code>?w=</code> thumbnails; switch <code>fetchPhotoImages</code> to URLs; global <code>TextureCache</code>. Keep force graph.</td><td class="ok">Low — backend-only + small store change.</td><td>Yes — shipped <span class="meta">(commits f564472, 3ae455f, 5e2852a)</span></td></tr>
         <tr><td><strong>1. Canvas skeleton</strong></td><td><code>SceneManager</code> + <code>ChunkManager</code> + flat layout behind a feature flag. No filter, no chat bridge yet.</td><td class="ok">Medium — new rendering path.</td><td>Yes — route flag <code>?view=canvas</code>.</td></tr>
         <tr><td><strong>2. Layout &amp; selection</strong></td><td>Knowledge-aware layout (time/cluster/depth), raycast selection, ported <code>NodeOverlay</code>.</td><td>Medium</td><td>Yes.</td></tr>
         <tr><td><strong>3. Filter &amp; detail</strong></td><td><code>FilterBar</code>, match-mask fade, facet chips, focus camera.</td><td>Low</td><td>Yes.</td></tr>
@@ -413,13 +415,23 @@ CHUNK_OFFSETS     = run(() =&gt; {
       </tbody>
     </table>
     <p>Each phase is independently shippable and reversible. Phase 0 alone should recover most of the lost performance on the current UI.</p>
+    <div class="card" style="border-left: 4px solid var(--green);">
+      <h4>Phase 0 — complete ✓</h4>
+      <p class="meta">Shipped in commits <code>f564472</code> (backend thumbnail endpoint), <code>3ae455f</code> (frontend URL + TextureCache migration), <code>5e2852a</code> (full-res on expand).</p>
+      <ul>
+        <li><strong>Backend</strong>: <code>/photo/{filename}?w=&lt;int&gt;</code> returns PIL-resized LANCZOS JPEGs (EXIF-oriented, q85), disk-cached under <code>dist/thumbs/</code> with <code>Cache-Control: immutable</code>. <code>?w=full</code> or no param serves raw (backward compatible). Measured: 6.5 MB → 11 KB at <code>?w=256</code> (586× smaller).</li>
+        <li><strong>Frontend</strong>: <code>graphStore.photoImages</code> now holds thumbnail URLs instead of base64 dataURLs. New <code>TextureCache.ts</code> — global <code>Map&lt;url, THREE.Texture&gt;</code> singleton (ports the reference <code>texture-manager.ts</code>). Per-node <code>photoTextureCache</code> deleted; multiple nodes sharing an image now reuse one GPU texture across refreshes.</li>
+        <li><strong>Full-res on expand</strong>: <code>PhotoOverlay</code> fullscreen and <code>ImageGallery</code> lightbox swap <code>?w=&lt;int&gt;</code> → <code>?w=full</code> on click, so full-res loads only on demand. Chat reference images load as thumbnails inline.</li>
+        <li><strong>Bugs fixed during review</strong>: <code>return</code> → <code>continue</code> in both <code>fetchPhotoImages</code> loops (would have skipped URL resolution after the first cached node); <code>PhotoOverlay</code> <code>fullUrl</code> no longer relies on <code>graphStore.nodes</code> (empty because <code>GraphView</code> uses local <code>allNodes</code>).</li>
+      </ul>
+    </div>
 
     <h2 id="effort">Effort &amp; risk</h2>
     <div class="grid2">
       <div class="card">
         <h4>Estimated effort</h4>
         <ul>
-          <li>Phase 0 — image pipeline: <strong>~1 day</strong> (port the existing face-crop PIL pattern).</li>
+          <li>Phase 0 — image pipeline: <strong>~1 day</strong> (port the existing face-crop PIL pattern). <span class="tag green">✓ shipped</span></li>
           <li>Phase 1 — canvas skeleton: <strong>~2–3 days</strong> (port constants/utils/texture-manager to TS; Svelte RAF loop).</li>
           <li>Phase 2 — layout &amp; selection: <strong>~2 days</strong>.</li>
           <li>Phase 3 — filter &amp; detail: <strong>~1–2 days</strong> (reuse <code>filteredNodes</code> + <code>PhotoOverlay</code>).</li>
