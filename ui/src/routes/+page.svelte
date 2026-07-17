@@ -9,6 +9,7 @@
   import { configStore } from '$lib/stores/config.svelte';
   import { conversationStore } from '$lib/stores/conversation.svelte';
   import GraphView from '$lib/components/graph/GraphView.svelte';
+  import CanvasView from '$lib/components/canvas/CanvasView.svelte';
   import IngestionPanel from '$lib/components/ingestion/IngestionPanel.svelte';
   import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
   import NodeDetail from '$lib/components/graph/NodeDetail.svelte';
@@ -38,6 +39,18 @@
   }
 
   let conversations = $state<Conversation[]>([]);
+
+  /** Graph view mode: 'canvas' (infinite canvas, Phase 1) or 'graph' (force graph, default). */
+  let graphViewMode = $state<'graph' | 'canvas'>('graph');
+
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'canvas') graphViewMode = 'canvas';
+    window.addEventListener('popstate', () => {
+      const p = new URLSearchParams(window.location.search);
+      graphViewMode = p.get('view') === 'canvas' ? 'canvas' : 'graph';
+    });
+  }
 
   // Expose stores on window for E2E testing (stripped in production builds)
   if (typeof window !== 'undefined') {
@@ -1488,7 +1501,11 @@
   {/if}
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
-      <GraphView onqueryAbout={handleQueryAbout} />
+      {#if graphViewMode === 'canvas'}
+        <CanvasView onqueryAbout={handleQueryAbout} />
+      {:else}
+        <GraphView onqueryAbout={handleQueryAbout} />
+      {/if}
     </div>
 
     <!-- Floating chat input -->
