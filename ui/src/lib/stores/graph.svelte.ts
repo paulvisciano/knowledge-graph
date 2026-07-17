@@ -36,7 +36,8 @@ class GraphStore {
   async loadGraph(label?: string, nodeId?: string, depth?: number) {
     this.isLoading = true;
     try {
-      const graph = await lightragClient.getGraph(label, nodeId, depth);
+      // LightRAG /graphs requires `label` (422 if omitted); default to 'default'
+      const graph = await lightragClient.getGraph(label ?? 'default', nodeId, depth);
       const lightragNodeIds = new Set(graph.nodes.map((n: KGNode) => n.id));
       const lightragEdgeIds = new Set(graph.edges.map((e: KGEdge) => e.id));
       const preservedNodes = this.nodes.filter((n) => !lightragNodeIds.has(n.id));

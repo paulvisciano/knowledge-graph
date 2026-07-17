@@ -203,7 +203,7 @@ export class LightragClient {
 
   async getGraph(label?: string, nodeId?: string, depth?: number): Promise<KGGraph> {
     const params = new URLSearchParams();
-    if (label) params.set('label', label);
+    params.set('label', label ?? 'default');
     if (nodeId) params.set('node_id', nodeId);
     if (depth !== undefined) params.set('depth', String(depth));
     const qs = params.toString();
