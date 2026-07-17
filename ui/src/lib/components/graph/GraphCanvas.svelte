@@ -105,6 +105,10 @@
   // the camera back and clobber the user's manual zoom.
   let initialFitDone = false;
 
+  // Whether the 3d-force-graph _animationCycle loop is currently running.
+  // Paused on engine stop, resumed on data refresh / camera tween.
+  let animationRunning = false;
+
   // Track per-node opacity for fade animation
   // nodeId → current opacity (0 = hidden, 1 = visible)
   const nodeOpacity = new Map<string, number>();
@@ -1106,6 +1110,16 @@
         fg.d3AlphaDecay(1);
         fg.d3VelocityDecay(1);
         fg.d3AlphaMin(0.5);
+        // Stop the per-frame _animationCycle loop.  3d-force-graph's
+        // animation loop runs every frame even after the engine stops,
+        // doing a full Three.js render + node/link position iteration.
+        // That continuous render competes with wheel-zoom for the main
+        // thread and is the primary cause of zoom jitter (trace showed
+        // 65 long tasks >50ms, worst 623ms, all from FireAnimationFrame).
+        // We resume the loop only when new data arrives or the simulation
+        // reheats.  Zoom/pan call refresh() for a single re-render instead.
+        fg.pauseAnimation();
+        animationRunning = false;
         // Fit the camera to the settled layout ONLY on the initial settle.
         // Subsequent engine stops (from SSE data merges / refreshGraph) must
         // not re-fit, or the 500ms zoomToFit tween will clobber the user's
@@ -1119,6 +1133,8 @@
           // the camera is positioned at the fit distance.
           oninitialFit();
         }
+        // Single re-render of the final state (camera + node positions).
+        fg.refresh();
       })
       .onNodeClick((node: NodeObject) => {
         const gn = node as GraphNode;
@@ -1203,6 +1219,21 @@
     const controls = fg.controls() as unknown as TrackballControlsLike;
     controls.noZoom = true; // disable default scroll zoom (TrackballControls uses noZoom, not enableZoom)
 
+    // The animation loop is paused after engine stop (see onEngineStop above).
+    // TrackballControls rotate/pan by moving the camera, but the new camera
+    // position is only rendered when _animationCycle calls controls.update()
+    // + renderer.render().  Since that loop is paused, listen for the
+    // controls 'change' event and do a single re-render via refresh().
+    // refresh() calls _rerender() which calls controls.update() + render().
+    let controlsRaf = 0;
+    (controls as unknown as { addEventListener: (type: string, cb: () => void) => void }).addEventListener('change', () => {
+      if (animationRunning) return;
+      cancelAnimationFrame(controlsRaf);
+      controlsRaf = requestAnimationFrame(() => {
+        if (graph && !animationRunning) graph.refresh();
+      });
+    });
+
     // Attach wheel handler to the canvas (not the container div) so that
     // stopImmediatePropagation prevents the library's own wheel listener
     const canvas = fg.renderer().domElement;
@@ -1286,6 +1317,11 @@
     applyClusterForce();
     updateHighlight();
     opacityDirty = true;
+    // New data — reheat the simulation and resume the animation loop
+    // (it was paused on the previous onEngineStop).
+    graph.d3ReheatSimulation();
+    graph.resumeAnimation();
+    animationRunning = true;
   }
 
   /** Re-register nodeThreeObject so photo nodes get recreated with up-to-date textures. */
@@ -1298,6 +1334,9 @@
     graph.nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode));
     graph.graphData(buildGraphData());
     opacityDirty = true;
+    graph.d3ReheatSimulation();
+    graph.resumeAnimation();
+    animationRunning = true;
   }
 
   // Only re-register nodeThreeObject when showLabels changes.
@@ -1307,6 +1346,7 @@
     if (showLabels !== prevShowLabels) {
       prevShowLabels = showLabels;
       graph.nodeThreeObject((node: NodeObject) => createNodeThreeObject(node as GraphNode));
+      graph.refresh();
     }
   });
 
@@ -1339,8 +1379,10 @@
 
       if (_layout === 'circular') {
         applyCircularLayout();
+        graph.refresh();
       } else if (_layout === 'radial') {
         applyRadialLayout();
+        graph.refresh();
       } else {
         refreshGraph();
       }
@@ -1480,6 +1522,10 @@
     // Keep the camera looking at the new target
     camera.lookAt(target.target);
     target.update();
+
+    // The animation loop is paused (onEngineStop called pauseAnimation),
+    // so we need a single re-render to display the new camera position.
+    graph.refresh();
   }
 
   /** Handle wheel events to zoom toward the cursor position. */
@@ -1559,9 +1605,18 @@
 
   export function fitView(instant = false) {
     if (!graph) return;
-    // instant=true snaps the camera with no transition (0ms), used on initial
-    // load so the graph doesn't visibly animate from zoomed-in to zoomed-out.
-    graph.zoomToFit(instant ? 0 : 500, 80);
+    if (instant) {
+      graph.zoomToFit(0, 80);
+      graph.refresh();
+    } else {
+      graph.resumeAnimation();
+      animationRunning = true;
+      graph.zoomToFit(500, 80);
+      setTimeout(() => {
+        graph?.pauseAnimation();
+        animationRunning = false;
+      }, 550);
+    }
   }
 
   export function getGraph() {
@@ -1577,11 +1632,19 @@
     const ny = (node.y ?? 0) as number;
     const nz = node.z as number;
     const distance = 200;
+    // Resume the animation loop to drive the camera tween, then pause
+    // again when it finishes so zoom stays jitter-free.
+    graph.resumeAnimation();
+    animationRunning = true;
     graph.cameraPosition(
       { x: nx, y: ny, z: nz },
       { x: nx, y: ny, z: nz + distance },
       600
     );
+    setTimeout(() => {
+      graph?.pauseAnimation();
+      animationRunning = false;
+    }, 650);
   }
 
   onMount(() => {
