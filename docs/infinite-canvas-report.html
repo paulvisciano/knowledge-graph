@@ -408,7 +408,7 @@ CHUNK_OFFSETS     = run(() =&gt; {
       <tbody>
         <tr class="done"><td><strong>0. Image pipeline</strong> <span class="tag green">✓ done</span></td><td>Add <code>?w=</code> thumbnails; switch <code>fetchPhotoImages</code> to URLs; global <code>TextureCache</code>. Keep force graph.</td><td class="ok">Low — backend-only + small store change.</td><td>Yes — shipped <span class="meta">(commits f564472, 3ae455f, 5e2852a)</span></td></tr>
         <tr class="done"><td><strong>1. Canvas skeleton</strong> <span class="tag green">✓ done</span></td><td><code>SceneManager</code> + <code>ChunkManager</code> + flat layout behind a feature flag. No filter, no chat bridge yet.</td><td class="ok">Medium — new rendering path.</td><td>Yes — route flag <code>?view=canvas</code>. <span class="meta">(commits 02e86e2, a0ba7fd, 5e66743)</span></td></tr>
-        <tr><td><strong>2. Layout &amp; selection</strong></td><td>Knowledge-aware layout (time/cluster/depth), raycast selection, ported <code>NodeOverlay</code>.</td><td>Medium</td><td>Yes.</td></tr>
+        <tr class="done"><td><strong>2. Layout &amp; selection</strong> <span class="tag green">✓ done</span></td><td>Knowledge-aware layout (time/cluster/depth), photos-only render, raycast click selection, <code>NodeOverlay</code> with EXIF + connected entities.</td><td class="ok">Medium</td><td>Yes — route flag <code>?view=canvas</code>.</td></tr>
         <tr><td><strong>3. Filter &amp; detail</strong></td><td><code>FilterBar</code>, match-mask fade, facet chips, focus camera.</td><td>Low</td><td>Yes.</td></tr>
         <tr><td><strong>4. Chat bridge</strong></td><td>Reference → highlight → flyTo; bidirectional links; streaming parse.</td><td class="ok">Low — additive.</td><td>Yes.</td></tr>
         <tr><td><strong>5. Cut over</strong></td><td>Make canvas the default, delete <code>GraphCanvas.svelte</code> force-graph path and <code>3d-force-graph</code> dependency.</td><td class="amber">Medium — removes ~1600 lines + a dep.</td><td>Last.</td></tr>
@@ -439,6 +439,16 @@ CHUNK_OFFSETS     = run(() =&gt; {
       </ul>
     </div>
 
+    <div class="card" style="border-left: 4px solid var(--green);">
+      <h4>Phase 2 — complete ✓</h4>
+      <ul>
+        <li><strong>Knowledge-aware layout</strong> (<span class="file">Layout.ts</span>): <code>buildCanvasLayout</code> now assigns <code>cellY</code> from <code>buildClusterAssignment</code> (degree-based hubMap → dense band index; non-hub photos inherit their hub's band so a cluster reads as a contiguous row) and <code>cellZ</code> from a new <code>buildDepthPlan</code> (0 = focused node + 1-hop, 1 = 2-hop, 2 = far; 0 when nothing focused). Only photo/image nodes are emitted to the renderer — non-photo entities (person/location/event/concept) still participate in clustering and depth via their edges but are not rendered. <code>buildTimePlan</code> remains the primary X axis (auto-granularity: per-photo / day / month). Added optional <code>selectedNodeId</code> parameter for focus-depth parallax. 14 vitest cases in <span class="file">canvas-layout.test.ts</span> lock the behavior (cluster bands, depth buckets, determinism, URL building, sizing).</li>
+        <li><strong>Raycast selection</strong> (<span class="file">renderer/SceneManager.ts</code>): pointer raycast against mounted chunk meshes via <code>ChunkManager.getPickableMeshes()</code>. Click fires <code>onSelectNode(nodeId | null)</code>; pointer-move fires <code>onHoverNode(nodeId | null)</code> (throttled ~30 Hz). 5 px threshold distinguishes click from drag (report §effort/risks); wheel-zoom marks the gesture as dragged so it doesn't count as a click. <code>getCanvasNode(nodeId)</code> looks up the <code>CanvasNode</code> for overlay metadata. <code>NodePlane</code> tags its mesh with <code>userData.nodeId</code>; <code>Chunk</code> exposes a <code>planes</code> getter; <code>ChunkManager</code> exposes <code>getPickableMeshes()</code> + <code>findPlaneByNodeId()</code>.</li>
+        <li><strong>NodeOverlay</strong> (<span class="file">NodeOverlay.svelte</code>): static right-side detail panel (no 3D-point tracking — click-to-inspect). Shows thumbnail (swaps to full-res in a fullscreen lightbox on "View full image"), filename, EXIF rows (ported from <span class="file">PhotoOverlay.svelte</span> — same <code>EXIF_DISPLAY_KEYS</code>, <code>formatExifRows</code>, <code>fetchExifForNode</code>, live <code>imageProcessingStore.getExifSummary</code> fallback), processing stepper, and connected entities grouped by kind (persons with face-crop thumbnails via <code>faceCropById</code>/<code>faceCrop</code>, locations + events as chips). Derived from <code>graphStore.edges</code> neighbors — generalizes PhotoOverlay's person-only logic to all neighbor types.</li>
+        <li><strong>CanvasView wiring</strong> (<span class="file">CanvasView.svelte</code>): <code>sceneManager.onSelectNode</code> opens/closes the overlay; <code>selectedCanvasNode</code> captured imperatively from <code>getCanvasNode</code> at click time (not reactive — the mounted set changes as the camera moves); <code>selectedKgNode</code> derived from <code>graphStore.nodes</code>. Phase badge updated to "Phase 2". Empty-space click clears the selection.</li>
+      </ul>
+    </div>
+
     <h2 id="effort">Effort &amp; risk</h2>
     <div class="grid2">
       <div class="card">
@@ -446,7 +456,7 @@ CHUNK_OFFSETS     = run(() =&gt; {
         <ul>
           <li>Phase 0 — image pipeline: <strong>~1 day</strong> (port the existing face-crop PIL pattern). <span class="tag green">✓ shipped</span></li>
           <li>Phase 1 — canvas skeleton: <strong>~2–3 days</strong> (port constants/utils/texture-manager to TS; Svelte RAF loop). <span class="tag green">✓ shipped</span></li>
-          <li>Phase 2 — layout &amp; selection: <strong>~2 days</strong>.</li>
+          <li>Phase 2 — layout &amp; selection: <strong>~2 days</strong>. <span class="tag green">✓ shipped</span></li>
           <li>Phase 3 — filter &amp; detail: <strong>~1–2 days</strong> (reuse <code>filteredNodes</code> + <code>PhotoOverlay</code>).</li>
           <li>Phase 4 — chat bridge: <strong>~1 day</strong> (small, additive).</li>
           <li>Phase 5 — cut over: <strong>~0.5 day</strong>.</li>

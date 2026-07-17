@@ -7,8 +7,8 @@
  * `docs/infinite-canvas-report.html` §data) is:
  *
  *   cellX = time bucket  (primary axis — new photos scroll in from +X)
- *   cellY = cluster band (hubMap grouping → hashed hub id → band index)
- *   cellZ = relationship depth (Phase 1: 0 for everything)
+ *   cellY = cluster band (hubMap grouping → dense band index)
+ *   cellZ = relationship depth (0 = focused + 1-hop, 1 = 2-hop, 2 = far; 0 when nothing focused)
  *
  * No Three.js / DOM access here — this module is pure data and must be
  * deterministic: two calls with the same input produce identical coords.
@@ -143,6 +143,8 @@ interface ClusterAssignment {
   hubOf: Map<string, string>;
   /** hubId → stable band index (0-based). */
   bandOfHub: Map<string, number>;
+  /** Set of hub node ids (degree ≥ median). */
+  hubSet: Set<string>;
 }
 
 /**
@@ -217,7 +219,7 @@ function buildClusterAssignment(nodes: KGNode[], edges: KGEdge[]): ClusterAssign
     bandOfHub.set(sortedHubs[i], i);
   }
 
-  return { hubOf, bandOfHub };
+  return { hubOf, bandOfHub, hubSet };
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +334,64 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
 }
 
 // ---------------------------------------------------------------------------
+// Relationship-depth plan (cellZ — focus parallax)
+// ---------------------------------------------------------------------------
+
+interface DepthPlan {
+  /** nodeId → depth bucket (0 = in-focus, 1 = 1 hop out, 2 = far). */
+  depthOf: Map<string, number>;
+}
+
+/**
+ * Assign each node a relationship-depth bucket relative to `selectedNodeId`.
+ *
+ *  - depth 0: the focused node itself + its 1-hop neighbors (sit at the
+ *    camera plane for the "focus and get more details" feel).
+ *  - depth 1: 2-hop neighbors (drop back one Z-layer for parallax).
+ *  - depth 2: everything else (background).
+ *
+ * When `selectedNodeId` is null/undefined or not in the graph, every node
+ * gets depth 0 so the whole graph sits on one plane.
+ */
+function buildDepthPlan(
+  nodes: KGNode[],
+  edges: KGEdge[],
+  selectedNodeId?: string | null,
+): DepthPlan {
+  const depthOf = new Map<string, number>();
+
+  if (!selectedNodeId) {
+    for (const n of nodes) depthOf.set(n.id, 0);
+    return { depthOf };
+  }
+
+  const adjacency = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!adjacency.has(e.source)) adjacency.set(e.source, []);
+    if (!adjacency.has(e.target)) adjacency.set(e.target, []);
+    adjacency.get(e.source)!.push(e.target);
+    adjacency.get(e.target)!.push(e.source);
+  }
+
+  const oneHop = new Set<string>(adjacency.get(selectedNodeId) ?? []);
+  oneHop.add(selectedNodeId);
+
+  const twoHop = new Set<string>();
+  for (const id of oneHop) {
+    for (const nbr of adjacency.get(id) ?? []) {
+      if (!oneHop.has(nbr)) twoHop.add(nbr);
+    }
+  }
+
+  for (const n of nodes) {
+    if (oneHop.has(n.id)) depthOf.set(n.id, 0);
+    else if (twoHop.has(n.id)) depthOf.set(n.id, 1);
+    else depthOf.set(n.id, 2);
+  }
+  return { depthOf };
+}
+
+// ---------------------------------------------------------------------------
 // Image URL resolution
 // ---------------------------------------------------------------------------
 
@@ -355,25 +415,50 @@ function photoFilename(node: KGNode): string | null {
  * Build the full canvas layout — a `CanvasNode[]` ready to hand to
  * `SceneManager.setNodes`.
  *
- * Layout axes:
- *  - cellX = time bucket index (monotonic).
- *  - cellY = cluster band (hashed hub id).
- *  - cellZ = 0 (Phase 1; selection-depth is Phase 2).
+ * Layout axes (Phase 2 — knowledge-aware, see
+ * `docs/infinite-canvas-report.html` §data):
  *
- * Within a chunk cell, nodes are spread on a square grid sized to the cell's
- * node count so they never overlap. Non-photo nodes sit at `localZ = -20`
- * for a subtle parallax behind the photo plane.
+ *  - cellX = time bucket index (monotonic). New photos scroll in from +X.
+ *  - cellY = cluster band: each hub's cluster occupies a stable, dense
+ *    horizontal band derived from `buildClusterAssignment` (degree-based
+ *    hubMap). Non-hub nodes inherit their hub's band so a cluster reads as a
+ *    contiguous row.
+ *  - cellZ = relationship depth from the focused node (0 = neighbors of the
+ *    focused node, 1 = 2-hop, 2 = far; 0 when nothing is focused). This is the
+ *    "focus and get more details" parallax depth called out in the report.
+ *
+ * Within a chunk cell, photos are spread on a square grid sized to the cell's
+ * node count so they never overlap. Only photo/image nodes are rendered to
+ * the canvas; non-photo entities (person/location/event/concept) still
+ * participate in the cluster-band and depth computation (via their edges)
+ * but do not get planes — they inform the layout, not the render set.
+ *
+ * @param nodes        all `KGNode`s in the graph (used for clustering + depth).
+ * @param edges        all `KGEdge`s in the graph.
+ * @param photoImages  `nodeId → thumbnail URL` for photo nodes.
+ * @param personImages `nodeId → face-crop URL` for person nodes (reserved for
+ *                     later phases; person nodes are not rendered on the canvas).
+ * @param selectedNodeId optional focused node id — when set, its 1-hop
+ *                     neighbors sit at `cellZ=0`, 2-hop at `cellZ=1`, and
+ *                     everything else at `cellZ=2`. When unset, all nodes use
+ *                     `cellZ=0`. This is the depth-of-field parallax axis.
  */
 export function buildCanvasLayout(
   nodes: KGNode[],
   edges: KGEdge[],
   photoImages: Record<string, string>,
   _personImages: Record<string, string>,
+  selectedNodeId?: string | null,
 ): CanvasNode[] {
   const timePlan = buildTimePlan(nodes, edges);
   const clusters = buildClusterAssignment(nodes, edges);
+  const depthPlan = buildDepthPlan(nodes, edges, selectedNodeId);
 
-  // First pass: compute cell coords + per-cell node count (for grid spread).
+  const bandCount = Math.max(1, clusters.bandOfHub.size);
+  // Y-bands per chunk: cluster bands are dense (0..bandCount-1) and wrapped
+  // into a compact vertical stack. Each band occupies one chunk-Y row.
+  const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
+
   const cellCount = new Map<string, number>();
   const provisional: {
     node: KGNode;
@@ -389,13 +474,14 @@ export function buildCanvasLayout(
     const kind = classifyKind(node);
     if (kind !== 'photo') continue;
     const cellX = timePlan.cellXOf.get(node.id) ?? i;
-    const photoIdx = provisional.length;
-    // Spread across Y bands and Z layers so photos form a 3D grid rather
-    // than a single row. Y cycles through a few bands; Z layers every 3 photos.
-    const yBands = 4;
-    const cellY = photoIdx % yBands;
-    const layerCount = 5;
-    const cellZ = Math.floor(photoIdx / 3) % layerCount;
+
+    const hubId = clusters.hubOf.get(node.id) ?? node.id;
+    const band = clusters.bandOfHub.get(hubId) ?? 0;
+    const cellY = band % yBandsPerChunk;
+
+    const depth = depthPlan.depthOf.get(node.id) ?? 0;
+    const cellZ = depth;
+
     const cellKey = `${cellX},${cellY},${cellZ}`;
     cellCount.set(cellKey, (cellCount.get(cellKey) ?? 0) + 1);
     provisional.push({ node, kind, cellX, cellY, cellZ, cellKey });
@@ -414,8 +500,6 @@ export function buildCanvasLayout(
     const idx = cellCursor.get(cellKey) ?? 0;
     cellCursor.set(cellKey, idx + 1);
 
-    // Grid spread inside the chunk. Side = ceil(sqrt(count)); cells are
-    // CHUNK_SIZE wide so each slot is CHUNK_SIZE / side. Center the grid.
     const side = Math.max(1, Math.ceil(Math.sqrt(count)));
     const slot = CHUNK_SIZE / side;
     const col = idx % side;
@@ -423,46 +507,34 @@ export function buildCanvasLayout(
     const localX = col * slot + slot / 2;
     const localY = row * slot + slot / 2;
 
-    // Photos get a localZ offset within their Z-layer chunk for sub-layer
-    // parallax. Non-photo nodes (none in Phase 1) would sit further back.
-    const localZ = kind === 'photo' ? (idx % 3) * 10 : -20;
+    // Per-node Z jitter within a cell so overlapping photos don't z-fight.
+    const localZ = (idx % 3) * 10;
 
-    // Size.
+    const pw = node.properties?.width;
+    const ph = node.properties?.height;
     let width: number;
     let height: number;
-    if (kind === 'photo') {
-      const pw = node.properties?.width;
-      const ph = node.properties?.height;
-      if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
-        const maxDim = 140;
-        const scale = maxDim / Math.max(pw, ph);
-        width = Math.round(pw * scale);
-        height = Math.round(ph * scale);
-      } else {
-        width = 140;
-        height = 105; // 4:3 default
-      }
+    if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
+      const maxDim = 140;
+      const scale = maxDim / Math.max(pw, ph);
+      width = Math.round(pw * scale);
+      height = Math.round(ph * scale);
     } else {
-      width = 40;
-      height = 40;
+      width = 140;
+      height = 105;
     }
 
-    // Image URLs.
     let imageUrl: string | undefined;
     let fullUrl: string | undefined;
-    if (kind === 'photo') {
-      const cached = photoImages[node.id];
-      if (cached) {
-        imageUrl = cached;
-      } else {
-        const fname = photoFilename(node);
-        if (fname) imageUrl = `${KG_API_BASE}${API.kg.photoImageThumb(fname, 512)}`;
-      }
+    const cached = photoImages[node.id];
+    if (cached) {
+      imageUrl = cached;
+    } else {
       const fname = photoFilename(node);
-      if (fname) fullUrl = `${KG_API_BASE}${API.kg.photoImageFull(fname)}`;
+      if (fname) imageUrl = `${KG_API_BASE}${API.kg.photoImageThumb(fname, 512)}`;
     }
-    // Person face-crop textures are dataURLs and skipped in Phase 1 to keep
-    // TextureCache URL-keyed. Person nodes render as colored planes.
+    const fname = photoFilename(node);
+    if (fname) fullUrl = `${KG_API_BASE}${API.kg.photoImageFull(fname)}`;
 
     out[i] = {
       id: node.id,

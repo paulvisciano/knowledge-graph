@@ -47,10 +47,15 @@ export class SceneManager {
   private readonly _resizeObserver: ResizeObserver;
   private readonly _velocity = new THREE.Vector3();
   private readonly _keys = new Set<string>();
+  private readonly _raycaster = new THREE.Raycaster();
+  private readonly _pointerNdc = new THREE.Vector2();
   private readonly _pointer = {
     down: false,
     lastX: 0,
     lastY: 0,
+    downStartX: 0,
+    downStartY: 0,
+    dragged: false,
   };
 
   private _rafId = 0;
@@ -58,9 +63,16 @@ export class SceneManager {
   private _visible = true;
   private _disposed = false;
   private _userMoved = false;
+  private _lastHoverTime = 0;
 
   /** Optional callback fired when the camera crosses a chunk boundary. */
   onChunkChange?: (cx: number, cy: number, cz: number) => void;
+
+  /** Fired when the user clicks a photo plane (or null on empty-space click). */
+  onSelectNode?: (nodeId: string | null) => void;
+
+  /** Fired as the pointer moves over a photo plane (or null when off-plane). */
+  onHoverNode?: (nodeId: string | null) => void;
 
   /**
    * Creates the renderer, camera, scene, shared geometry, and chunk manager,
@@ -109,6 +121,14 @@ export class SceneManager {
   /** Number of chunks currently mounted (debug). */
   get mountedChunkCount(): number {
     return this._chunkManager.mountedChunkCount;
+  }
+
+  /**
+   * Looks up the `CanvasNode` for `nodeId` among mounted chunks. Returns
+   * `undefined` when the node's chunk is outside the render distance.
+   */
+  getCanvasNode(nodeId: string): CanvasNode | undefined {
+    return this._chunkManager.findPlaneByNodeId(nodeId)?.node;
   }
 
   /**
@@ -257,22 +277,35 @@ export class SceneManager {
     this._pointer.down = true;
     this._pointer.lastX = e.clientX;
     this._pointer.lastY = e.clientY;
+    this._pointer.downStartX = e.clientX;
+    this._pointer.downStartY = e.clientY;
+    this._pointer.dragged = false;
     this._userMoved = true;
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this._pointer.down) return;
-    const dx = e.clientX - this._pointer.lastX;
-    const dy = e.clientY - this._pointer.lastY;
-    this._pointer.lastX = e.clientX;
-    this._pointer.lastY = e.clientY;
-    const panScale = this._camera.position.z * 0.002;
-    this._camera.position.x -= dx * panScale;
-    this._camera.position.y += dy * panScale;
-    this._userMoved = true;
+    if (this._pointer.down) {
+      const dx = e.clientX - this._pointer.lastX;
+      const dy = e.clientY - this._pointer.lastY;
+      this._pointer.lastX = e.clientX;
+      this._pointer.lastY = e.clientY;
+      // 5px threshold distinguishes a click from a drag (report §effort/risks).
+      if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
+        this._pointer.dragged = true;
+      }
+      const panScale = this._camera.position.z * 0.002;
+      this._camera.position.x -= dx * panScale;
+      this._camera.position.y += dy * panScale;
+      this._userMoved = true;
+    } else {
+      this.hoverRaycast(e);
+    }
   };
 
-  private onPointerUp = (): void => {
+  private onPointerUp = (e: PointerEvent): void => {
+    if (this._pointer.down && !this._pointer.dragged) {
+      this.clickRaycast(e);
+    }
     this._pointer.down = false;
   };
 
@@ -281,8 +314,44 @@ export class SceneManager {
     this._camera.position.z -= e.deltaY * WHEEL_ZOOM_STEP;
     if (this._camera.position.z < MIN_CAMERA_Z) this._camera.position.z = MIN_CAMERA_Z;
     if (this._camera.position.z > MAX_CAMERA_Z) this._camera.position.z = MAX_CAMERA_Z;
+    this._pointer.dragged = true;
     this._userMoved = true;
   };
+
+  /**
+   * Raycasts from pointer NDC into the mounted chunk meshes and fires
+   * `onHoverNode` with the hit node id (or null). Throttled to ~30Hz.
+   */
+  private hoverRaycast(e: PointerEvent): void {
+    const now = performance.now();
+    if (now - this._lastHoverTime < 33) return;
+    this._lastHoverTime = now;
+    const hit = this.raycast(e);
+    this.onHoverNode?.(hit ?? null);
+  }
+
+  /** Raycasts on click and fires `onSelectNode` with the hit id (or null). */
+  private clickRaycast(e: PointerEvent): void {
+    const hit = this.raycast(e);
+    this.onSelectNode?.(hit ?? null);
+  }
+
+  /**
+   * Converts a pointer event to NDC and raycasts against the mounted chunk
+   * meshes. Returns the hit node id, or `undefined` on no hit.
+   */
+  private raycast(e: PointerEvent): string | undefined {
+    const rect = this._renderer.domElement.getBoundingClientRect();
+    this._pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    this._pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this._raycaster.setFromCamera(this._pointerNdc, this._camera);
+    const meshes = this._chunkManager.getPickableMeshes();
+    if (meshes.length === 0) return undefined;
+    const hits = this._raycaster.intersectObjects(meshes, false);
+    if (hits.length === 0) return undefined;
+    const nodeId = hits[0].object.userData.nodeId;
+    return typeof nodeId === 'string' ? nodeId : undefined;
+  }
 
   private onContextLoss = (): void => {
     console.warn('[SceneManager] WebGL context lost — stopping RAF loop.');

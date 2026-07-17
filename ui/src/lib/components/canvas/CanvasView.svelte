@@ -5,6 +5,8 @@
   import { LightragClient } from '$lib/services/lightrag-client';
   import { SceneManager } from './renderer/SceneManager';
   import { buildCanvasLayout } from './Layout';
+  import NodeOverlay from './NodeOverlay.svelte';
+  import type { CanvasNode } from './renderer/types';
 
   const client = new LightragClient();
   let loadError = $state<string | null>(null);
@@ -22,7 +24,30 @@
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let lastAppliedAt = 0;
 
+  let selectedNodeId = $state<string | null>(null);
+  let selectedCanvasNode = $state<CanvasNode | null>(null);
+  let selectedKgNode = $derived<KGNode | null>(
+    selectedNodeId ? graphStore.nodes.find((n) => n.id === selectedNodeId) ?? null : null,
+  );
+
+  function clearSelection(): void {
+    selectedNodeId = null;
+    selectedCanvasNode = null;
+  }
+
   const THROTTLE_MS = 200;
+
+  function wireSceneManager(sm: SceneManager): void {
+    sm.onSelectNode = (nodeId) => {
+      if (nodeId) {
+        const cn = sm.getCanvasNode(nodeId);
+        selectedNodeId = nodeId;
+        selectedCanvasNode = cn ?? null;
+      } else {
+        clearSelection();
+      }
+    };
+  }
 
   function rebuildLayout(): void {
     if (!sceneManager) return;
@@ -68,13 +93,14 @@
   onMount(() => {
     mounted = true;
     if (containerEl && graphStore.nodes.length > 0) {
-      sceneManager = new SceneManager(containerEl);
-      sceneManager.onChunkChange = (cx, cy, cz) => {
-        console.debug('[CanvasView] chunk change', { cx, cy, cz });
-      };
-      rebuildLayout();
-      sceneManager.start();
-      firstLayoutApplied = true;
+        sceneManager = new SceneManager(containerEl);
+        wireSceneManager(sceneManager);
+        sceneManager.onChunkChange = (cx, cy, cz) => {
+          console.debug('[CanvasView] chunk change', { cx, cy, cz });
+        };
+        rebuildLayout();
+        sceneManager.start();
+        firstLayoutApplied = true;
     } else {
       // No data yet — kick off the initial load. The $effect below will mount
       // the renderer once graphStore.nodes populates.
@@ -105,9 +131,7 @@
     if (!firstLayoutApplied) {
       if (containerEl && !sceneManager && graphStore.nodes.length > 0) {
         sceneManager = new SceneManager(containerEl);
-        sceneManager.onChunkChange = (cx, cy, cz) => {
-          console.debug('[CanvasView] chunk change', { cx, cy, cz });
-        };
+        wireSceneManager(sceneManager);
         rebuildLayout();
         sceneManager.start();
         firstLayoutApplied = true;
@@ -136,9 +160,11 @@
 {/if}
 
 <div class="phase-badge">
-  <span class="badge-label">Canvas view (Phase 1)</span>
+  <span class="badge-label">Canvas view (Phase 2)</span>
   <a class="badge-link" href="?view=graph">← back to force graph</a>
 </div>
+
+<NodeOverlay node={selectedCanvasNode} kgNode={selectedKgNode} onClose={clearSelection} />
 
 <style>
   .canvas-container {

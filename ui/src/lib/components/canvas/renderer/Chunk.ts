@@ -79,6 +79,11 @@ export class Chunk {
     return this._chunkOrigin;
   }
 
+  /** The `NodePlane`s owned by this chunk (read-only view). */
+  get planes(): readonly NodePlane[] {
+    return this._planes;
+  }
+
   /**
    * (Re)builds the `NodePlane`s for this chunk from a node list. Disposes any
    * previously built planes first.

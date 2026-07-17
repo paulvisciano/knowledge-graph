@@ -59,6 +59,7 @@ export class NodePlane {
     this._mesh = new THREE.Mesh(sharedGeometry, this._material);
     this._mesh.scale.set(node.width, node.height, 1);
     this._mesh.position.set(node.localX, node.localY, node.localZ);
+    this._mesh.userData.nodeId = node.id;
 
     if (node.kind === 'photo' && node.imageUrl) {
       const cached = textureCache.load(node.imageUrl, (t) => this.applyTexture(t));

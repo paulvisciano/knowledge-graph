@@ -16,6 +16,7 @@ import {
   getChunkUpdateThrottleMs,
 } from './constants';
 import { Chunk } from './Chunk';
+import type { NodePlane } from './NodePlane';
 import { chunkKey, type CanvasNode, type ChunkKey } from './types';
 
 /**
@@ -116,6 +117,33 @@ export class ChunkManager {
   /** Number of chunks currently mounted in the scene. */
   get mountedChunkCount(): number {
     return this._mounted.size;
+  }
+
+  /**
+   * Returns the meshes of all currently mounted chunk planes for raycasting.
+   * Fresh array each call — the mounted set changes as the camera moves.
+   */
+  getPickableMeshes(): THREE.Mesh[] {
+    const meshes: THREE.Mesh[] = [];
+    for (const chunk of this._mounted.values()) {
+      for (const plane of chunk.planes) {
+        meshes.push(plane.mesh);
+      }
+    }
+    return meshes;
+  }
+
+  /**
+   * Finds the `NodePlane` for `nodeId` among the mounted chunks, or
+   * `undefined` if the node's chunk is not currently mounted.
+   */
+  findPlaneByNodeId(nodeId: string): NodePlane | undefined {
+    for (const chunk of this._mounted.values()) {
+      for (const plane of chunk.planes) {
+        if (plane.node.id === nodeId) return plane;
+      }
+    }
+    return undefined;
   }
 
   /**
