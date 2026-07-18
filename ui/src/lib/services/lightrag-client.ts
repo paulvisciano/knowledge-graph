@@ -2,6 +2,7 @@ import {
   LIGHTRAG_API,
   API,
   type QueryRequest,
+  type QueryMode,
   type LightragStatus,
   type KGGraph,
   type DocStatus,
@@ -60,6 +61,31 @@ export class LightragClient {
       method: 'POST',
       body: JSON.stringify({ ...params, stream: false }),
     });
+  }
+
+  /**
+   * Fetch the fully-assembled prompt LightRAG would send to the LLM for a given
+   * query, using the only_need_prompt=true query param. Returns the rag_response
+   * system prompt (with retrieved KG context) joined with the user query.
+   *
+   * Mirrors the retrieval that /chat performs for the same query + mode, so the
+   * returned string is exactly what the LLM receives as its system+user message
+   * (conversation history is passed separately by the /chat caller as Ollama
+   * history_messages, not embedded in this prompt string).
+   */
+  async fetchKgPrompt(
+    query: string,
+    history: { role: 'user' | 'assistant' | 'system'; content: string }[] = [],
+    mode: QueryMode = 'mix',
+  ): Promise<string> {
+    const { response } = await this.query({
+      query,
+      mode,
+      only_need_prompt: true,
+      stream: false,
+      conversation_history: history,
+    });
+    return response;
   }
 
   async *queryStream(params: QueryRequest): AsyncGenerator<string> {

@@ -165,6 +165,14 @@ export interface ChatMessage {
   audioData?: string;
   audioFormat?: 'wav' | 'mp3';
   imageUrls?: string[];
+  /** For kg-direct mode: the fully-assembled prompt sent to the LLM
+   *  (rag_response system prompt with retrieved KG context + user query),
+   *  captured via LightRAG's only_need_prompt query param. Shown in the UI
+   *  as a collapsible "Prompt sent to LLM" section under the assistant reply. */
+  kgPrompt?: string;
+  /** Conversation history forwarded to the LLM alongside kgPrompt
+   *  (prior user/assistant turns from the same conversation). */
+  kgPromptHistory?: { role: 'user' | 'assistant' | 'system'; content: string }[];
 }
 
 export interface MessageTimings {

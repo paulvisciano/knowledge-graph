@@ -17,7 +17,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
+  import { AudioRecorder, blobToBase64, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
   import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
   import { extractReferenceImages } from '$lib/utils/extract-reference-images';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
@@ -183,11 +183,29 @@
         const wavBlob = await audioRecorder.stopRecording();
         console.log('[audio] WAV blob size:', wavBlob.size, 'type:', wavBlob.type);
         const audioUrl = URL.createObjectURL(wavBlob);
-        isTranscribing = true;
-        processingLabel = 'Processing audio...';
         const audioData = await blobToBase64(wavBlob);
         console.log('[audio] base64 length:', audioData.length, 'format: wav');
-        await handleSend(audioUrl, audioData, 'wav', false);
+
+        // In kg-direct mode the knowledge graph path only understands text,
+        // so transcribe the recording with Whisper and pass the transcript to
+        // handleSend. The KG then retrieves context and Gemma generates the
+        // answer using both the transcript and the retrieved context. In
+        // llm-mcp mode, skip transcription and send the raw audio to the LLM
+        // (multimodal content parts).
+        if ($chatMode === 'kg-direct') {
+          isTranscribing = true;
+          processingLabel = 'Transcribing audio...';
+          try {
+            const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+            console.log('[audio] transcript length:', transcript.length);
+            await handleSend(audioUrl, audioData, 'wav', false, transcript || undefined);
+          } finally {
+            isTranscribing = false;
+            processingLabel = '';
+          }
+        } else {
+          await handleSend(audioUrl, audioData, 'wav', false);
+        }
       } catch (e) {
         console.error('Audio processing failed:', e);
       } finally {
@@ -445,6 +463,30 @@
           role: m.role as 'user' | 'assistant' | 'system',
           content: m.content,
         }));
+
+      // Fetch the fully-assembled prompt (rag_response system prompt with
+      // retrieved KG context + user query) in parallel with the /chat stream.
+      // The last user message is the query; everything before it is history.
+      // The preview mirrors the /chat retrieval for the same query, so what
+      // the UI shows is exactly what the LLM receives. Non-blocking: if it
+      // fails, the chat still streams normally, just without the preview.
+      const lastUserMsg = ollamaMessages[ollamaMessages.length - 1];
+      const historyForPreview = ollamaMessages.slice(0, -1).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      if (lastUserMsg && lastUserMsg.role === 'user') {
+        lightragClient
+          .fetchKgPrompt(lastUserMsg.content, historyForPreview)
+          .then((prompt) => {
+            updateStreamMessage(assistantId, (m) => ({
+              ...m,
+              kgPrompt: prompt,
+              kgPromptHistory: historyForPreview,
+            }));
+          })
+          .catch((e) => console.error('[kg-direct] prompt preview fetch failed:', e));
+      }
 
       let accumulatedContent = '';
       let gotFirstToken = false;
@@ -1003,8 +1045,11 @@
     }
   }
 
-  async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false) {
-    const trimmed = chatInput.trim();
+  async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false, transcript?: string) {
+    // When audio is transcribed, the transcript becomes the message content so
+    // the KG path has text to query on. Text input keeps using chatInput.
+    const messageText = transcript ?? chatInput.trim();
+    const trimmed = messageText.trim();
     if ((!trimmed && attachments.length === 0) && !audioData) return;
     if (isActiveConversationStreaming) return;
 
@@ -1052,9 +1097,13 @@
       scrollToBottom();
     });
 
-    // Images are now processed immediately on attach via processSingleImage
-    // Audio requires multimodal content parts, so always route through LLM path
-    if ($chatMode === 'kg-direct' && !audioData) {
+    // kg-direct mode: route through the knowledge graph (LightRAG retrieval +
+    // Gemma generation). Audio must be transcribed upstream (see handleMicClick)
+    // so the transcript is available as message content; without a transcript
+    // we fall back to the multimodal LLM path to avoid sending an empty query.
+    // llm-mcp mode: always use the multimodal LLM path so audio/images go
+    // directly to the model as content parts.
+    if ($chatMode === 'kg-direct' && (!audioData || transcript)) {
       await streamKGChatResponse();
     } else {
       await streamAssistantResponse(sentAttachments);

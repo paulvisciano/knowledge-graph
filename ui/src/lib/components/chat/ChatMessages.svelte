@@ -9,6 +9,40 @@
 
   let containerEl: HTMLDivElement | undefined = $state();
   let shouldAutoScroll = $state(true);
+  let expandedPromptIds = $state<Set<string>>(new Set());
+
+  function togglePrompt(id: string) {
+    expandedPromptIds = new Set(
+      expandedPromptIds.has(id)
+        ? [...expandedPromptIds].filter((x) => x !== id)
+        : [...expandedPromptIds, id]
+    );
+  }
+
+  /** Split the assembled LightRAG prompt into its structural sections
+   *  (---Role---, ---Goal---, ---Instructions---, Context, ---User Query---)
+   *  so the UI can render each block separately and the user can see exactly
+   *  what was sent to the LLM. Returns sections in the order they appear. */
+  function parsePromptSections(prompt: string): { title: string; body: string }[] {
+    const sections: { title: string; body: string }[] = [];
+    const markerRegex = /^---(.+?)---\s*$/gm;
+    const marks: { name: string; start: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = markerRegex.exec(prompt)) !== null) {
+      marks.push({ name: m[1], start: m.index });
+    }
+    for (let i = 0; i < marks.length; i++) {
+      const headerEnd = marks[i].start + `---${marks[i].name}---`.length;
+      const bodyStart = headerEnd + 1;
+      const bodyEnd = i + 1 < marks.length ? marks[i + 1].start : prompt.length;
+      sections.push({
+        title: marks[i].name,
+        body: prompt.slice(bodyStart, bodyEnd).trim(),
+      });
+    }
+    if (sections.length === 0) sections.push({ title: 'Prompt', body: prompt.trim() });
+    return sections;
+  }
 
   marked.use({
     renderer: {
@@ -79,6 +113,49 @@
                 <span class="ml-0.5 inline-block h-4 w-1.5 animate-pulse-glow bg-cyber-cyan align-text-bottom"></span>
               {/if}
             </div>
+
+            {#if msg.kgPrompt}
+              <div class="mt-3 border-t border-cyber-border pt-2">
+                <button
+                  type="button"
+                  onclick={() => togglePrompt(msg.id)}
+                  class="flex w-full items-center gap-1.5 text-xs font-medium text-cyber-text-dim transition-colors hover:text-cyber-cyan"
+                >
+                  <svg
+                    class="h-3 w-3 shrink-0 transition-transform duration-200 {expandedPromptIds.has(msg.id) ? 'rotate-90' : ''}"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span>Prompt sent to LLM</span>
+                </button>
+                {#if expandedPromptIds.has(msg.id)}
+                  <div class="mt-2 space-y-3">
+                    {#each parsePromptSections(msg.kgPrompt) as section}
+                      <div class="rounded-md border border-cyber-border/60 bg-cyber-bg/60 px-3 py-2">
+                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">{section.title}</div>
+                        <pre class="max-h-80 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-cyber-text-dim">{section.body}</pre>
+                      </div>
+                    {/each}
+                    {#if msg.kgPromptHistory && msg.kgPromptHistory.length > 0}
+                      <div class="rounded-md border border-cyber-border/60 bg-cyber-bg/60 px-3 py-2">
+                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">Conversation history ({msg.kgPromptHistory.length})</div>
+                        <div class="space-y-1.5">
+                          {#each msg.kgPromptHistory as hm, idx}
+                            <div class="text-[11px] leading-relaxed">
+                              <span class="font-mono uppercase text-cyber-text-dim/70">{hm.role}:</span>
+                              <span class="text-cyber-text-dim">{hm.content.slice(0, 200)}{hm.content.length > 200 ? '…' : ''}</span>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
 
             {#if msg.mcpToolCalls && msg.mcpToolCalls.length > 0}
               <div class="mt-3 border-t border-cyber-border pt-2">
