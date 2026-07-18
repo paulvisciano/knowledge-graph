@@ -730,9 +730,7 @@
           const toolLabels: Record<string, string> = {
             query_knowledge_graph: 'Searching knowledge graph...',
             query_knowledge_graph_stream: 'Searching knowledge graph...',
-            search_entities: 'Searching entities...',
             insert_text: 'Inserting text...',
-            edit_entity: 'Editing entity...',
             list_documents: 'Listing documents...',
           };
           if (streamingConversationId === activeConversationId) {

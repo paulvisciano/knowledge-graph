@@ -1,13 +1,10 @@
-"""Knowledge Graph MCP facade — 4 curated KG tools calling LightRAG REST directly."""
+"""Knowledge Graph MCP facade — 2 curated KG tools calling LightRAG REST directly."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import re
-from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -60,9 +57,8 @@ mcp = FastMCP(
         "\n"
         "### Correcting information\n"
         "When the user corrects something in the knowledge graph ('that's wrong', 'actually, X is Y'), "
-        "use edit_entity. IMPORTANT: entity_name must be the EXACT name in the knowledge graph. "
-        "If unsure of the exact name, first call search_entities to find it, then call edit_entity "
-        "with the exact match.\n"
+        "use insert_text with file_source='correction' to add the corrected information. The new text "
+        "will be indexed and update the graph accordingly.\n"
         "\n"
         "### No results\n"
         "If query_knowledge_graph returns 'No results found', say so for the KG data only. "
@@ -162,60 +158,6 @@ async def insert_text(text: str, file_source: str = "") -> str:
         return json.dumps(result, indent=2, default=str)
     except Exception as e:
         return f"Error inserting text: {e}"
-
-
-@mcp.tool()
-async def search_entities(label: str) -> str:
-    """Search for entities in the knowledge graph by name. Use this to find the exact entity name before calling edit_entity, since edit_entity requires an exact name match. Returns matching entities with their types and descriptions."""
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.get(
-                f"{_LIGHTRAG_API_URL}/graph/label/search",
-                headers=_headers(),
-                params={"q": label},
-            )
-            r.raise_for_status()
-            result = r.json()
-        return json.dumps(result, indent=2, default=str)
-    except Exception as e:
-        return f"Error searching entities: {e}"
-
-
-@mcp.tool()
-async def edit_entity(
-    entity_name: str,
-    description: str | None = None,
-    entity_type: str | None = None,
-) -> str:
-    """Edit an existing entity in the knowledge graph to correct or update its description or type. Only the fields you provide will be updated; other fields remain unchanged.
-
-IMPORTANT: entity_name must be the EXACT name in the knowledge graph. If unsure, call search_entities first to find the exact name, then pass it here.
-
-Args:
-    entity_name: The exact name of the entity to edit (e.g. "Paul", "Colors Vibes Expansion").
-    description: The new description for the entity. Replaces the existing description.
-    entity_type: The new type for the entity (e.g. "person", "playlist", "location")."""
-    updated_data: dict[str, Any] = {}
-    if description is not None:
-        updated_data["description"] = description
-    if entity_type is not None:
-        updated_data["entity_type"] = entity_type
-    if not updated_data:
-        return "Error: provide at least one field to update (description or entity_type)"
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                f"{_LIGHTRAG_API_URL}/graph/entity/edit",
-                headers=_headers(),
-                json={"entity_name": entity_name, "updated_data": updated_data},
-            )
-            r.raise_for_status()
-            result = r.json()
-        return json.dumps(result, indent=2, default=str)
-    except httpx.HTTPStatusError as e:
-        return f"Error editing entity: {e.response.status_code} — {e.response.text}"
-    except Exception as e:
-        return f"Error editing entity: {e}"
 
 
 def main() -> None:
