@@ -142,7 +142,7 @@ class ImageProcessingStore {
     if (eventName === 'injecting_exif_relations' || eventName === 'creating_exif_entities' || eventName === 'photo_node_created' || eventName === 'exif_node_created' || eventName === 'exif_relation_created' || eventName === 'exif_cross_relation_created' || eventName === 'exif_entities_complete') return 'creating_entities';
     if (eventName === 'describing_image') return 'describing_image';
     if (eventName === 'upload_complete' || eventName === 'lightrag_upload_complete') return 'uploading_to_graph';
-    if (eventName === 'lightrag_processing_waiting') return 'graph_processing';
+    if (eventName === 'lightrag_processing_waiting' || eventName === 'lightrag_processing_timeout') return 'graph_processing';
     if (eventName === 'lightrag_processing_complete' || eventName.startsWith('visual_')) return 'linking_visual_entities';
     if (eventName === 'pipeline_complete') return 'complete';
     if (eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')) return 'error';

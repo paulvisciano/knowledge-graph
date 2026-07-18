@@ -225,7 +225,7 @@ def _map_event_to_stage(event_name: str) -> str:
         return "extracting_metadata"
     if event_name in ("injecting_exif_relations", "creating_exif_entities", "photo_node_created", "exif_node_created", "exif_relation_created", "exif_entities_complete"):
         return "creating_entities"
-    if event_name in ("describing_image", "upload_complete", "lightrag_upload_complete", "lightrag_processing_waiting"):
+    if event_name in ("describing_image", "upload_complete", "lightrag_upload_complete", "lightrag_processing_waiting", "lightrag_processing_timeout"):
         return "processing_ai"
     if event_name in ("lightrag_processing_complete",) or event_name.startswith("visual_"):
         return "linking_entities"
@@ -271,6 +271,10 @@ async def resume_pending_jobs() -> list[str]:
                         "Job %s was interrupted during face detection — skipping faces on resume",
                         job.id,
                     )
+                # Emit a closing faces_complete so consumers (UI stepper, status
+                # mapping) reconcile the dangling detecting_faces event instead of
+                # hanging on "Running facial recognition..." forever.
+                await store_event(job.id, "faces_complete", {"faces": {}, "resumed": True})
             logger.info("Re-running interrupted job %s for %s", job.id, job.file_source)
             await start_processing(job)
             resumed.append(job.id)
