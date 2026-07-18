@@ -86,12 +86,46 @@ services:
       CHUNK_SIZE: "${CHUNK_SIZE:-1500}"
       CHUNK_OVERLAP_SIZE: "${CHUNK_OVERLAP_SIZE:-150}"
       LLM_TIMEOUT: "${LLM_TIMEOUT:-900}"
+      # Override LightRAG defaults (TOP_K=40, CHUNK_TOP_K=20, MAX_TOTAL_TOKENS=30000)
+      # to keep retrieved context ~4k tokens instead of 17k+ for faster chat turns.
+      TOP_K: "${TOP_K:-5}"
+      CHUNK_TOP_K: "${CHUNK_TOP_K:-5}"
+      MAX_ENTITY_TOKENS: "${MAX_ENTITY_TOKENS:-1500}"
+      MAX_RELATION_TOKENS: "${MAX_RELATION_TOKENS:-1500}"
+      MAX_TOTAL_TOKENS: "${MAX_TOTAL_TOKENS:-4000}"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9621/health')\" || exit 1"]
       interval: 15s
       timeout: 10s
       start_period: 30s
       retries: 5
+    networks:
+      - internal
+
+  knowledge-graph-mcp:
+    build:
+      context: .
+      dockerfile: docker/knowledge-graph-mcp/Dockerfile
+    image: knowledge-graph-mcp:latest
+    container_name: knowledge-graph-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEMORY_SEARCH_MCP_PORT: "${MEMORY_SEARCH_MCP_PORT:-9653}"
+      LIGHTRAG_API_URL: "http://lightrag:${LIGHTRAG_PORT:-9621}"
+      LIGHTRAG_API_KEY: "${LIGHTRAG_BINDING_API_KEY:-}"
+    ports:
+      - "${MEMORY_SEARCH_MCP_PORT:-9653}:${MEMORY_SEARCH_MCP_PORT:-9653}"
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('localhost',9653)); s.close()\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     networks:
       - internal
 

@@ -66,7 +66,7 @@ echo "Starting LLM on port ${LLM_PORT}..."
     --image-max-tokens 280 --image-min-tokens 40 \
     -c 32768 -b 2048 -ub 2048 \
     -ctk q4_0 -ctv q4_0 \
-    -np 1 -fa on -cram 0 -ngl 99 \
+    -np 4 -fa on -cram 0 -ngl 99 \
     --reasoning off --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &
