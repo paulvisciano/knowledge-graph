@@ -1950,7 +1950,7 @@
     {/if}
 
   {:else if $activeTab === 'ingestion'}
-    <div class="h-full w-full overflow-hidden p-2 md:p-0">
+    <div class="h-full w-full overflow-hidden p-2 md:pt-14 md:pl-14 md:pr-4 md:pb-4">
       <IngestionPanel />
     </div>
   {:else if $activeTab === 'activity'}

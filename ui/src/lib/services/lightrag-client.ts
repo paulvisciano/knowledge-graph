@@ -301,6 +301,51 @@ export class LightragClient {
     };
   }
 
+  async getDocumentsPaginated(
+    page = 1,
+    pageSize = 20,
+  ): Promise<{
+    documents: DocStatus[];
+    total: number;
+    page: number;
+    page_size: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  }> {
+    const body: Record<string, unknown> = {
+      page,
+      page_size: Math.min(200, Math.max(10, pageSize)),
+      sort_field: 'updated_at',
+      sort_direction: 'desc',
+    };
+    const raw = await this.request<{
+      documents: DocStatus[];
+      pagination: {
+        page: number;
+        page_size: number;
+        total_count: number;
+        total_pages: number;
+        has_next: boolean;
+        has_prev: boolean;
+      };
+      status_counts: Record<string, number>;
+    }>(API.lightrag.documents.paginated, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const p = raw.pagination;
+    return {
+      documents: raw.documents ?? [],
+      total: p.total_count,
+      page: p.page,
+      page_size: p.page_size,
+      total_pages: p.total_pages,
+      has_next: p.has_next,
+      has_prev: p.has_prev,
+    };
+  }
+
   async getDocumentStatus(): Promise<DocStatus[]> {
     return this.request<DocStatus[]>(API.lightrag.documents.status);
   }
@@ -343,7 +388,7 @@ export class LightragClient {
   }
 
   async cancelPipeline(): Promise<unknown> {
-    return this.request<unknown>('/pipeline/cancel', {
+    return this.request<unknown>('/documents/cancel_pipeline', {
       method: 'POST',
     });
   }
