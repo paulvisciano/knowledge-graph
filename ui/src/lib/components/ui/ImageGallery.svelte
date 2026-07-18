@@ -71,23 +71,23 @@
 </script>
 
 {#if images.length > 0}
-  <div class="mt-2 grid {images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'} gap-2">
+  <div class="mt-2 flex gap-1.5 overflow-x-auto pb-1" style="scrollbar-width: thin;">
     {#each images as imgUrl, i}
       <button
         type="button"
         onclick={() => openLightbox(i)}
-        class="group/img relative overflow-hidden rounded-lg border border-cyber-border/30 transition-all duration-200 hover:border-cyber-cyan/40 hover:shadow-[0_0_12px_rgba(0,212,255,0.1)] focus:outline-none focus:ring-2 focus:ring-cyber-cyan/50"
+        class="group/img relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-cyber-border/30 transition-all duration-200 hover:border-cyber-cyan/40 hover:shadow-[0_0_8px_rgba(0,212,255,0.15)] focus:outline-none focus:ring-2 focus:ring-cyber-cyan/50"
         aria-label="Expand image {i + 1} of {images.length}"
       >
         <img
           src={imgUrl}
           {alt}
-          class="max-h-64 w-full object-cover transition-transform duration-200 group-hover/img:scale-[1.02]"
+          class="h-full w-full object-cover transition-transform duration-200 group-hover/img:scale-110"
           loading="lazy"
           onerror={(e) => { (e.target as HTMLElement).closest('button')?.remove(); }}
         />
-        <div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 transition-all duration-200 group-hover/img:bg-black/20">
-          <svg class="h-8 w-8 opacity-0 transition-opacity duration-200 group-hover/img:opacity-80" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 transition-all duration-200 group-hover/img:bg-black/30">
+          <svg class="h-4 w-4 opacity-0 transition-opacity duration-200 group-hover/img:opacity-90" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M15 3h6v6M14 10l6.1-6.1M9 21H3v-6M10 14l-6.1 6.1" />
           </svg>
         </div>
