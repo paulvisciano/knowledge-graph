@@ -4,8 +4,6 @@ export const KG_API = '';
 export const MCP_API = '';
 export const SYNC_URL = '';
 
-export type ChatMode = 'llm-mcp' | 'kg-direct';
-
 export const API = {
   kg: {
     health: '/health',
