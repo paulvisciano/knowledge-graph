@@ -387,6 +387,12 @@ export class LightragClient {
     });
   }
 
+  async getDocumentFullContent(id: string): Promise<{ id: string; content: string; content_length: number }> {
+    return this.request<{ id: string; content: string; content_length: number }>(
+      API.lightrag.documents.fullContent(id)
+    );
+  }
+
   async cancelPipeline(): Promise<unknown> {
     return this.request<unknown>('/documents/cancel_pipeline', {
       method: 'POST',

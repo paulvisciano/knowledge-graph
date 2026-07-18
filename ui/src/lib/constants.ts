@@ -56,6 +56,7 @@ export const API = {
       delete: (id: string) => `/documents/${id}`,
       reprocess: (id: string) => `/documents/${id}/reprocess`,
       content: (id: string) => `/documents/${id}/content`,
+      fullContent: (id: string) => `/documents/${id}/full_content`,
       pipelineStatus: '/documents/pipeline_status',
     },
   },
