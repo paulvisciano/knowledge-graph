@@ -1008,11 +1008,15 @@
     if ((!trimmed && attachments.length === 0) && !audioData) return;
     if (isActiveConversationStreaming) return;
 
+    // Capture whether the chat was already open before this send: a send from
+    // the main page (collapsed chat) should start a new conversation, while a
+    // send from inside an open conversation should append to it.
+    const wasChatExpanded = chatExpanded;
     chatExpanded = true;
     isProcessing = true;
     processingLabel = 'Sending...';
 
-    if (startNew || !activeConversationId) {
+    if (startNew || !wasChatExpanded || !activeConversationId) {
       startNewConversation();
     }
 
