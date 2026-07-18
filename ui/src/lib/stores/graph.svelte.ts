@@ -40,7 +40,21 @@ class GraphStore {
       const graph = await lightragClient.getGraph(label ?? 'default', nodeId, depth);
       const lightragNodeIds = new Set(graph.nodes.map((n: KGNode) => n.id));
       const lightragEdgeIds = new Set(graph.edges.map((e: KGEdge) => e.id));
-      const preservedNodes = this.nodes.filter((n) => !lightragNodeIds.has(n.id));
+      // Preserve locally-added nodes that aren't in the backend response yet
+      // (e.g. user-created entities not yet synced), but drop stale optimistic
+      // Photo nodes whose source_id is "manual_creation" — those were added
+      // during image processing that never completed/persisted, so keeping
+      // them would show images with no backing processed document. This
+      // mirrors the existing manual_creation filters in fetchPhotoImages
+      // (line 87) and GraphView.svelte.
+      const isStalePhotoNode = (n: KGNode): boolean => {
+        if (!n.labels?.some((l) => /^(Photo|Image)$/i.test(l)) && n.properties?.entity_type !== 'Photo' && n.properties?.entity_type !== 'Image') return false;
+        const sourceId = n.properties?.source_id ?? n.properties?.file_path;
+        return !sourceId || sourceId === 'manual_creation';
+      };
+      const preservedNodes = this.nodes.filter(
+        (n) => !lightragNodeIds.has(n.id) && !isStalePhotoNode(n),
+      );
       const preservedEdges = this.edges.filter((e) => !lightragEdgeIds.has(e.id));
       this.nodes = [...graph.nodes, ...preservedNodes];
       this.edges = [...graph.edges, ...preservedEdges];
