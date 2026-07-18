@@ -17,7 +17,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
+  import { AudioRecorder, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
   import { parseKGResult } from '$lib/utils/parse-kg-result';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
@@ -178,15 +178,21 @@
 
     if (isRecording) {
       isRecording = false;
+      isTranscribing = true;
       try {
         const wavBlob = await audioRecorder.stopRecording();
         console.log('[audio] WAV blob size:', wavBlob.size, 'type:', wavBlob.type);
         const audioUrl = URL.createObjectURL(wavBlob);
-        const audioData = await blobToBase64(wavBlob);
-        console.log('[audio] base64 length:', audioData.length, 'format: wav');
 
-        // Audio is multimodal: send the raw audio to the LLM as content parts.
-        await handleSend(audioUrl, audioData, 'wav', false);
+        const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+        console.log('[audio] transcript:', transcript);
+        const text = transcript.trim();
+        if (!text) {
+          console.warn('[audio] empty transcript, ignoring');
+          return;
+        }
+
+        await handleSend(audioUrl, undefined, undefined, false, text);
       } catch (e) {
         console.error('Audio processing failed:', e);
       } finally {
@@ -865,8 +871,6 @@
   }
 
   async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false, transcript?: string) {
-    // When audio is transcribed, the transcript becomes the message content so
-    // the KG path has text to query on. Text input keeps using chatInput.
     const messageText = transcript ?? chatInput.trim();
     const trimmed = messageText.trim();
     if ((!trimmed && attachments.length === 0) && !audioData) return;
