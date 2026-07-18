@@ -150,13 +150,14 @@ describe('buildCanvasLayout', () => {
     expect(node.imageUrl).toBe('https://cached/thumb.jpg');
   });
 
-  it('sizes photo planes from width/height properties, defaults to 140x105', () => {
+  it('sizes photo planes preserving aspect ratio with a random base', () => {
     const p = photo('p1', { width: 800, height: 600 });
     const out = buildCanvasLayout([p], [], {}, {});
     const pNode = out.find((n) => n.id === 'p1')!;
-    // 4:3 → max dim 140 → 140 x 105
-    expect(pNode.width).toBe(140);
-    expect(pNode.height).toBe(105);
+    // 4:3 aspect preserved; base height is random in [60, 120).
+    expect(pNode.height).toBeGreaterThanOrEqual(60);
+    expect(pNode.height).toBeLessThan(120);
+    expect(pNode.width).toBe(Math.round(pNode.height * (800 / 600)));
   });
 
   it('photo localZ is non-negative (no parallax-behind for photos)', () => {

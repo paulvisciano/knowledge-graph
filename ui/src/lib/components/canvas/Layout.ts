@@ -95,6 +95,12 @@ function hashStr(s: string): number {
   return Math.abs(h);
 }
 
+/** Deterministic [0, 1) PRNG from an integer seed (matches reference seededRandom). */
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed * 9999) * 10000;
+  return x - Math.floor(x);
+}
+
 /**
  * Parse a date from any of the known photo-timestamp properties.
  * Returns `null` when no usable timestamp is present.
@@ -459,7 +465,6 @@ export function buildCanvasLayout(
   // into a compact vertical stack. Each band occupies one chunk-Y row.
   const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
 
-  const cellCount = new Map<string, number>();
   const provisional: {
     node: KGNode;
     kind: NodeKind;
@@ -483,45 +488,42 @@ export function buildCanvasLayout(
     const cellZ = depth;
 
     const cellKey = `${cellX},${cellY},${cellZ}`;
-    cellCount.set(cellKey, (cellCount.get(cellKey) ?? 0) + 1);
     provisional.push({ node, kind, cellX, cellY, cellZ, cellKey });
   }
 
-  // Per-cell cursor so we can place nodes on a grid in deterministic order
-  // (iteration order of `provisional` = input node order, which is stable).
-  const cellCursor = new Map<string, number>();
   const out: CanvasNode[] = new Array(provisional.length);
 
   for (let i = 0; i < provisional.length; i++) {
     const p = provisional[i];
-    const { node, kind, cellX, cellY, cellZ, cellKey } = p;
+    const { node, kind, cellX, cellY, cellZ } = p;
 
-    const count = cellCount.get(cellKey) ?? 1;
-    const idx = cellCursor.get(cellKey) ?? 0;
-    cellCursor.set(cellKey, idx + 1);
-
-    const side = Math.max(1, Math.ceil(Math.sqrt(count)));
-    const slot = CHUNK_SIZE / side;
-    const col = idx % side;
-    const row = Math.floor(idx / side);
-    const localX = col * slot + slot / 2;
-    const localY = row * slot + slot / 2;
-
-    // Per-node Z jitter within a cell so overlapping photos don't z-fight.
-    const localZ = (idx % 3) * 10;
+    // Seeded random scatter within the chunk cube — mirrors the reference
+    // repo's generateChunkPlanes, where each plane's position is
+    // cellOrigin + seededRandom() * CHUNK_SIZE on each axis. The seed is
+    // derived from the node id so positions are stable across re-layouts.
+    const seed = hashStr(node.id);
+    const r0 = seededRandom(seed);
+    const r1 = seededRandom(seed + 1);
+    const r2 = seededRandom(seed + 2);
+    const localX = r0 * CHUNK_SIZE;
+    const localY = r1 * CHUNK_SIZE;
+    const localZ = r2 * CHUNK_SIZE;
 
     const pw = node.properties?.width;
     const ph = node.properties?.height;
+    // Random base size in [60, 120) world units, then preserve the native
+    // image aspect ratio (height = base, width = base * aspect) — same
+    // approach as the reference's displayScale.
+    const base = 60 + seededRandom(seed + 4) * 60;
     let width: number;
     let height: number;
     if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
-      const maxDim = 140;
-      const scale = maxDim / Math.max(pw, ph);
-      width = Math.round(pw * scale);
-      height = Math.round(ph * scale);
+      const aspect = pw / ph;
+      height = base;
+      width = Math.round(base * aspect);
     } else {
-      width = 140;
-      height = 105;
+      width = base;
+      height = Math.round(base * 0.75);
     }
 
     let imageUrl: string | undefined;
