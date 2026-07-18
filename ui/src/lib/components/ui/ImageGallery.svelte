@@ -71,12 +71,12 @@
 </script>
 
 {#if images.length > 0}
-  <div class="mt-2 flex gap-1.5 overflow-x-auto pb-1" style="scrollbar-width: thin;">
+  <div class="mt-2 flex gap-2 overflow-x-auto pb-1" style="scrollbar-width: thin;">
     {#each images as imgUrl, i}
       <button
         type="button"
         onclick={() => openLightbox(i)}
-        class="group/img relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-cyber-border/30 transition-all duration-200 hover:border-cyber-cyan/40 hover:shadow-[0_0_8px_rgba(0,212,255,0.15)] focus:outline-none focus:ring-2 focus:ring-cyber-cyan/50"
+        class="group/img relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-cyber-border/30 transition-all duration-200 hover:border-cyber-cyan/40 hover:shadow-[0_0_8px_rgba(0,212,255,0.15)] focus:outline-none focus:ring-2 focus:ring-cyber-cyan/50"
         aria-label="Expand image {i + 1} of {images.length}"
       >
         <img
