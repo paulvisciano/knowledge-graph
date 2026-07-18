@@ -282,7 +282,8 @@ export async function transcribeAudio(
 
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('model', 'whisper');
+  formData.append('temperature', '0.0');
+  formData.append('response_format', 'json');
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -294,7 +295,7 @@ export async function transcribeAudio(
   }
 
   const result = await response.json();
-  return result.text ?? '';
+  return (result.text ?? '').trim();
 }
 
 export function isAudioRecordingSupported(): boolean {

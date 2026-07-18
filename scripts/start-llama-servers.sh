@@ -12,18 +12,23 @@ MODEL_DIR="${MODEL_DIR:-$PROJECT_DIR/models}"
 LLM_PORT="${LLM_PORT:-8080}"
 EMBED_PORT="${EMBED_MODEL_PORT:-8081}"
 RERANK_PORT="${RERANKER_PORT:-8082}"
+WHISPER_PORT="${WHISPER_PORT:-8090}"
 
 LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/gemma4-12b-obliterated/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf}"
 LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
 EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-obliterated/mmproj-BF16.gguf}"
+WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-base.en.bin}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"
         exit 1
     fi
 done
+if [[ ! -f "$WHISPER_MODEL_PATH" ]]; then
+    echo "WARNING: Whisper model not found: $WHISPER_MODEL_PATH (transcription will be unavailable)"
+fi
 
 LLAMA_SERVER="$(which llama-server 2>/dev/null || echo /opt/homebrew/bin/llama-server)"
 if [[ ! -x "$LLAMA_SERVER" ]]; then
@@ -92,15 +97,33 @@ echo "Starting reranker on port ${RERANK_PORT}..."
     &>/tmp/llama-server-reranker.log &
 PIDS+=($!)
 
+if [[ -f "$WHISPER_MODEL_PATH" ]]; then
+    WHISPER_SERVER="$(which whisper-server 2>/dev/null || echo /opt/homebrew/bin/whisper-server)"
+    if [[ -x "$WHISPER_SERVER" ]]; then
+        echo "Starting whisper transcription server on port ${WHISPER_PORT}..."
+        "$WHISPER_SERVER" \
+            -m "$WHISPER_MODEL_PATH" \
+            -l en --convert -t 4 \
+            --host 0.0.0.0 --port "$WHISPER_PORT" \
+            &>/tmp/whisper-server.log &
+        PIDS+=($!)
+    else
+        echo "WARNING: whisper-server not found, skipping transcription server"
+    fi
+fi
+
 echo ""
 echo "Waiting for all endpoints..."
 FAIL=0
 health_check "$LLM_PORT" 90 || FAIL=$((FAIL+1))
 health_check "$EMBED_PORT" 45 || FAIL=$((FAIL+1))
 health_check "$RERANK_PORT" 45 || FAIL=$((FAIL+1))
+if [[ -f "$WHISPER_MODEL_PATH" ]] && [[ -x "${WHISPER_SERVER:-/opt/homebrew/bin/whisper-server}" ]]; then
+    health_check "$WHISPER_PORT" 30 || FAIL=$((FAIL+1))
+fi
 
 if [[ $FAIL -gt 0 ]]; then
-    echo "WARNING: $FAIL endpoint(s) failed. Check /tmp/llama-server-*.log"
+    echo "WARNING: $FAIL endpoint(s) failed. Check /tmp/llama-server-*.log and /tmp/whisper-server.log"
 fi
 
 echo ""
@@ -108,6 +131,7 @@ echo "═══ llama-servers running (PIDs: ${PIDS[*]}) ═══"
 echo "LLM:        http://localhost:${LLM_PORT}"
 echo "Embeddings: http://localhost:${EMBED_PORT}"
 echo "Reranker:   http://localhost:${RERANK_PORT}"
+echo "Whisper:    http://localhost:${WHISPER_PORT}"
 echo ""
 echo "Press Ctrl+C to stop all servers."
 

@@ -6,6 +6,7 @@ const llamaHost = process.env.LLAMA_PROXY_HOST || 'http://localhost:8080';
 const lightragHost = process.env.LIGHTRAG_PROXY_HOST || 'http://localhost:9621';
 const kgApiHost = process.env.KG_API_PROXY_HOST || 'http://localhost:8000';
 const mcpHost = process.env.MCP_PROXY_HOST || 'http://localhost:9653';
+const whisperHost = process.env.WHISPER_PROXY_HOST || 'http://localhost:8090';
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
@@ -45,6 +46,10 @@ export default defineConfig({
       '/mcp': {
         target: mcpHost,
         rewrite: (path) => path.replace(/^\/mcp/, '/mcp')
+      },
+      '/whisper': {
+        target: whisperHost,
+        rewrite: (path) => path.replace(/^\/whisper/, '')
       }
     }
   }

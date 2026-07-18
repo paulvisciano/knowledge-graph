@@ -64,7 +64,7 @@ export const API = {
     models: '/v1/models',
     health: '/health',
     slots: '/slots',
-    transcriptions: '/v1/audio/transcriptions',
+    transcriptions: '/whisper/inference',
   },
   sync: {
     conversations: '/conversations',
