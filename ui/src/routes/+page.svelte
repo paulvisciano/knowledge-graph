@@ -187,7 +187,7 @@
         processingLabel = 'Processing audio...';
         const audioData = await blobToBase64(wavBlob);
         console.log('[audio] base64 length:', audioData.length, 'format: wav');
-        await handleSend(audioUrl, audioData, 'wav', true);
+        await handleSend(audioUrl, audioData, 'wav', false);
       } catch (e) {
         console.error('Audio processing failed:', e);
       } finally {
@@ -1564,7 +1564,7 @@
             bind:this={textareaEl}
             bind:value={chatInput}
             oninput={autoResize}
-            onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, true); } }}
+            onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, false); } }}
             placeholder={$chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
             rows="1"
             data-testid="chat-input"
@@ -1581,7 +1581,7 @@
             </button>
           {:else}
             <button
-              onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, undefined, undefined, true) : handleMicClick()}
+              onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, undefined, undefined, false) : handleMicClick()}
               disabled={isTranscribing || (!chatInput.trim() && attachments.length === 0 && !recordingSupported)}
               data-testid="send-button"
               class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (chatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 hover:glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/50 text-cyber-text-dim/30 rounded-lg'}"
