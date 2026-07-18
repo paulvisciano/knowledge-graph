@@ -37,6 +37,79 @@ _MAX_RELATION_ATTEMPTS = 5
 _VLM_MAX_RETRIES = 3
 _VLM_RETRY_BACKOFF_BASE = 5  # seconds
 
+# When LightRAG's pipeline is busy, /graph/{entity,relation}/create returns
+# HTTP 409 with this detail string.  That response is *transient* — the edge
+# or node was NOT created, the write was refused.  This is distinct from a
+# 400/409 "already exists" response, which is permanent (the object genuinely
+# exists and the verify-then-stop path applies).  Conflating the two is what
+# produced the orphan nodes: the linking step ran while ingestion was still
+# in progress, every /graph/relation/create came back 409 pipeline-busy, the
+# helper retried a handful of times, never waited long enough for the pipeline
+# to drain, and gave up — leaving the visual entity node with no appears_in
+# edge.  Detect the busy response explicitly and retry with enough patience
+# for the pipeline to finish.
+_PIPELINE_BUSY_MARKERS = (
+    "Pipeline is busy",
+    "pipeline is busy",
+    "Wait for the running job",
+)
+# Pipeline ingestion can run for many minutes per batch.  Retry on busy for
+# up to this many seconds before giving up, with exponential backoff capped
+# at 30s between attempts.
+_PIPELINE_BUSY_TOTAL_TIMEOUT = int(os.environ.get("PIPELINE_BUSY_TIMEOUT", "300"))
+_PIPELINE_BUSY_MAX_SLEEP = 30.0
+
+
+def _classify_create_error(exc: BaseException) -> str:
+    """Classify an error from /graph/{entity,relation}/create.
+
+    Returns one of:
+      - "busy":   HTTP 409 pipeline-busy (transient — retry with backoff)
+      - "exists": HTTP 400/409 "already exists" (permanent — verify & stop)
+      - "error":  anything else (give up)
+    """
+    # urllib raises HTTPError (a URLError subclass) carrying the status code;
+    # .code is the cleanest signal when available.
+    status = getattr(exc, "code", None)
+    msg = str(exc)
+    # HTTPError's str() is "HTTP Error 409: Conflict" — it does NOT include the
+    # response body where LightRAG writes "Pipeline is busy ...".  Read the
+    # body from the exception object (it's file-like) so the busy marker can
+    # be detected.  The body is the JSON {"detail": "..."} envelope.
+    body = ""
+    read = getattr(exc, "read", None)
+    if callable(read):
+        try:
+            body = read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+    combined = f"{msg} {body}"
+
+    if status == 409 or "409" in msg or "Conflict" in combined:
+        if any(marker in combined for marker in _PIPELINE_BUSY_MARKERS):
+            return "busy"
+        # 409 without the busy marker — treat as a genuine "already exists"
+        # conflict (the legacy stale-index case the helper was written for).
+        return "exists"
+    if status == 400 or "400" in msg or "already exists" in combined:
+        return "exists"
+    return "error"
+
+# The llama-server runs with -np 1 (single processing slot), so only one
+# vision-LLM request can be served at a time.  Without serialization, multiple
+# concurrent jobs (MAX_CONCURRENT_JOBS=3) plus face-crop descriptions all fire
+# VLM calls simultaneously — the overflowed requests queue behind the single
+# slot, blow past the httpx timeout, exhaust retries, and fall back to
+# EXIF-only content.  This semaphore guarantees at most one in-flight VLM call,
+# matching the server's capacity.
+_VLM_CONCURRENCY = int(os.environ.get("VLM_MAX_CONCURRENT", "1"))
+_vlm_semaphore = asyncio.Semaphore(_VLM_CONCURRENCY)
+
+# A single VLM call takes ~88s on this hardware.  The timeout must be long
+# enough to survive queue-wait time behind any preceding call (up to one full
+# generation) plus the generation itself.
+_VLM_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", "300"))
+
 
 async def _create_entity_verified(
     base_url: str,
@@ -47,13 +120,18 @@ async def _create_entity_verified(
 ) -> dict[str, Any]:
     """Create a graph entity, verifying it actually exists after creation.
 
-    LightRAG's entity creation may return 409 (conflict) even when the entity
-    does not actually exist due to a stale index. This helper verifies after
-    a conflict response and retries if the entity is missing.
+    Mirrors _create_relation_verified: a 409 "Pipeline is busy" is transient
+    (the write was refused) and must be retried with backoff until the pipeline
+    drains; a 400/409 "already exists" is permanent and is verified before
+    stopping.  See _classify_create_error for the rationale.
     """
     payload = json.dumps({"entity_name": entity_name, "entity_data": entity_data}).encode("utf-8")
 
-    for attempt in range(1, max_attempts + 1):
+    exists_retries_left = max_attempts
+    busy_deadline = time.monotonic() + _PIPELINE_BUSY_TOTAL_TIMEOUT
+    busy_sleep = 2.0
+
+    while True:
         try:
             def _post(payload: bytes = payload) -> dict[str, Any]:
                 req = Request(
@@ -66,20 +144,34 @@ async def _create_entity_verified(
                     return json.loads(resp.read().decode("utf-8"))
 
             result = await asyncio.to_thread(_post)
-            logger.info("[Entity] Created '%s' (attempt %d)", entity_name, attempt)
+            logger.info("[Entity] Created '%s'", entity_name)
             return {**result, "status": result.get("status", "success")}
 
         except URLError as exc:
-            is_conflict = (
-                "409" in str(exc) or "Conflict" in str(exc)
-                or "400" in str(exc) or "already exists" in str(exc)
-            )
-            if not is_conflict:
+            kind = _classify_create_error(exc)
+
+            if kind == "error":
                 logger.warning("[Entity] Failed '%s': %s", entity_name, exc)
                 return {"status": "error", "entity_name": entity_name, "error": str(exc)}
 
-            await asyncio.sleep(3.0 * attempt)
+            if kind == "busy":
+                if time.monotonic() >= busy_deadline:
+                    logger.error(
+                        "[Entity] '%s' pipeline stayed busy for %ds, giving up",
+                        entity_name, _PIPELINE_BUSY_TOTAL_TIMEOUT,
+                    )
+                    return {"status": "error", "entity_name": entity_name,
+                            "error": f"Pipeline busy after {_PIPELINE_BUSY_TOTAL_TIMEOUT}s"}
+                logger.info(
+                    "[Entity] '%s' pipeline busy, retrying in %.1fs",
+                    entity_name, busy_sleep,
+                )
+                await asyncio.sleep(busy_sleep)
+                busy_sleep = min(busy_sleep * 1.7, _PIPELINE_BUSY_MAX_SLEEP)
+                continue
 
+            # kind == "exists": verify the entity is actually present.
+            await asyncio.sleep(3.0 * (max_attempts - exists_retries_left + 1))
             try:
                 def _check(name: str = entity_name) -> bool:
                     req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
@@ -91,17 +183,26 @@ async def _create_entity_verified(
                 entity_exists = False
 
             if entity_exists:
-                logger.info("[Entity] '%s' confirmed existing (attempt %d)", entity_name, attempt)
+                logger.info("[Entity] '%s' confirmed existing", entity_name)
                 return {"status": "exists", "entity_name": entity_name}
 
-            logger.warning("[Entity] '%s' conflict but not found, retrying (%d/%d)", entity_name, attempt, max_attempts)
+            exists_retries_left -= 1
+            if exists_retries_left <= 0:
+                logger.error(
+                    "[Entity] '%s' reported exists but not found after %d verifies",
+                    entity_name, max_attempts,
+                )
+                return {"status": "error", "entity_name": entity_name,
+                        "error": f"Conflict reported but entity missing after {max_attempts} verifies"}
+
+            logger.warning(
+                "[Entity] '%s' conflict but not found, retrying (%d/%d)",
+                entity_name, max_attempts - exists_retries_left + 1, max_attempts,
+            )
 
         except Exception as exc:
             logger.warning("[Entity] Unexpected error '%s': %s", entity_name, exc)
             return {"status": "error", "entity_name": entity_name, "error": str(exc)}
-
-    logger.error("[Entity] All %d attempts failed for '%s'", max_attempts, entity_name)
-    return {"status": "error", "entity_name": entity_name, "error": f"Failed after {max_attempts} attempts"}
 
 
 async def _create_relation_verified(
@@ -114,10 +215,21 @@ async def _create_relation_verified(
 ) -> dict[str, Any]:
     """Create a graph relation, verifying it actually exists after creation.
 
-    LightRAG's graph/relation/create may return 400/409 (conflict) even when
-    the relation does not actually exist — a stale-index bug. This helper
-    works around it by querying the source entity's subgraph after a conflict
-    response to confirm the edge is present. If missing, creation is retried.
+    LightRAG's graph/relation/create can fail in two ways that must be handled
+    differently:
+
+    - HTTP 409 "Pipeline is busy ...": the write was *refused* because an
+      ingestion pipeline is running.  The relation was NOT created.  This is
+      transient — retry with exponential backoff until the pipeline drains.
+    - HTTP 400/409 "Relation from '...' to '...' already exists": the
+      relation genuinely exists (or a stale index claims so).  Verify via the
+      source entity's subgraph; if the edge is present, treat as success,
+      otherwise retry a bounded number of times.
+
+    Conflating these (the old behaviour) is what produced orphan nodes: the
+    linking step ran during ingestion, every create returned 409 busy, the
+    helper retried a few times with short sleeps, never waited long enough,
+    and gave up — leaving the visual entity with no appears_in edge.
     """
     payload = json.dumps({
         "source_entity": source_entity,
@@ -125,7 +237,11 @@ async def _create_relation_verified(
         "relation_data": relation_data,
     }).encode("utf-8")
 
-    for attempt in range(1, max_attempts + 1):
+    exists_retries_left = max_attempts
+    busy_deadline = time.monotonic() + _PIPELINE_BUSY_TOTAL_TIMEOUT
+    busy_sleep = 2.0
+
+    while True:
         try:
             def _post(payload: bytes = payload) -> dict[str, Any]:
                 req = Request(
@@ -138,18 +254,33 @@ async def _create_relation_verified(
                     return json.loads(resp.read().decode("utf-8"))
 
             result = await asyncio.to_thread(_post)
-            logger.info("[Relation] Created '%s' -> '%s' (attempt %d)", source_entity, target_entity, attempt)
+            logger.info("[Relation] Created '%s' -> '%s'", source_entity, target_entity)
             return {**result, "status": result.get("status", "success")}
 
         except URLError as exc:
-            is_conflict = (
-                "409" in str(exc) or "Conflict" in str(exc)
-                or "400" in str(exc) or "already exists" in str(exc)
-            )
-            if not is_conflict:
+            kind = _classify_create_error(exc)
+
+            if kind == "error":
                 logger.warning("[Relation] Failed '%s' -> '%s': %s", source_entity, target_entity, exc)
                 return {"status": "error", "source": source_entity, "target": target_entity, "error": str(exc)}
 
+            if kind == "busy":
+                if time.monotonic() >= busy_deadline:
+                    logger.error(
+                        "[Relation] '%s' -> '%s' pipeline stayed busy for %ds, giving up",
+                        source_entity, target_entity, _PIPELINE_BUSY_TOTAL_TIMEOUT,
+                    )
+                    return {"status": "error", "source": source_entity, "target": target_entity,
+                            "error": f"Pipeline busy after {_PIPELINE_BUSY_TOTAL_TIMEOUT}s"}
+                logger.info(
+                    "[Relation] '%s' -> '%s' pipeline busy, retrying in %.1fs",
+                    source_entity, target_entity, busy_sleep,
+                )
+                await asyncio.sleep(busy_sleep)
+                busy_sleep = min(busy_sleep * 1.7, _PIPELINE_BUSY_MAX_SLEEP)
+                continue
+
+            # kind == "exists": verify the edge is actually present.
             try:
                 def _verify(se: str = source_entity) -> bool:
                     req = Request(
@@ -172,23 +303,27 @@ async def _create_relation_verified(
                 edge_exists = False
 
             if edge_exists:
-                logger.info("[Relation] '%s' -> '%s' confirmed existing (attempt %d)", source_entity, target_entity, attempt)
+                logger.info("[Relation] '%s' -> '%s' confirmed existing", source_entity, target_entity)
                 return {"status": "exists", "source": source_entity, "target": target_entity}
+
+            exists_retries_left -= 1
+            if exists_retries_left <= 0:
+                logger.error(
+                    "[Relation] '%s' -> '%s' reported exists but edge not found after %d verifies",
+                    source_entity, target_entity, max_attempts,
+                )
+                return {"status": "error", "source": source_entity, "target": target_entity,
+                        "error": f"Conflict reported but edge missing after {max_attempts} verifies"}
 
             logger.warning(
                 "[Relation] '%s' -> '%s' conflict reported but edge not found, retrying (%d/%d)",
-                source_entity, target_entity, attempt, max_attempts,
+                source_entity, target_entity, max_attempts - exists_retries_left + 1, max_attempts,
             )
-            if attempt < max_attempts:
-                await asyncio.sleep(3.0 * attempt)
+            await asyncio.sleep(3.0 * (max_attempts - exists_retries_left + 1))
 
         except Exception as exc:
             logger.warning("[Relation] Unexpected error '%s' -> '%s': %s", source_entity, target_entity, exc)
             return {"status": "error", "source": source_entity, "target": target_entity, "error": str(exc)}
-
-    logger.error("[Relation] All %d attempts failed for '%s' -> '%s'", max_attempts, source_entity, target_entity)
-    return {"status": "error", "source": source_entity, "target": target_entity,
-            "error": f"Failed after {max_attempts} attempts — relation may not exist"}
 
 
 @dataclass
@@ -812,8 +947,9 @@ async def describe_image_with_vlm(
     last_exc: Exception | None = None
     for attempt in range(1, _VLM_MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
+            async with _vlm_semaphore:
+                async with httpx.AsyncClient(timeout=_VLM_TIMEOUT) as client:
+                    resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
 
             if resp.status_code != 200:
                 logger.error("VLM request failed: %d %s (attempt %d/%d)", resp.status_code, resp.text[:500], attempt, _VLM_MAX_RETRIES)
@@ -884,8 +1020,9 @@ async def describe_face_crop(
     if VLM_API_KEY:
         headers["Authorization"] = f"Bearer {VLM_API_KEY}"
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
+    async with _vlm_semaphore:
+        async with httpx.AsyncClient(timeout=_VLM_TIMEOUT) as client:
+            resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
 
     if resp.status_code != 200:
         logger.error("VLM face description failed: %d %s", resp.status_code, resp.text[:500])
