@@ -130,6 +130,26 @@ services:
     networks:
       - internal
 
+  whisper:
+    build:
+      context: .
+      dockerfile: docker/whisper/Dockerfile
+    image: knowledge-graph-whisper:latest
+    container_name: knowledge-graph-whisper
+    restart: unless-stopped
+    volumes:
+      - ./models/whisper:/models:ro
+    ports:
+      - "${WHISPER_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks:
+      - internal
+
   postgres:
     image: pgvector/pgvector:pg18
     container_name: knowledge-graph-postgres
