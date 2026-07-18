@@ -454,7 +454,7 @@
     pushStreamMessage(assistantMsg);
     isStreaming = true;
     isProcessing = true;
-    processingLabel = 'Searching knowledge graph...';
+    processingLabel = 'Retrieving knowledge graph...';
 
     try {
       const ollamaMessages: OllamaMessage[] = messages
@@ -465,9 +465,9 @@
         }));
 
       // Fetch the fully-assembled prompt (rag_response system prompt with
-      // retrieved KG context + user query) in parallel with the /chat stream.
+      // retrieved KG context + user query) in parallel with the /query stream.
       // The last user message is the query; everything before it is history.
-      // The preview mirrors the /chat retrieval for the same query, so what
+      // The preview mirrors the /query retrieval for the same query, so what
       // the UI shows is exactly what the LLM receives. Non-blocking: if it
       // fails, the chat still streams normally, just without the preview.
       const lastUserMsg = ollamaMessages[ollamaMessages.length - 1];
@@ -509,32 +509,38 @@
         });
       }
 
-      for await (const chunk of lightragClient.chatStream(ollamaMessages)) {
+      // Use /query/stream (not /api/chat) so LightRAG emits a references
+      // line as soon as retrieval completes — that gives us a live "Retrieved
+      // N sources" stage with real file paths before generation begins.
+      // Conversation history is passed through so the LLM keeps coherence.
+      const queryText = lastUserMsg?.content ?? '';
+      for await (const ev of lightragClient.queryStreamEvents({
+        query: queryText,
+        mode: 'mix',
+        stream: true,
+        include_references: true,
+        conversation_history: historyForPreview,
+      })) {
         if (!streamAbortController) break;
 
-        if (!gotFirstToken && chunk.message?.content) {
-          gotFirstToken = true;
+        if (ev.type === 'references') {
           if (streamingConversationId === activeConversationId) {
-            processingLabel = 'Generating...';
+            const n = ev.references.length;
+            processingLabel = `Retrieved ${n} source${n === 1 ? '' : 's'}…`;
           }
-        }
-
-        if (chunk.message?.content) {
-          accumulatedContent += chunk.message.content;
+          updateStreamMessage(assistantId, (m) => ({ ...m, kgReferences: ev.references }));
+        } else if (ev.type === 'chunk') {
+          if (!gotFirstToken) {
+            gotFirstToken = true;
+            if (streamingConversationId === activeConversationId) {
+              processingLabel = 'Generating…';
+            }
+          }
+          accumulatedContent += ev.text;
           streamingBuffer = { content: accumulatedContent, thinking: '', assistantId };
           scheduleFlush();
-        }
-
-        if (chunk.done) {
-          if (chunk.eval_count && chunk.prompt_eval_count) {
-            const totalMs = (chunk.total_duration ?? 0) / 1_000_000;
-            const evalMs = totalMs;
-            const tokensPerSec = chunk.eval_count > 0 && evalMs > 0
-              ? Math.round(chunk.eval_count / (evalMs / 1000))
-              : null;
-            tokensPerSecond = tokensPerSec;
-            promptTokens = chunk.prompt_eval_count;
-          }
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message);
         }
       }
 

@@ -114,6 +114,25 @@
               {/if}
             </div>
 
+            {#if msg.kgReferences && msg.kgReferences.length > 0}
+              <div class="mt-3 border-t border-cyber-border pt-2">
+                <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">
+                  Retrieved {msg.kgReferences.length} source{msg.kgReferences.length === 1 ? '' : 's'}
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  {#each msg.kgReferences as ref, idx}
+                    <span
+                      title={ref.file_path}
+                      class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 bg-cyber-bg/60 px-2 py-0.5 font-mono text-[10px] text-cyber-text-dim"
+                    >
+                      <span class="text-cyber-cyan/70">{ref.reference_id}</span>
+                      <span class="truncate max-w-[180px]">{ref.file_path.split('/').pop() || ref.file_path}</span>
+                    </span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
             {#if msg.kgPrompt}
               <div class="mt-3 border-t border-cyber-border pt-2">
                 <button

@@ -105,6 +105,14 @@ export interface QueryRequest {
   top_k?: number;
   conversation_history?: Message[];
   history_turns?: number;
+  include_references?: boolean;
+  include_chunk_content?: boolean;
+}
+
+export interface ReferenceItem {
+  reference_id: string;
+  file_path: string;
+  content?: string[];
 }
 
 export interface Message {
@@ -173,6 +181,10 @@ export interface ChatMessage {
   /** Conversation history forwarded to the LLM alongside kgPrompt
    *  (prior user/assistant turns from the same conversation). */
   kgPromptHistory?: { role: 'user' | 'assistant' | 'system'; content: string }[];
+  /** Source references retrieved for this query (file paths + ids), streamed
+   *  from LightRAG's /query/stream as soon as retrieval completes. Shown as
+   *  a live "Retrieved N sources" chip list under the assistant reply. */
+  kgReferences?: ReferenceItem[];
 }
 
 export interface MessageTimings {

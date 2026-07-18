@@ -3,6 +3,7 @@ import {
   API,
   type QueryRequest,
   type QueryMode,
+  type ReferenceItem,
   type LightragStatus,
   type KGGraph,
   type DocStatus,
@@ -148,6 +149,77 @@ export class LightragClient {
       } else if (trimmed !== '[DONE]') {
         yield trimmed;
       }
+    }
+  }
+
+  /**
+   * Stream a KG query via /query/stream with structured events. When
+   * include_references is true, LightRAG emits a {"references": [...]} line
+   * as soon as retrieval completes, BEFORE any generation chunks — this lets
+   * the UI show "Retrieved N sources" with real file paths as a live progress
+   * marker. Then yields {type:'chunk'} events for each generated text chunk.
+   *
+   * Event order: references (once, if include_references) → chunk* → done.
+   */
+  async *queryStreamEvents(
+    params: QueryRequest,
+  ): AsyncGenerator<
+    { type: 'references'; references: ReferenceItem[] } | { type: 'chunk'; text: string } | { type: 'error'; message: string }
+  > {
+    const url = this.proxyUrl(API.lightrag.queryStream);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ ...params, stream: true }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`LightRAG ${res.status} ${res.statusText}: ${body}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const handleLine = (raw: string) => {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.startsWith(':') || trimmed === '[DONE]') return null;
+      const payload = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+      if (!payload || payload === '[DONE]') return null;
+      try {
+        const parsed = JSON.parse(payload);
+        if (Array.isArray(parsed.references)) {
+          return { type: 'references' as const, references: parsed.references as ReferenceItem[] };
+        }
+        if (parsed.error) {
+          return { type: 'error' as const, message: String(parsed.error) };
+        }
+        const text = parsed.response ?? parsed.content ?? parsed.text ?? parsed.delta ?? '';
+        if (text) return { type: 'chunk' as const, text: String(text) };
+        return null;
+      } catch {
+        return null;
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const ev = handleLine(line);
+        if (ev) yield ev;
+      }
+    }
+
+    if (buffer.trim()) {
+      const ev = handleLine(buffer);
+      if (ev) yield ev;
     }
   }
 
