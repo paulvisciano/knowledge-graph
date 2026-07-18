@@ -113,6 +113,7 @@ export class Chunk {
   updateFade(cameraPos: THREE.Vector3): void {
     for (const plane of this._planes) {
       plane.updateFade(cameraPos, this._chunkOrigin);
+      plane.updateLod(cameraPos, this._chunkOrigin);
     }
   }
 

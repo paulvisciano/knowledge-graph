@@ -107,6 +107,17 @@ export const CHUNK_OFFSETS: readonly ChunkOffset[] = (() => {
   return offsets;
 })();
 
+/** Chebyshev chunk distance at/below which a photo node promotes to full-res. */
+export const LOD_FULL_CHEBY = 1;
+/** Absolute depth (world units) at/below which a photo node promotes to full-res. */
+export const LOD_FULL_DEPTH = 120;
+/** Extra Chebyshev distance beyond LOD_FULL_CHEBY where a node stays full-res before demoting (hysteresis band). */
+export const LOD_HYSTERESIS = 1;
+/** Absolute depth hysteresis band (world units) beyond LOD_FULL_DEPTH before demoting. */
+export const LOD_FULL_DEPTH_HYSTERESIS = 60;
+/** Maximum simultaneous full-res textures held in GPU memory (LRU eviction above this). */
+export const LOD_FULL_MAX = 12;
+
 /**
  * Returns the chunk-update throttle delay in milliseconds based on the
  * current camera velocity magnitude. Ported from the reference's

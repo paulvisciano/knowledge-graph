@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LOD_FULL_MAX } from '$lib/components/canvas/renderer/constants';
 
 /**
  * Global texture cache keyed by image URL. Ports the reference repo's
@@ -14,6 +15,7 @@ class TextureCache {
   private cache = new Map<string, THREE.Texture>();
   private loaders = new Map<string, Set<(t: THREE.Texture) => void>>();
   private textureLoader = new THREE.TextureLoader();
+  private fullResLru = new Map<string, Set<() => void>>();
 
   /** Returns the cached texture for `url`, or `undefined` if not yet loaded. */
   get(url: string): THREE.Texture | undefined {
@@ -66,7 +68,10 @@ class TextureCache {
 
   private onDone(url: string, texture: THREE.Texture): void {
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 8;
     texture.needsUpdate = true;
     this.cache.set(url, texture);
     this.flush(url, texture);
@@ -86,12 +91,77 @@ class TextureCache {
     return this.cache.has(url);
   }
 
+  /**
+   * Requests a full-res texture for `url`. If cached, `onLoaded` fires sync
+   * and `onEvicted` is registered for later LRU eviction. If not cached, a
+   * load is kicked off; `onLoaded` fires when it completes. When adding a new
+   * LRU entry exceeds `LOD_FULL_MAX`, the LRU (oldest) entry is evicted: all
+   * its `onEvicted` callbacks fire, and the texture is disposed + removed.
+   */
+  requestFullRes(
+    url: string,
+    onLoaded: (t: THREE.Texture) => void,
+    onEvicted: () => void,
+  ): void {
+    const existing = this.cache.get(url);
+    if (existing) {
+      const prevCbs = this.fullResLru.get(url);
+      this.fullResLru.delete(url);
+      const cbs = prevCbs ?? new Set<() => void>();
+      cbs.add(onEvicted);
+      this.fullResLru.set(url, cbs);
+      onLoaded(existing);
+      return;
+    }
+
+    const prevCbs = this.fullResLru.get(url);
+    const cbs = prevCbs ?? new Set<() => void>();
+    cbs.add(onEvicted);
+    this.fullResLru.delete(url);
+    this.fullResLru.set(url, cbs);
+
+    if (this.fullResLru.size > LOD_FULL_MAX) {
+      const oldestUrl = this.fullResLru.keys().next().value;
+      if (oldestUrl !== undefined && oldestUrl !== url) {
+        this._evictFullRes(oldestUrl);
+      }
+    }
+
+    this.load(url, (t) => {
+      onLoaded(t);
+    });
+  }
+
+  /** Deregisters a plane's `onEvicted` callback. If no callbacks remain, evicts. */
+  releaseFullRes(url: string, onEvicted: () => void): void {
+    const cbs = this.fullResLru.get(url);
+    if (!cbs) return;
+    cbs.delete(onEvicted);
+    if (cbs.size === 0) {
+      this._evictFullRes(url);
+    }
+  }
+
+  private _evictFullRes(url: string): void {
+    const cbs = this.fullResLru.get(url);
+    if (cbs) {
+      for (const cb of cbs) cb();
+      this.fullResLru.delete(url);
+    }
+    const tex = this.cache.get(url);
+    if (tex) {
+      tex.dispose();
+      this.cache.delete(url);
+    }
+  }
+
   clear(): void {
     for (const texture of this.cache.values()) {
       texture.dispose();
     }
     this.cache.clear();
     this.loaders.clear();
+    this.fullResLru.clear();
   }
 
   size(): number {

@@ -253,6 +253,10 @@ export class SceneManager {
     }
 
     this._renderer.render(this._scene, this._camera);
+
+    // DEBUG: expose scene graph for black-canvas diagnosis
+    (this as unknown as { __debugLastFrame?: number }).__debugLastFrame = performance.now();
+    (window as unknown as { __sm?: unknown }).__sm = this;
   };
 
   /** Applies held keyboard keys to the velocity vector. */

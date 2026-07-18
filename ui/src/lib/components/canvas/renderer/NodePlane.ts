@@ -14,6 +14,10 @@ import {
   DEPTH_FADE_END,
   DEPTH_FADE_START,
   INVIS_THRESHOLD,
+  LOD_FULL_CHEBY,
+  LOD_FULL_DEPTH,
+  LOD_FULL_DEPTH_HYSTERESIS,
+  LOD_HYSTERESIS,
   RENDER_DISTANCE,
 } from './constants';
 import type { CanvasNode, NodeKind } from './types';
@@ -44,6 +48,10 @@ export class NodePlane {
   private readonly _material: THREE.MeshBasicMaterial;
   private _currentOpacity = 1;
   private _disposed = false;
+  private _currentLod: 'thumb' | 'full' = 'thumb';
+  private _fullUrl?: string;
+  private _thumbUrl?: string;
+  private _fullEvictCb?: () => void;
 
   /**
    * @param node - the canvas node to render.
@@ -63,6 +71,8 @@ export class NodePlane {
     this._mesh.userData.nodeId = node.id;
 
     if (node.kind === 'photo' && node.imageUrl) {
+      this._thumbUrl = node.imageUrl;
+      this._fullUrl = node.fullUrl;
       const cached = textureCache.load(node.imageUrl, (t) => this.applyTexture(t));
       if (cached) {
         this.applyTexture(cached);
@@ -153,10 +163,74 @@ export class NodePlane {
     this._material.needsUpdate = true;
   }
 
+  updateLod(cameraPos: THREE.Vector3, chunkOrigin: THREE.Vector3): void {
+    if (this._disposed) return;
+    if (this._node.kind !== 'photo' || !this._thumbUrl) return;
+    if (!this._fullUrl) return;
+
+    const worldPos = this._mesh.position;
+    const nodeWorldX = chunkOrigin.x + worldPos.x;
+    const nodeWorldY = chunkOrigin.y + worldPos.y;
+    const nodeWorldZ = chunkOrigin.z + worldPos.z;
+
+    const camChunkX = Math.floor(cameraPos.x / CHUNK_SIZE);
+    const camChunkY = Math.floor(cameraPos.y / CHUNK_SIZE);
+    const camChunkZ = Math.floor(cameraPos.z / CHUNK_SIZE);
+
+    const nodeChunkX = Math.floor(nodeWorldX / CHUNK_SIZE);
+    const nodeChunkY = Math.floor(nodeWorldY / CHUNK_SIZE);
+    const nodeChunkZ = Math.floor(nodeWorldZ / CHUNK_SIZE);
+
+    const cheby = Math.max(
+      Math.abs(nodeChunkX - camChunkX),
+      Math.abs(nodeChunkY - camChunkY),
+      Math.abs(nodeChunkZ - camChunkZ),
+    );
+    const absDepth = Math.abs(cameraPos.z - nodeWorldZ);
+
+    const demoteThreshold = LOD_FULL_CHEBY + LOD_HYSTERESIS;
+    const demoteDepth = LOD_FULL_DEPTH + LOD_FULL_DEPTH_HYSTERESIS;
+    const shouldFull = cheby <= LOD_FULL_CHEBY && absDepth <= LOD_FULL_DEPTH;
+    const shouldThumb = cheby > demoteThreshold || absDepth > demoteDepth;
+
+    if (this._currentLod === 'thumb' && shouldFull) {
+      this._promoteToFull();
+    } else if (this._currentLod === 'full' && shouldThumb) {
+      this._demoteToThumb();
+    }
+  }
+
+  private _promoteToFull(): void {
+    if (!this._fullUrl) return;
+    this._currentLod = 'full';
+    const onEvicted = () => {
+      this._currentLod = 'thumb';
+      this._fullEvictCb = undefined;
+      const thumb = this._thumbUrl ? textureCache.get(this._thumbUrl) : undefined;
+      if (thumb) this.applyTexture(thumb);
+    };
+    this._fullEvictCb = onEvicted;
+    textureCache.requestFullRes(this._fullUrl, (t) => this.applyTexture(t), onEvicted);
+  }
+
+  private _demoteToThumb(): void {
+    this._currentLod = 'thumb';
+    if (this._fullUrl && this._fullEvictCb) {
+      textureCache.releaseFullRes(this._fullUrl, this._fullEvictCb);
+      this._fullEvictCb = undefined;
+    }
+    const thumb = this._thumbUrl ? textureCache.get(this._thumbUrl) : undefined;
+    if (thumb) this.applyTexture(thumb);
+  }
+
   /** Releases the material (the geometry is shared and not disposed here). */
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    if (this._fullUrl && this._fullEvictCb) {
+      textureCache.releaseFullRes(this._fullUrl, this._fullEvictCb);
+      this._fullEvictCb = undefined;
+    }
     this._material.map = null;
     this._material.dispose();
   }
