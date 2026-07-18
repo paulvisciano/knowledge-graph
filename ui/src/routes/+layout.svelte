@@ -13,7 +13,10 @@
   let { children }: { children: import('svelte').Snippet } = $props();
 
   $effect(() => {
-    connectionStore.startPolling();
+    connectionStore
+      .connectMcp()
+      .catch((e) => console.error('MCP connect failed:', e))
+      .finally(() => connectionStore.startPolling());
     return () => connectionStore.stopPolling();
   });
 

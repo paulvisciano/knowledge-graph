@@ -2,9 +2,6 @@ import {
   LIGHTRAG_API,
   API,
   type QueryRequest,
-  type QueryMode,
-  type ReferenceItem,
-  type KgRetrievalData,
   type LightragStatus,
   type KGGraph,
   type DocStatus,
@@ -63,65 +60,6 @@ export class LightragClient {
       method: 'POST',
       body: JSON.stringify({ ...params, stream: false }),
     });
-  }
-
-  /**
-   * Fetch the fully-assembled prompt LightRAG would send to the LLM for a given
-   * query, using the only_need_prompt=true query param. Returns the rag_response
-   * system prompt (with retrieved KG context) joined with the user query.
-   *
-   * Mirrors the retrieval that /chat performs for the same query + mode, so the
-   * returned string is exactly what the LLM receives as its system+user message
-   * (conversation history is passed separately by the /chat caller as Ollama
-   * history_messages, not embedded in this prompt string).
-   */
-  async fetchKgPrompt(
-    query: string,
-    history: { role: 'user' | 'assistant' | 'system'; content: string }[] = [],
-    mode: QueryMode = 'mix',
-  ): Promise<string> {
-    const { response } = await this.query({
-      query,
-      mode,
-      only_need_prompt: true,
-      stream: false,
-      conversation_history: history,
-    });
-    return response;
-  }
-
-  /**
-   * Fetch the full structured retrieval (entities, relationships, chunks,
-   * references) for a query via /query/data. This is the pure retrieval result
-   * with NO LLM generation — what the knowledge graph actually returned for
-   * the query. The mode mirrors the generation call so the retrieved data
-   * matches what was used to build the prompt. Used to surface live retrieval
-   * details (entity names, relationship src->tgt, chunk snippets) in the UI
-   * in parallel with generation.
-   */
-  async fetchKgRetrievalData(
-    query: string,
-    mode: QueryMode = 'mix',
-  ): Promise<KgRetrievalData> {
-    const url = this.proxyUrl(API.lightrag.queryData);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ query, mode, stream: false }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`LightRAG query/data ${res.status} ${res.statusText}: ${body}`);
-    }
-    const payload = await res.json() as {
-      status: string;
-      message: string;
-      data: KgRetrievalData;
-      metadata: Record<string, unknown>;
-    };
-    return (
-      payload.data ?? { entities: [], relationships: [], chunks: [], references: [] }
-    );
   }
 
   async *queryStream(params: QueryRequest): AsyncGenerator<string> {
@@ -184,77 +122,6 @@ export class LightragClient {
       } else if (trimmed !== '[DONE]') {
         yield trimmed;
       }
-    }
-  }
-
-  /**
-   * Stream a KG query via /query/stream with structured events. When
-   * include_references is true, LightRAG emits a {"references": [...]} line
-   * as soon as retrieval completes, BEFORE any generation chunks — this lets
-   * the UI show "Retrieved N sources" with real file paths as a live progress
-   * marker. Then yields {type:'chunk'} events for each generated text chunk.
-   *
-   * Event order: references (once, if include_references) → chunk* → done.
-   */
-  async *queryStreamEvents(
-    params: QueryRequest,
-  ): AsyncGenerator<
-    { type: 'references'; references: ReferenceItem[] } | { type: 'chunk'; text: string } | { type: 'error'; message: string }
-  > {
-    const url = this.proxyUrl(API.lightrag.queryStream);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ ...params, stream: true }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`LightRAG ${res.status} ${res.statusText}: ${body}`);
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('No response body');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    const handleLine = (raw: string) => {
-      const trimmed = raw.trim();
-      if (!trimmed || trimmed.startsWith(':') || trimmed === '[DONE]') return null;
-      const payload = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
-      if (!payload || payload === '[DONE]') return null;
-      try {
-        const parsed = JSON.parse(payload);
-        if (Array.isArray(parsed.references)) {
-          return { type: 'references' as const, references: parsed.references as ReferenceItem[] };
-        }
-        if (parsed.error) {
-          return { type: 'error' as const, message: String(parsed.error) };
-        }
-        const text = parsed.response ?? parsed.content ?? parsed.text ?? parsed.delta ?? '';
-        if (text) return { type: 'chunk' as const, text: String(text) };
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        const ev = handleLine(line);
-        if (ev) yield ev;
-      }
-    }
-
-    if (buffer.trim()) {
-      const ev = handleLine(buffer);
-      if (ev) yield ev;
     }
   }
 

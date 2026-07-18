@@ -110,12 +110,6 @@ export interface QueryRequest {
   include_chunk_content?: boolean;
 }
 
-export interface ReferenceItem {
-  reference_id: string;
-  file_path: string;
-  content?: string[];
-}
-
 export interface KgEntity {
   entity_name: string;
   entity_type: string;
@@ -143,13 +137,6 @@ export interface KgChunk {
   file_path: string;
   chunk_id: string;
   reference_id: string;
-}
-
-export interface KgRetrievalData {
-  entities: KgEntity[];
-  relationships: KgRelationship[];
-  chunks: KgChunk[];
-  references: ReferenceItem[];
 }
 
 export interface Message {
@@ -210,22 +197,6 @@ export interface ChatMessage {
   audioData?: string;
   audioFormat?: 'wav' | 'mp3';
   imageUrls?: string[];
-  /** For kg-direct mode: the fully-assembled prompt sent to the LLM
-   *  (rag_response system prompt with retrieved KG context + user query),
-   *  captured via LightRAG's only_need_prompt query param. Shown in the UI
-   *  as a collapsible "Prompt sent to LLM" section under the assistant reply. */
-  kgPrompt?: string;
-  /** Conversation history forwarded to the LLM alongside kgPrompt
-   *  (prior user/assistant turns from the same conversation). */
-  kgPromptHistory?: { role: 'user' | 'assistant' | 'system'; content: string }[];
-  /** Source references retrieved for this query (file paths + ids), streamed
-   *  from LightRAG's /query/stream as soon as retrieval completes. Shown as
-   *  a live "Retrieved N sources" chip list under the assistant reply. */
-  kgReferences?: ReferenceItem[];
-  /** Full structured retrieval (entities, relationships, chunks) fetched in
-   *  parallel from /query/data. Surfaced live so the user sees exactly what
-   *  the knowledge graph returned for their query, not just a source count. */
-  kgRetrieval?: KgRetrievalData;
 }
 
 export interface MessageTimings {
@@ -243,6 +214,11 @@ export interface MCPToolCall {
   result?: string;
   isError?: boolean;
   timestamp: number;
+  parsedKG?: {
+    entities: { entity: string; type?: string; description?: string }[];
+    relationships: { entity1: string; entity2: string; description: string }[];
+    imagePaths: string[];
+  };
 }
 
 export interface OpenAIToolDefinition {

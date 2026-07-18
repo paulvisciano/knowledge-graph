@@ -5,7 +5,7 @@ export type TabId = 'graph' | 'ingestion' | 'activity';
 
 export const activeTab = writable<TabId>('graph');
 
-export const chatMode = writable<ChatMode>('kg-direct');
+export const chatMode = writable<ChatMode>('llm-mcp');
 
 export const lightragStatus = writable<'connected' | 'disconnected' | 'busy' | 'error'>('disconnected');
 export const llamaStatus = writable<'connected' | 'disconnected' | 'busy' | 'error'>('disconnected');
