@@ -1467,6 +1467,7 @@
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
             title="Chat history"
             aria-label="Open chat history"
+            data-testid="chat-history-button"
           >
             <Icon name="clock" size={18} />
           </button>
@@ -1510,6 +1511,7 @@
               onclick={cancelStreaming}
               class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
               title="Stop generating"
+              data-testid="stop-button"
             >
               <Icon name="square" size={14} />
             </button>
@@ -1573,7 +1575,7 @@
         </div>
 
         <!-- Messages -->
-        <div bind:this={messagesContainer} class="flex-1 overflow-y-auto px-4 py-3">
+        <div bind:this={messagesContainer} class="flex-1 overflow-y-auto px-4 py-3" data-testid="messages-container">
           {#if configStore.systemPrompt.trim()}
             <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
               <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
@@ -1586,7 +1588,7 @@
             </details>
           {/if}
           {#each messages as msg (msg.id)}
-            <div class="group mb-4 animate-fade-in-up">
+            <div class="group mb-4 animate-fade-in-up" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
                 <div class="flex justify-end">
                   <div class="max-w-[80%] space-y-1">
@@ -1597,7 +1599,7 @@
                       <AudioPlayer src={msg.audioUrl} label="Voice message" />
                     {/if}
                     {#if msg.content}
-                      <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20">
+                      <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20" data-testid="user-message-text">
                         {msg.content}
                       </div>
                     {/if}
@@ -1610,6 +1612,7 @@
                       onclick={() => resendMessage(msg.id)}
                       class="flex items-center gap-1 rounded-md border border-cyber-border/50 bg-cyber-surface-2/60 px-2 py-1 text-[11px] font-medium text-cyber-text-dim transition-all duration-200 hover:border-cyber-cyan/50 hover:bg-cyber-cyan/10 hover:text-cyber-cyan hover:glow-cyan focus:outline-none focus:ring-1 focus:ring-cyber-cyan/40 active:scale-95"
                       title="Regenerate response"
+                      data-testid="regenerate-button"
                     >
                       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                       Regenerate
@@ -1632,19 +1635,19 @@
                     {/if}
 
                     {#if msg.content || (msg.isStreaming && !msg.mcpToolCalls?.length)}
-                    <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30">
+                    <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
                       {#if msg.isStreaming && isProcessing}
-                        <div class="flex items-center gap-2 py-1">
+                        <div class="flex items-center gap-2 py-1" data-testid="processing-indicator">
                           <div class="flex-1 h-1.5 rounded-full bg-cyber-border/40 overflow-hidden">
                             <div class="h-full rounded-full bg-cyber-orange animate-pulse" style="width: {processingLabel.includes('%') ? processingLabel.match(/(\d+)%/)?.[1] ?? '0' : '100'}%"></div>
                           </div>
-                          <span class="shrink-0 text-[11px] text-cyber-orange">{processingLabel}</span>
+                          <span class="shrink-0 text-[11px] text-cyber-orange" data-testid="processing-label">{processingLabel}</span>
                           {#if promptTokens}
                             <span class="shrink-0 font-mono text-[10px] text-cyber-text-dim">{promptTokens} tokens</span>
                           {/if}
                         </div>
                       {:else if msg.isStreaming && !msg.content}
-                        <div class="flex items-center gap-2 py-1">
+                        <div class="flex items-center gap-2 py-1" data-testid="generating-indicator">
                           <div class="flex gap-1">
                             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 0ms"></span>
                             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 150ms"></span>
@@ -1655,6 +1658,7 @@
                             onclick={cancelStreaming}
                             class="ml-1 flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10"
                             title="Stop generating"
+                            data-testid="stop-button-inline"
                           >
                             <svg class="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
                             Stop
@@ -1662,7 +1666,7 @@
                         </div>
                       {/if}
                       {#if msg.content}
-                        <div class="prose-cyber">{@html msg.isStreaming ? renderStreamingContent(msg.content) : renderMarkdown(msg.content)}</div>
+                        <div class="prose-cyber" data-testid="assistant-message-text">{@html msg.isStreaming ? renderStreamingContent(msg.content) : renderMarkdown(msg.content)}</div>
                       {/if}
                       {#if msg.isStreaming && msg.content}
                         <span class="inline-flex items-center gap-1.5">
@@ -1710,6 +1714,7 @@
                           onclick={() => copyToClipboard(msg.content)}
                           class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan"
                           title="Copy message"
+                          data-testid="copy-button"
                         >
                           <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
                           Copy
@@ -1725,8 +1730,8 @@
                         {@const relCount = parsed ? parsed.relationships.length : 0}
                         {@const isRunning = !toolCall.result && !toolCall.isError}
                         {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
-                        <details class="group" open={true}>
-                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}">
+                        <details class="group" open={true} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
+                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
                             {#if toolCall.isError}
                               <svg class="h-3.5 w-3.5 shrink-0 text-cyber-red" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                             {:else if toolCall.result}
@@ -1752,15 +1757,15 @@
                             <span class="ml-auto text-cyber-text-dim/40">{formatTime(toolCall.timestamp)}</span>
                             <svg class="h-3 w-3 text-cyber-text-dim/50 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                           </summary>
-                          <div class="mt-1 space-y-2 rounded-lg border border-cyber-border/20 bg-cyber-bg/50 p-2.5">
+                          <div class="mt-1 space-y-2 rounded-lg border border-cyber-border/20 bg-cyber-bg/50 p-2.5" data-testid="tool-call-body">
                             {#if isRunning}
-                              <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange">
+                              <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange" data-testid="tool-call-running">
                                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                 <span>Querying knowledge graph...</span>
                               </div>
                             {:else if parsed}
                               {#if hasPhotos}
-                                <div>
+                                <div data-testid="tool-call-photos">
                                   <div class="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-green/80">
                                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                                     Photos
@@ -1769,7 +1774,7 @@
                                 </div>
                               {/if}
                               {#if parsed.relationships.length > 0}
-                                <details class="group/rels">
+                                <details class="group/rels" data-testid="tool-call-relationships">
                                   <summary class="mb-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-purple/80 hover:text-cyber-purple transition-colors">
                                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
                                     Relationships
@@ -1796,7 +1801,7 @@
                                 </details>
                               {/if}
                               {#if parsed.entities.length > 0}
-                                <details class="group/entities">
+                                <details class="group/entities" data-testid="tool-call-entities">
                                   <summary class="mb-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-cyan/80 hover:text-cyber-cyan transition-colors">
                                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 000 20M12 2a14.5 14.5 0 010 20"/></svg>
                                     Entities
@@ -2032,7 +2037,10 @@
   @media (max-width: 768px) {
     .chat-overlay-panel {
       max-width: 100%;
-      inset: 0;
+      top: 0;
+      bottom: 56px;
+      left: 0;
+      right: 0;
       border-left: none;
     }
   }

@@ -71,13 +71,15 @@
 </script>
 
 {#if images.length > 0}
-  <div class="mt-2 flex gap-2 overflow-x-auto pb-1" style="scrollbar-width: thin;">
+  <div class="mt-2 flex gap-2 overflow-x-auto pb-1" style="scrollbar-width: thin;" data-testid="image-gallery">
     {#each images as imgUrl, i}
       <button
         type="button"
         onclick={() => openLightbox(i)}
         class="group/img relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-cyber-border/30 transition-all duration-200 hover:border-cyber-cyan/40 hover:shadow-[0_0_8px_rgba(0,212,255,0.15)] focus:outline-none focus:ring-2 focus:ring-cyber-cyan/50"
         aria-label="Expand image {i + 1} of {images.length}"
+        data-testid="gallery-thumbnail"
+        data-gallery-index={i}
       >
         <img
           src={imgUrl}
@@ -105,11 +107,13 @@
     role="dialog"
     aria-modal="true"
     aria-label="Image gallery"
+    data-testid="lightbox"
   >
     <img
       src={fullResUrl(images[lightboxIndex])}
       alt="{alt} {lightboxIndex + 1}"
       class="absolute inset-0 h-full w-full object-contain"
+      data-testid="lightbox-image"
     />
 
     <div class="pointer-events-none absolute inset-0 z-10 flex items-center justify-between px-3">
@@ -119,6 +123,7 @@
           onclick={goPrev}
           class="pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white"
           aria-label="Previous image"
+          data-testid="lightbox-prev"
         >
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 18 9 12 15 6" />
@@ -129,6 +134,7 @@
           onclick={goNext}
           class="pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white"
           aria-label="Next image"
+          data-testid="lightbox-next"
         >
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6" />
@@ -151,6 +157,7 @@
         onclick={closeLightbox}
         class="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white/80 backdrop-blur-sm transition-all hover:bg-black/60 hover:text-white"
         aria-label="Close lightbox"
+        data-testid="lightbox-close"
       >
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />
