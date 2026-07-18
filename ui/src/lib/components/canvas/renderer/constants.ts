@@ -19,11 +19,16 @@ export const CHUNK_FADE_MARGIN = 1;
 /** Maximum camera velocity magnitude (world units / frame at 60fps reference). */
 export const MAX_VELOCITY = 3.2;
 
-/** Absolute depth (world units) at which the far depth-fade ramp begins. */
-export const DEPTH_FADE_START = 1200;
+/**
+ * Absolute depth (world units) at which the far depth-fade ramp begins.
+ * Tuned relative to MAX_CAMERA_Z (1000): planes start fading at ~45% zoom-out
+ * and are fully invisible by ~70%, so users see depth fade as they zoom out.
+ * Mirrors the reference repo's 140/260 band scaled to our larger world.
+ */
+export const DEPTH_FADE_START = 450;
 
 /** Absolute depth (world units) at which planes are fully hidden by depth fade. */
-export const DEPTH_FADE_END = 2000;
+export const DEPTH_FADE_END = 700;
 
 /** Oposity below which a plane is considered invisible (mesh.visible = false). */
 export const INVIS_THRESHOLD = 0.01;

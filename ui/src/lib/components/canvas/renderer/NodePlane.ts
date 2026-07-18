@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { textureCache } from '$lib/services/TextureCache';
 import {
+  CHUNK_FADE_MARGIN,
   CHUNK_SIZE,
   DEPTH_FADE_END,
   DEPTH_FADE_START,
@@ -111,21 +112,20 @@ export class NodePlane {
       Math.abs(nodeChunkZ - camChunkZ),
     );
 
-    let targetOpacity: number;
-    if (cheby <= RENDER_DISTANCE) {
-      targetOpacity = 1;
-    } else {
-      const fadeRange = RENDER_DISTANCE + 1 - cheby;
-      targetOpacity = Math.max(0, Math.min(1, fadeRange));
-    }
+    const gridFade =
+      cheby <= RENDER_DISTANCE
+        ? 1
+        : Math.max(0, 1 - (cheby - RENDER_DISTANCE) / Math.max(CHUNK_FADE_MARGIN, 0.0001));
 
     const absDepth = Math.abs(cameraPos.z - nodeWorldZ);
-    if (absDepth > DEPTH_FADE_END) {
-      targetOpacity = 0;
-    } else if (absDepth > DEPTH_FADE_START) {
-      const depthFade = 1 - (absDepth - DEPTH_FADE_START) / (DEPTH_FADE_END - DEPTH_FADE_START);
-      targetOpacity *= Math.max(0, Math.min(1, depthFade));
-    }
+    const depthFade =
+      absDepth <= DEPTH_FADE_START
+        ? 1
+        : Math.max(0, 1 - (absDepth - DEPTH_FADE_START) / Math.max(DEPTH_FADE_END - DEPTH_FADE_START, 0.0001));
+
+    // Reference repo formula: opacity = min(gridFade, depthFade²). The squared
+    // depth term makes far planes fall off faster than grid distance alone.
+    const targetOpacity = Math.min(gridFade, depthFade * depthFade);
 
     this._currentOpacity += (targetOpacity - this._currentOpacity) * OPACITY_LERP;
 
