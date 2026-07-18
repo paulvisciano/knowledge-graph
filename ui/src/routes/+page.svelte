@@ -2033,12 +2033,17 @@
   }
 
   @media (max-width: 768px) {
+    .chat-overlay-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+    }
+
     .chat-overlay-panel {
+      position: fixed;
+      inset: 0;
       max-width: 100%;
-      top: 0;
-      bottom: 56px;
-      left: 0;
-      right: 0;
+      z-index: 61;
       border-left: none;
     }
   }
