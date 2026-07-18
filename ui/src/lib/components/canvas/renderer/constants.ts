@@ -30,6 +30,27 @@ export const DEPTH_FADE_START = 450;
 /** Absolute depth (world units) at which planes are fully hidden by depth fade. */
 export const DEPTH_FADE_END = 700;
 
+/** Mouse-parallax drift amplitude base; multiplied by zoom factor each frame. */
+export const DRIFT_AMOUNT = 8.0;
+
+/** Lerp factor smoothing drift toward the mouse-driven target. */
+export const DRIFT_LERP = 0.12;
+
+/** Lerp factor smoothing drift while zooming (snappier to avoid lag). */
+export const DRIFT_LERP_ZOOMING = 0.2;
+
+/** Velocity magnitude (|velocity.z|) above which the camera is considered zooming. */
+export const ZOOMING_VEL_THRESHOLD = 0.05;
+
+/** Minimum of zoomFactor = clamp(basePos.z / ZOOM_FACTOR_DIVISOR, min, max). */
+export const ZOOM_FACTOR_MIN = 0.3;
+
+/** Maximum of zoomFactor = clamp(basePos.z / ZOOM_FACTOR_DIVISOR, min, max). */
+export const ZOOM_FACTOR_MAX = 2.0;
+
+/** Divisor for basePos.z → zoomFactor. */
+export const ZOOM_FACTOR_DIVISOR = 50;
+
 /** Oposity below which a plane is considered invisible (mesh.visible = false). */
 export const INVIS_THRESHOLD = 0.01;
 

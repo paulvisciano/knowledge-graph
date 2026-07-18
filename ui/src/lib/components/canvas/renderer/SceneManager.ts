@@ -12,6 +12,9 @@
 import * as THREE from 'three';
 import {
   CHUNK_SIZE,
+  DRIFT_AMOUNT,
+  DRIFT_LERP,
+  DRIFT_LERP_ZOOMING,
   INITIAL_CAMERA_Z,
   KEYBOARD_SPEED,
   MAX_CAMERA_Z,
@@ -19,6 +22,10 @@ import {
   MIN_CAMERA_Z,
   VELOCITY_DECAY,
   VELOCITY_LERP,
+  ZOOMING_VEL_THRESHOLD,
+  ZOOM_FACTOR_DIVISOR,
+  ZOOM_FACTOR_MAX,
+  ZOOM_FACTOR_MIN,
 } from './constants';
 
 /** Drag-to-keyboard pan scale factor (matches drag panScale of z*0.002 per pixel). */
@@ -51,6 +58,9 @@ export class SceneManager {
   private readonly _chunkManager: ChunkManager;
   private readonly _resizeObserver: ResizeObserver;
   private readonly _velocity = new THREE.Vector3();
+  private readonly _basePos = new THREE.Vector3();
+  private readonly _drift = new THREE.Vector2();
+  private readonly _mouse = new THREE.Vector2();
   private readonly _keys = new Set<string>();
   private readonly _raycaster = new THREE.Raycaster();
   private readonly _pointerNdc = new THREE.Vector2();
@@ -155,6 +165,7 @@ export class SceneManager {
   private centerOnLayout(nodes: CanvasNode[]): void {
     if (nodes.length === 0) {
       this._camera.position.set(0, 0, INITIAL_CAMERA_Z);
+      this._basePos.set(0, 0, INITIAL_CAMERA_Z);
       return;
     }
     // Center on the first photo's chunk rather than the full-layout centroid.
@@ -165,6 +176,7 @@ export class SceneManager {
     const targetX = first.cellX * CHUNK_SIZE + first.localX;
     const targetY = first.cellY * CHUNK_SIZE + first.localY;
     this._camera.position.set(targetX, targetY, INITIAL_CAMERA_Z);
+    this._basePos.set(targetX, targetY, INITIAL_CAMERA_Z);
   }
 
   /** Begins the RAF loop. Safe to call once; idempotent if already running. */
@@ -216,17 +228,26 @@ export class SceneManager {
 
     this.applyKeyboard();
     this.applyVelocity();
+    this.applyDrift();
 
-    const prevChunkX = Math.floor(this._camera.position.x / CHUNK_SIZE);
-    const prevChunkY = Math.floor(this._camera.position.y / CHUNK_SIZE);
-    const prevChunkZ = Math.floor(this._camera.position.z / CHUNK_SIZE);
+    // Compose final camera position from basePos + drift. Chunk/fade logic
+    // uses basePos only so mouse parallax never triggers remounts or pop-in.
+    this._camera.position.set(
+      this._basePos.x + this._drift.x,
+      this._basePos.y + this._drift.y,
+      this._basePos.z,
+    );
+
+    const prevChunkX = Math.floor(this._basePos.x / CHUNK_SIZE);
+    const prevChunkY = Math.floor(this._basePos.y / CHUNK_SIZE);
+    const prevChunkZ = Math.floor(this._basePos.z / CHUNK_SIZE);
 
     const velMag = this._velocity.length();
-    this._chunkManager.update(this._camera.position, velMag);
+    this._chunkManager.update(this._basePos, velMag);
 
-    const cx = Math.floor(this._camera.position.x / CHUNK_SIZE);
-    const cy = Math.floor(this._camera.position.y / CHUNK_SIZE);
-    const cz = Math.floor(this._camera.position.z / CHUNK_SIZE);
+    const cx = Math.floor(this._basePos.x / CHUNK_SIZE);
+    const cy = Math.floor(this._basePos.y / CHUNK_SIZE);
+    const cz = Math.floor(this._basePos.z / CHUNK_SIZE);
     if (cx !== prevChunkX || cy !== prevChunkY || cz !== prevChunkZ) {
       this.onChunkChange?.(cx, cy, cz);
     }
@@ -237,7 +258,7 @@ export class SceneManager {
   /** Applies held keyboard keys to the velocity vector. */
   private applyKeyboard(): void {
     const k = this._keys;
-    const panStep = KEYBOARD_PAN_PIXELS * this._camera.position.z * DRAG_PAN_SCALE;
+    const panStep = KEYBOARD_PAN_PIXELS * this._basePos.z * DRAG_PAN_SCALE;
     const zoomStep = KEYBOARD_SPEED;
     let moved = false;
     if (k.has('ArrowLeft') || k.has('a')) { this._velocity.x -= panStep; moved = true; }
@@ -249,20 +270,37 @@ export class SceneManager {
     if (moved) this._userMoved = true;
   }
 
-  /** Lerps camera toward velocity, decays velocity, clamps camera Z. */
+  /** Lerps basePos toward velocity, decays velocity, clamps basePos Z. */
   private applyVelocity(): void {
     if (this._velocity.length() > MAX_VELOCITY) {
       this._velocity.normalize().multiplyScalar(MAX_VELOCITY);
     }
-    this._camera.position.x += this._velocity.x * VELOCITY_LERP;
-    this._camera.position.y += this._velocity.y * VELOCITY_LERP;
-    this._camera.position.z += this._velocity.z * VELOCITY_LERP;
+    this._basePos.x += this._velocity.x * VELOCITY_LERP;
+    this._basePos.y += this._velocity.y * VELOCITY_LERP;
+    this._basePos.z += this._velocity.z * VELOCITY_LERP;
 
-    if (this._camera.position.z < MIN_CAMERA_Z) this._camera.position.z = MIN_CAMERA_Z;
-    if (this._camera.position.z > MAX_CAMERA_Z) this._camera.position.z = MAX_CAMERA_Z;
+    if (this._basePos.z < MIN_CAMERA_Z) this._basePos.z = MIN_CAMERA_Z;
+    if (this._basePos.z > MAX_CAMERA_Z) this._basePos.z = MAX_CAMERA_Z;
 
     this._velocity.multiplyScalar(VELOCITY_DECAY);
     if (this._velocity.lengthSq() < 1e-6) this._velocity.set(0, 0, 0);
+  }
+
+  /** Smooths drift toward mouse * driftAmount (zoom-scaled parallax). */
+  private applyDrift(): void {
+    const isZooming = Math.abs(this._velocity.z) > ZOOMING_VEL_THRESHOLD;
+    const zoomFactor = Math.max(
+      ZOOM_FACTOR_MIN,
+      Math.min(ZOOM_FACTOR_MAX, this._basePos.z / ZOOM_FACTOR_DIVISOR),
+    );
+    const amount = DRIFT_AMOUNT * zoomFactor;
+    const lerpFactor = isZooming ? DRIFT_LERP_ZOOMING : DRIFT_LERP;
+    if (this._pointer.down) {
+      // Freeze drift during drag — keep it at its current value.
+      return;
+    }
+    this._drift.x = this._drift.x + (this._mouse.x * amount - this._drift.x) * lerpFactor;
+    this._drift.y = this._drift.y + (this._mouse.y * amount - this._drift.y) * lerpFactor;
   }
 
   // --- input handlers --------------------------------------------------
@@ -287,6 +325,9 @@ export class SceneManager {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
+    const rect = this._renderer.domElement.getBoundingClientRect();
+    this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     if (this._pointer.down) {
       const dx = e.clientX - this._pointer.lastX;
       const dy = e.clientY - this._pointer.lastY;
@@ -296,9 +337,9 @@ export class SceneManager {
       if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
         this._pointer.dragged = true;
       }
-      const panScale = this._camera.position.z * DRAG_PAN_SCALE;
-      this._camera.position.x -= dx * panScale;
-      this._camera.position.y += dy * panScale;
+      const panScale = this._basePos.z * DRAG_PAN_SCALE;
+      this._basePos.x -= dx * panScale;
+      this._basePos.y += dy * panScale;
       this._userMoved = true;
       this.updateCursor();
     } else {
@@ -317,9 +358,9 @@ export class SceneManager {
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     // Inverted: scroll up (deltaY < 0) zooms in (z decreases), scroll down zooms out.
-    this._camera.position.z += e.deltaY * WHEEL_ZOOM_STEP;
-    if (this._camera.position.z < MIN_CAMERA_Z) this._camera.position.z = MIN_CAMERA_Z;
-    if (this._camera.position.z > MAX_CAMERA_Z) this._camera.position.z = MAX_CAMERA_Z;
+    this._basePos.z += e.deltaY * WHEEL_ZOOM_STEP;
+    if (this._basePos.z < MIN_CAMERA_Z) this._basePos.z = MIN_CAMERA_Z;
+    if (this._basePos.z > MAX_CAMERA_Z) this._basePos.z = MAX_CAMERA_Z;
     this._pointer.dragged = true;
     this._userMoved = true;
   };
