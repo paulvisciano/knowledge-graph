@@ -10,12 +10,21 @@
   let containerEl: HTMLDivElement | undefined = $state();
   let shouldAutoScroll = $state(true);
   let expandedPromptIds = $state<Set<string>>(new Set());
+  let expandedRetrievalIds = $state<Set<string>>(new Set());
 
   function togglePrompt(id: string) {
     expandedPromptIds = new Set(
       expandedPromptIds.has(id)
         ? [...expandedPromptIds].filter((x) => x !== id)
         : [...expandedPromptIds, id]
+    );
+  }
+
+  function toggleRetrieval(id: string) {
+    expandedRetrievalIds = new Set(
+      expandedRetrievalIds.has(id)
+        ? [...expandedRetrievalIds].filter((x) => x !== id)
+        : [...expandedRetrievalIds, id]
     );
   }
 
@@ -114,13 +123,80 @@
               {/if}
             </div>
 
-            {#if msg.kgReferences && msg.kgReferences.length > 0}
+            {#if msg.kgRetrieval && (msg.kgRetrieval.entities.length > 0 || msg.kgRetrieval.relationships.length > 0 || msg.kgRetrieval.chunks.length > 0)}
+              <div class="mt-3 border-t border-cyber-border pt-2">
+                <button
+                  type="button"
+                  onclick={() => toggleRetrieval(msg.id)}
+                  class="flex w-full items-center gap-1.5 text-xs font-medium text-cyber-text-dim transition-colors hover:text-cyber-cyan"
+                >
+                  <svg
+                    class="h-3 w-3 shrink-0 transition-transform duration-200 {expandedRetrievalIds.has(msg.id) ? 'rotate-90' : ''}"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span>Retrieved {msg.kgRetrieval.entities.length} entit{msg.kgRetrieval.entities.length === 1 ? 'y' : 'ies'}, {msg.kgRetrieval.relationships.length} relation{msg.kgRetrieval.relationships.length === 1 ? '' : 's'}, {msg.kgRetrieval.chunks.length} chunk{msg.kgRetrieval.chunks.length === 1 ? '' : 's'}</span>
+                </button>
+                {#if expandedRetrievalIds.has(msg.id)}
+                  <div class="mt-2 space-y-3">
+                    {#if msg.kgRetrieval.entities.length > 0}
+                      <div class="rounded-md border border-cyber-border/60 bg-cyber-bg/60 px-3 py-2">
+                        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">Entities ({msg.kgRetrieval.entities.length})</div>
+                        <div class="space-y-1.5">
+                          {#each msg.kgRetrieval.entities as ent}
+                            <div class="text-[11px] leading-relaxed">
+                              <span class="font-mono text-cyber-cyan/80">{ent.entity_name}</span>
+                              {#if ent.entity_type}<span class="ml-1 rounded bg-cyber-purple/20 px-1 py-0.5 text-[9px] uppercase text-cyber-purple/90">{ent.entity_type}</span>{/if}
+                              {#if ent.description}<div class="mt-0.5 text-cyber-text-dim">{ent.description.slice(0, 160)}{ent.description.length > 160 ? '…' : ''}</div>{/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    {#if msg.kgRetrieval.relationships.length > 0}
+                      <div class="rounded-md border border-cyber-border/60 bg-cyber-bg/60 px-3 py-2">
+                        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">Relationships ({msg.kgRetrieval.relationships.length})</div>
+                        <div class="space-y-1.5">
+                          {#each msg.kgRetrieval.relationships as rel}
+                            <div class="text-[11px] leading-relaxed">
+                              <span class="font-mono text-cyber-cyan/80">{rel.src_id}</span>
+                              <span class="mx-1 text-cyber-text-dim/60">→</span>
+                              <span class="font-mono text-cyber-cyan/80">{rel.tgt_id}</span>
+                              {#if rel.description}<div class="mt-0.5 text-cyber-text-dim">{rel.description.slice(0, 160)}{rel.description.length > 160 ? '…' : ''}</div>{/if}
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                    {#if msg.kgRetrieval.chunks.length > 0}
+                      <div class="rounded-md border border-cyber-border/60 bg-cyber-bg/60 px-3 py-2">
+                        <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">Chunks ({msg.kgRetrieval.chunks.length})</div>
+                        <div class="space-y-1.5">
+                          {#each msg.kgRetrieval.chunks as chk, idx}
+                            <div class="text-[11px] leading-relaxed">
+                              <div class="mb-0.5 flex items-center gap-1.5">
+                                <span class="text-cyber-cyan/70 font-mono text-[10px]">[{chk.reference_id}]</span>
+                                <span class="truncate text-cyber-text-dim/70 text-[10px]">{chk.file_path.split('/').pop() || chk.file_path}</span>
+                              </div>
+                              <div class="text-cyber-text-dim">{chk.content.slice(0, 200)}{chk.content.length > 200 ? '…' : ''}</div>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {:else if msg.kgReferences && msg.kgReferences.length > 0}
               <div class="mt-3 border-t border-cyber-border pt-2">
                 <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyber-cyan/80">
                   Retrieved {msg.kgReferences.length} source{msg.kgReferences.length === 1 ? '' : 's'}
                 </div>
                 <div class="flex flex-wrap gap-1.5">
-                  {#each msg.kgReferences as ref, idx}
+                  {#each msg.kgReferences as ref}
                     <span
                       title={ref.file_path}
                       class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 bg-cyber-bg/60 px-2 py-0.5 font-mono text-[10px] text-cyber-text-dim"

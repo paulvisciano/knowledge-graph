@@ -31,6 +31,7 @@ export const API = {
     status: '/status',
     query: '/query',
     queryStream: '/query/stream',
+    queryData: '/query/data',
     chat: '/api/chat',
     chatModels: '/api/show',
     graph: {
@@ -115,6 +116,42 @@ export interface ReferenceItem {
   content?: string[];
 }
 
+export interface KgEntity {
+  entity_name: string;
+  entity_type: string;
+  description: string;
+  source_id: string;
+  file_path: string;
+  created_at: string;
+  reference_id: string;
+}
+
+export interface KgRelationship {
+  src_id: string;
+  tgt_id: string;
+  description: string;
+  keywords: string;
+  weight: number;
+  source_id: string;
+  file_path: string;
+  created_at: string;
+  reference_id: string;
+}
+
+export interface KgChunk {
+  content: string;
+  file_path: string;
+  chunk_id: string;
+  reference_id: string;
+}
+
+export interface KgRetrievalData {
+  entities: KgEntity[];
+  relationships: KgRelationship[];
+  chunks: KgChunk[];
+  references: ReferenceItem[];
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -185,6 +222,10 @@ export interface ChatMessage {
    *  from LightRAG's /query/stream as soon as retrieval completes. Shown as
    *  a live "Retrieved N sources" chip list under the assistant reply. */
   kgReferences?: ReferenceItem[];
+  /** Full structured retrieval (entities, relationships, chunks) fetched in
+   *  parallel from /query/data. Surfaced live so the user sees exactly what
+   *  the knowledge graph returned for their query, not just a source count. */
+  kgRetrieval?: KgRetrievalData;
 }
 
 export interface MessageTimings {

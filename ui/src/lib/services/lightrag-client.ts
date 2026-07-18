@@ -4,6 +4,7 @@ import {
   type QueryRequest,
   type QueryMode,
   type ReferenceItem,
+  type KgRetrievalData,
   type LightragStatus,
   type KGGraph,
   type DocStatus,
@@ -87,6 +88,40 @@ export class LightragClient {
       conversation_history: history,
     });
     return response;
+  }
+
+  /**
+   * Fetch the full structured retrieval (entities, relationships, chunks,
+   * references) for a query via /query/data. This is the pure retrieval result
+   * with NO LLM generation — what the knowledge graph actually returned for
+   * the query. The mode mirrors the generation call so the retrieved data
+   * matches what was used to build the prompt. Used to surface live retrieval
+   * details (entity names, relationship src->tgt, chunk snippets) in the UI
+   * in parallel with generation.
+   */
+  async fetchKgRetrievalData(
+    query: string,
+    mode: QueryMode = 'mix',
+  ): Promise<KgRetrievalData> {
+    const url = this.proxyUrl(API.lightrag.queryData);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ query, mode, stream: false }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`LightRAG query/data ${res.status} ${res.statusText}: ${body}`);
+    }
+    const payload = await res.json() as {
+      status: string;
+      message: string;
+      data: KgRetrievalData;
+      metadata: Record<string, unknown>;
+    };
+    return (
+      payload.data ?? { entities: [], relationships: [], chunks: [], references: [] }
+    );
   }
 
   async *queryStream(params: QueryRequest): AsyncGenerator<string> {

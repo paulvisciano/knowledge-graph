@@ -475,9 +475,11 @@
         role: m.role,
         content: m.content,
       }));
+      const queryText = lastUserMsg?.content ?? '';
       if (lastUserMsg && lastUserMsg.role === 'user') {
+        // Assembled prompt preview (system prompt + retrieved context + query).
         lightragClient
-          .fetchKgPrompt(lastUserMsg.content, historyForPreview)
+          .fetchKgPrompt(queryText, historyForPreview)
           .then((prompt) => {
             updateStreamMessage(assistantId, (m) => ({
               ...m,
@@ -486,6 +488,24 @@
             }));
           })
           .catch((e) => console.error('[kg-direct] prompt preview fetch failed:', e));
+
+        // Full structured retrieval (entities, relationships, chunks) via
+        // /query/data — pure retrieval, no generation. Surfaced live so the
+        // user sees the actual KG data retrieved for their query, not just a
+        // source count. Updates the progress label with counts and attaches
+        // the data to the assistant message for the UI to render.
+        lightragClient
+          .fetchKgRetrievalData(queryText)
+          .then((data) => {
+            if (streamingConversationId === activeConversationId) {
+              const e = data.entities.length;
+              const r = data.relationships.length;
+              const c = data.chunks.length;
+              processingLabel = `Retrieved ${e} entities, ${r} relations, ${c} chunks…`;
+            }
+            updateStreamMessage(assistantId, (m) => ({ ...m, kgRetrieval: data }));
+          })
+          .catch((e) => console.error('[kg-direct] retrieval data fetch failed:', e));
       }
 
       let accumulatedContent = '';
@@ -513,7 +533,6 @@
       // line as soon as retrieval completes — that gives us a live "Retrieved
       // N sources" stage with real file paths before generation begins.
       // Conversation history is passed through so the LLM keeps coherence.
-      const queryText = lastUserMsg?.content ?? '';
       for await (const ev of lightragClient.queryStreamEvents({
         query: queryText,
         mode: 'mix',
@@ -524,10 +543,10 @@
         if (!streamAbortController) break;
 
         if (ev.type === 'references') {
-          if (streamingConversationId === activeConversationId) {
-            const n = ev.references.length;
-            processingLabel = `Retrieved ${n} source${n === 1 ? '' : 's'}…`;
-          }
+          // References arrive via /query/stream; the richer retrieval-data
+          // label (entities/relations/chunks) is set by the parallel
+          // /query/data fetch, so don't overwrite it here. Still attach the
+          // references for the chip list in case /query/data fails.
           updateStreamMessage(assistantId, (m) => ({ ...m, kgReferences: ev.references }));
         } else if (ev.type === 'chunk') {
           if (!gotFirstToken) {
