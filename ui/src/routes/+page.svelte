@@ -3,7 +3,7 @@
   import { API } from '$lib/constants';
   import { eventBus } from '$lib/stores/event-bus.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
-  import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen, chatMode } from '$lib/stores/ui';
+  import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
   import { mcpClient } from '$lib/services/mcp-client.svelte';
   import { connectionStore } from '$lib/stores/connection.svelte';
   import { configStore } from '$lib/stores/config.svelte';
@@ -17,9 +17,8 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { AudioRecorder, blobToBase64, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
-  import { extractImageFilePaths } from '$lib/utils/extract-image-paths';
-  import { extractReferenceImages } from '$lib/utils/extract-reference-images';
+  import { AudioRecorder, blobToBase64, isAudioRecordingSupported } from '$lib/utils/audio-recording';
+  import { parseKGResult } from '$lib/utils/parse-kg-result';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
@@ -186,26 +185,8 @@
         const audioData = await blobToBase64(wavBlob);
         console.log('[audio] base64 length:', audioData.length, 'format: wav');
 
-        // In kg-direct mode the knowledge graph path only understands text,
-        // so transcribe the recording with Whisper and pass the transcript to
-        // handleSend. The KG then retrieves context and Gemma generates the
-        // answer using both the transcript and the retrieved context. In
-        // llm-mcp mode, skip transcription and send the raw audio to the LLM
-        // (multimodal content parts).
-        if ($chatMode === 'kg-direct') {
-          isTranscribing = true;
-          processingLabel = 'Transcribing audio...';
-          try {
-            const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
-            console.log('[audio] transcript length:', transcript.length);
-            await handleSend(audioUrl, audioData, 'wav', false, transcript || undefined);
-          } finally {
-            isTranscribing = false;
-            processingLabel = '';
-          }
-        } else {
-          await handleSend(audioUrl, audioData, 'wav', false);
-        }
+        // Audio is multimodal: send the raw audio to the LLM as content parts.
+        await handleSend(audioUrl, audioData, 'wav', false);
       } catch (e) {
         console.error('Audio processing failed:', e);
       } finally {
@@ -435,210 +416,31 @@
   }
 
   /**
-   * Stream a KG-augmented chat response directly through LightRAG's /api/chat endpoint.
-   * This bypasses the LLM+MCP loop entirely — LightRAG handles retrieval and generation.
-   */
-  async function streamKGChatResponse() {
-    streamingConversationId = activeConversationId;
-    streamAbortController = new AbortController();
-
-    const assistantId = generateId();
-    const assistantMsg: ChatMessage = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-      mcpToolCalls: [],
-    };
-    pushStreamMessage(assistantMsg);
-    isStreaming = true;
-    isProcessing = true;
-    processingLabel = 'Retrieving knowledge graph...';
-
-    try {
-      const ollamaMessages: OllamaMessage[] = messages
-        .filter((m) => !m.isStreaming)
-        .map((m) => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content,
-        }));
-
-      // Fetch the fully-assembled prompt (rag_response system prompt with
-      // retrieved KG context + user query) in parallel with the /query stream.
-      // The last user message is the query; everything before it is history.
-      // The preview mirrors the /query retrieval for the same query, so what
-      // the UI shows is exactly what the LLM receives. Non-blocking: if it
-      // fails, the chat still streams normally, just without the preview.
-      const lastUserMsg = ollamaMessages[ollamaMessages.length - 1];
-      const historyForPreview = ollamaMessages.slice(0, -1).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-      const queryText = lastUserMsg?.content ?? '';
-      if (lastUserMsg && lastUserMsg.role === 'user') {
-        // Assembled prompt preview (system prompt + retrieved context + query).
-        lightragClient
-          .fetchKgPrompt(queryText, historyForPreview)
-          .then((prompt) => {
-            updateStreamMessage(assistantId, (m) => ({
-              ...m,
-              kgPrompt: prompt,
-              kgPromptHistory: historyForPreview,
-            }));
-          })
-          .catch((e) => console.error('[kg-direct] prompt preview fetch failed:', e));
-
-        // Full structured retrieval (entities, relationships, chunks) via
-        // /query/data — pure retrieval, no generation. Surfaced live so the
-        // user sees the actual KG data retrieved for their query, not just a
-        // source count. Updates the progress label with counts and attaches
-        // the data to the assistant message for the UI to render.
-        lightragClient
-          .fetchKgRetrievalData(queryText)
-          .then((data) => {
-            if (streamingConversationId === activeConversationId) {
-              const e = data.entities.length;
-              const r = data.relationships.length;
-              const c = data.chunks.length;
-              processingLabel = `Retrieved ${e} entities, ${r} relations, ${c} chunks…`;
-            }
-            updateStreamMessage(assistantId, (m) => ({ ...m, kgRetrieval: data }));
-          })
-          .catch((e) => console.error('[kg-direct] retrieval data fetch failed:', e));
-      }
-
-      let accumulatedContent = '';
-      let gotFirstToken = false;
-
-      function scheduleFlush() {
-        if (streamingRafId !== null) return;
-        streamingRafId = requestAnimationFrame(() => {
-          streamingRafId = null;
-          if (streamingBuffer) {
-            const buf = streamingBuffer;
-            if (streamingConversationId === activeConversationId) {
-              messages = messages.map((m) =>
-                m.id === assistantId
-                  ? { ...m, content: buf.content, isStreaming: true }
-                  : m
-              );
-            }
-            streamingBuffer = null;
-          }
-        });
-      }
-
-      // Use /query/stream (not /api/chat) so LightRAG emits a references
-      // line as soon as retrieval completes — that gives us a live "Retrieved
-      // N sources" stage with real file paths before generation begins.
-      // Conversation history is passed through so the LLM keeps coherence.
-      for await (const ev of lightragClient.queryStreamEvents({
-        query: queryText,
-        mode: 'mix',
-        stream: true,
-        include_references: true,
-        conversation_history: historyForPreview,
-      })) {
-        if (!streamAbortController) break;
-
-        if (ev.type === 'references') {
-          // References arrive via /query/stream; the richer retrieval-data
-          // label (entities/relations/chunks) is set by the parallel
-          // /query/data fetch, so don't overwrite it here. Still attach the
-          // references for the chip list in case /query/data fails.
-          updateStreamMessage(assistantId, (m) => ({ ...m, kgReferences: ev.references }));
-        } else if (ev.type === 'chunk') {
-          if (!gotFirstToken) {
-            gotFirstToken = true;
-            if (streamingConversationId === activeConversationId) {
-              processingLabel = 'Generating…';
-            }
-          }
-          accumulatedContent += ev.text;
-          streamingBuffer = { content: accumulatedContent, thinking: '', assistantId };
-          scheduleFlush();
-        } else if (ev.type === 'error') {
-          throw new Error(ev.message);
-        }
-      }
-
-      if (streamingRafId !== null) {
-        cancelAnimationFrame(streamingRafId);
-        streamingRafId = null;
-      }
-      streamingBuffer = null;
-
-      updateStreamMessage(assistantId, (m) => ({
-        ...m,
-        content: accumulatedContent || '',
-        isStreaming: false,
-        model: 'lightrag',
-      }));
-
-      // Render image references from the `### References` section as inline carousel.
-      try {
-        const refNames = extractReferenceImages(accumulatedContent || '');
-        const refImageUrls: string[] = [];
-        for (const name of refNames) {
-          refImageUrls.push(lightragClient.photoImageUrl(name));
-        }
-        if (refImageUrls.length > 0) {
-          updateStreamMessage(assistantId, (m) => ({
-            ...m,
-            imageUrls: [...(m.imageUrls || []), ...refImageUrls],
-          }));
-        }
-      } catch (refErr) {
-        console.error('[kg-direct] reference image resolution failed:', refErr);
-      }
-
-      saveMessagesToConversation();
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-
-      const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      updateStreamMessage(assistantId, (m) => ({
-        ...m,
-        content: m.content || `Error: ${errMsg}`,
-        isStreaming: false,
-      }));
-    } finally {
-      isStreaming = false;
-      isProcessing = false;
-      processingLabel = '';
-      thinkingContent = '';
-      tokensPerSecond = null;
-      promptTokens = null;
-
-      if (streamingConversationId) {
-        const conv = conversations.find((c) => c.id === streamingConversationId);
-        if (conv) {
-          if (streamingConversationId !== activeConversationId) {
-            conv.messages = conv.messages.map((m) =>
-              m.isStreaming ? { ...m, isStreaming: false } : m
-            );
-          } else {
-            conv.messages = [...messages];
-          }
-          conv.updatedAt = Date.now();
-          syncClient.saveConversation(conv);
-        }
-        if (streamingConversationId !== activeConversationId) {
-          unreadConversations = new Set([...unreadConversations, streamingConversationId]);
-        }
-      }
-      streamingConversationId = null;
-      requestAnimationFrame(scrollToBottom);
-    }
-  }
-
-  /**
    * Stream an assistant response from the LLM based on the current `messages` state.
    * This is the core streaming loop — called by both handleSend (new messages) and
    * resendMessage (re-processing).
    */
-  async function streamAssistantResponse(sentAttachments: Attachment[] = []) {
+   /**
+    * Resolve image file paths to renderable URLs concurrently and attach them
+    * to the streaming assistant message as they become available, so the gallery
+    * renders incrementally while the next LLM turn is in flight.
+    */
+   function resolveImagePaths(
+     paths: string[],
+     assistantId: string,
+     collected: string[],
+   ) {
+     for (const p of paths) {
+       const directUrl = lightragClient.photoImageUrl(p);
+       collected.push(directUrl);
+       updateStreamMessage(assistantId, (m) => ({
+         ...m,
+         imageUrls: [...(m.imageUrls || []), directUrl],
+       }));
+     }
+   }
+
+   async function streamAssistantResponse(sentAttachments: Attachment[] = []) {
      // Pin which conversation this stream belongs to, so it keeps writing
      // to the right place even if the user switches conversations.
      streamingConversationId = activeConversationId;
@@ -879,22 +681,25 @@
         }
         streamingBuffer = null;
 
-        // Finalize this assistant message
+        // Finalize this assistant message — keep isStreaming true if tool calls are
+        // pending so the progress bar / chip rendering stays visible during tool exec.
+        const pendingToolCalls = toolCalls.length > 0
+          ? toolCalls.map((tc) => ({
+              id: tc.id,
+              toolName: tc.name,
+              arguments: JSON.parse(tc.arguments || '{}'),
+              timestamp: Date.now(),
+            }))
+          : [];
+
         updateStreamMessage(assistantId, (m) => ({
           ...m,
           content: accumulatedContent || '',
-          isStreaming: false,
+          isStreaming: finishReason === 'tool_calls' && toolCalls.length > 0,
           thinkingContent: accumulatedThinking || undefined,
           timings: msgTimings,
           model: selectedModel || undefined,
-          mcpToolCalls: toolCalls.length > 0
-            ? toolCalls.map((tc) => ({
-                id: tc.id,
-                toolName: tc.name,
-                arguments: JSON.parse(tc.arguments || '{}'),
-                timestamp: Date.now(),
-              }))
-            : m.mcpToolCalls,
+          mcpToolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : m.mcpToolCalls,
         }));
 
         // If no tool calls, we're done
@@ -943,26 +748,20 @@
           }
 
           let displayResult = toolResult;
+          let parsedKG: MCPToolCall['parsedKG'] = undefined;
           if (!isToolError && toolResult) {
-            const imagePaths = extractImageFilePaths(toolResult);
-            for (const imgPath of imagePaths) {
-              const url = await lightragClient.resolveImageContentUrl(imgPath);
-              if (url) collectedImageUrls.push(url);
-            }
+            const parsed = parseKGResult(toolResult);
+            parsedKG = parsed;
             const markerIdx = toolResult.indexOf('---IMAGE_REFS---');
-            if (markerIdx !== -1) {
-              displayResult = toolResult.slice(0, markerIdx).trimEnd();
-              apiMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: displayResult,
-              });
-            } else {
-              apiMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: toolResult,
-              });
+            displayResult = markerIdx !== -1 ? toolResult.slice(0, markerIdx).trimEnd() : toolResult;
+            apiMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: parsed.contextText,
+            });
+
+            if (parsed.imagePaths.length > 0) {
+              resolveImagePaths(parsed.imagePaths, assistantId, collectedImageUrls);
             }
           } else {
             apiMessages.push({
@@ -977,7 +776,7 @@
             ...m,
             mcpToolCalls: m.mcpToolCalls?.map((mtc) =>
               mtc.id === tc.id
-                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError }
+                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG }
                 : mtc
             ),
           }));
@@ -992,12 +791,9 @@
           });
         }
 
-        if (collectedImageUrls.length > 0) {
-          updateStreamMessage(assistantId, (m) => ({
-            ...m,
-            imageUrls: [...(m.imageUrls || []), ...collectedImageUrls],
-          }));
-        }
+        // Finalize this assistant message — the tool turn is done, the next
+        // loop iteration creates a fresh streaming assistant message.
+        updateStreamMessage(assistantId, (m) => ({ ...m, isStreaming: false }));
 
         // Reset for next turn — the loop continues with tool results appended
         isStreaming = false;
@@ -1122,17 +918,7 @@
       scrollToBottom();
     });
 
-    // kg-direct mode: route through the knowledge graph (LightRAG retrieval +
-    // Gemma generation). Audio must be transcribed upstream (see handleMicClick)
-    // so the transcript is available as message content; without a transcript
-    // we fall back to the multimodal LLM path to avoid sending an empty query.
-    // llm-mcp mode: always use the multimodal LLM path so audio/images go
-    // directly to the model as content parts.
-    if ($chatMode === 'kg-direct' && (!audioData || transcript)) {
-      await streamKGChatResponse();
-    } else {
-      await streamAssistantResponse(sentAttachments);
-    }
+    await streamAssistantResponse(sentAttachments);
   }
 
   /** Process a single image through the KG pipeline with real-time SSE progress. */
@@ -1157,73 +943,151 @@
     }
   }
 
-  /** Consume SSE events from a job, with automatic reconnect on page reload. */
+  /** Consume SSE events from a job, with automatic reconnect + polling backstop. */
   async function consumeJobEvents(jobId: string, photoNodeId: string, att: Attachment, afterEventId: number = 0) {
-    const { stream, cancel } = kgApiClient.streamJobEvents(jobId, afterEventId);
+    let lastEventId = afterEventId;
+    const activeJobs = new Set<string>([jobId]);
 
-    for await (const sseEvent of stream) {
-      let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number; event_id?: number };
+    // Polling backstop: if the SSE stream ends without a terminal event, poll the
+    // job status endpoint to force-reconcile the stage. Stops once the job reaches
+    // a terminal state or is removed from the store.
+    const pollStatus = async () => {
       try {
-        payload = JSON.parse(sseEvent.data);
-      } catch {
-        continue;
-      }
-
-      const eventName = payload.event;
-      const eventData = payload.data ?? {};
-      if (!eventName) continue;
-
-      const mappedStage = imageProcessingStore.mapEventToStage(eventName);
-      if (mappedStage) {
-        const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
-          ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
-        imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
-      }
-
-      if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
-        imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
-      }
-
-      eventBus.pushEvent({
-        id: crypto.randomUUID(),
-        type: 'graph_update',
-        title: eventName.replace(/_/g, ' '),
-        description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
-        timestamp: Date.now(),
-        status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
-          ? 'completed'
-          : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
-            ? 'error'
-            : 'running',
-        meta: eventData as Record<string, unknown>,
-      });
-
-      if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
-        const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
-        const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
-        graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
-        if (eventName === 'photo_node_created' && att.dataUrl) {
-          graphStore.setPhotoImage(nodeId, att.dataUrl);
+        const job = await kgApiClient.getJob(jobId);
+        if (job.status === 'complete') {
+          imageProcessingStore.updateStage(photoNodeId, 'complete');
+          graphStore.pipelineDone = true;
+          graphStore.refresh();
+          return true;
         }
-      } else if (eventName === 'visual_entity_linked') {
-        const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
-        const targetId = String(eventData.target ?? eventData.entity_name ?? '');
-        const edgeType = String(eventData.relation_type ?? 'depicts');
-        graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
-      } else if (eventName === 'exif_relation_created') {
-        const sourceId = String(eventData.source ?? '');
-        const targetId = String(eventData.target ?? '');
-        const edgeType = String(eventData.relation_type ?? 'has_exif');
-        graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+        if (job.status === 'failed' || job.status === 'cancelled') {
+          imageProcessingStore.updateStage(photoNodeId, 'error', job.error || `Job ${job.status}`);
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
+    // Cleanup helper used by every terminal path.
+    let currentCancel: (() => void) | null = null;
+    const finish = () => {
+      if (currentCancel) currentCancel();
+      currentCancel = null;
+      activeJobs.delete(jobId);
+    };
+
+    let reconnectDelayMs = 1000;
+    const MAX_RECONNECT_DELAY_MS = 15000;
+    const MAX_RECONNECTS = 5;
+
+    for (let attempt = 0; attempt <= MAX_RECONNECTS; attempt++) {
+      const { stream, cancel } = kgApiClient.streamJobEvents(jobId, lastEventId);
+      currentCancel = cancel;
+      let streamEnded = false;
+
+      try {
+        for await (const sseEvent of stream) {
+          let payload: { event?: string; data?: Record<string, unknown>; timestamp?: number; event_id?: number };
+          try {
+            payload = JSON.parse(sseEvent.data);
+          } catch {
+            continue;
+          }
+
+          if (payload.event_id != null && payload.event_id > lastEventId) {
+            lastEventId = payload.event_id;
+          }
+
+          const eventName = payload.event;
+          const eventData = payload.data ?? {};
+          if (!eventName) continue;
+
+          const mappedStage = imageProcessingStore.mapEventToStage(eventName);
+          if (mappedStage) {
+            const errorMsg = eventName.endsWith('_failed') || eventName.endsWith('_error') || eventName.endsWith('_timeout')
+              ? String(eventData.error ?? eventData.message ?? 'Unknown error') : undefined;
+            imageProcessingStore.updateStage(photoNodeId, mappedStage, errorMsg);
+          }
+
+          if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
+            imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
+          }
+
+          eventBus.pushEvent({
+            id: crypto.randomUUID(),
+            type: 'graph_update',
+            title: eventName.replace(/_/g, ' '),
+            description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
+            timestamp: Date.now(),
+            status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
+              ? 'completed'
+              : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
+                ? 'error'
+                : 'running',
+            meta: eventData as Record<string, unknown>,
+          });
+
+          if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
+            const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
+            const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
+            graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
+            if (eventName === 'photo_node_created' && att.dataUrl) {
+              graphStore.setPhotoImage(nodeId, att.dataUrl);
+            }
+          } else if (eventName === 'visual_entity_linked') {
+            const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
+            const targetId = String(eventData.target ?? eventData.entity_name ?? '');
+            const edgeType = String(eventData.relation_type ?? 'depicts');
+            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+          } else if (eventName === 'exif_relation_created') {
+            const sourceId = String(eventData.source ?? '');
+            const targetId = String(eventData.target ?? '');
+            const edgeType = String(eventData.relation_type ?? 'has_exif');
+            graphStore.upsertEdge(sourceId, targetId, edgeType, eventData as Record<string, unknown>);
+          }
+
+          if (eventName === 'pipeline_complete' || eventName === 'pipeline_failed') {
+            graphStore.pipelineDone = true;
+            graphStore.refresh();
+            finish();
+            return;
+          }
+        }
+        streamEnded = true;
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          finish();
+          return;
+        }
+        // Network error — fall through to reconnect/reconcile below.
+        streamEnded = true;
       }
 
-      if (eventName === 'pipeline_complete' || eventName === 'pipeline_failed') {
-        graphStore.pipelineDone = true;
-        graphStore.refresh();
-        cancel();
-        return;
+      // Stream ended without a terminal event. Reconcile via the status endpoint
+      // before deciding whether to reconnect: the job may have already completed.
+      if (streamEnded) {
+        const terminal = await pollStatus();
+        if (terminal) {
+          finish();
+          return;
+        }
+        if (attempt < MAX_RECONNECTS) {
+          await new Promise((r) => setTimeout(r, reconnectDelayMs));
+          reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+        }
       }
     }
+
+    // Exhausted reconnects and the job isn't terminal — poll a couple more times
+    // as a last resort, then leave the store as-is so the user can see the stall.
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      if (!(jobId in imageProcessingStore.statuses)) { finish(); return; }
+      if (await pollStatus()) { finish(); return; }
+    }
+    finish();
   }
 
   /** Send image attachments through the KG pipeline with real-time SSE progress. */
@@ -1274,15 +1138,7 @@
     isProcessing = true;
     processingLabel = 'Regenerating...';
 
-    // Stream a new assistant response using the existing conversation history.
-    // Audio is multimodal and must route through streamAssistantResponse even in
-    // kg-direct mode (matches handleSend routing), otherwise audioData is dropped
-    // and the model receives an empty user message -> "[no-context]".
-    if ($chatMode === 'kg-direct' && !msg.audioData) {
-      streamKGChatResponse();
-    } else {
-      streamAssistantResponse();
-    }
+    streamAssistantResponse();
   }
 
   function deleteConversation(id: string) {
@@ -1643,7 +1499,7 @@
             bind:value={chatInput}
             oninput={autoResize}
             onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, false); } }}
-            placeholder={$chatMode === 'kg-direct' ? 'Ask your knowledge graph...' : 'Ask me anything...'}
+            placeholder='Ask me anything...'
             rows="1"
             data-testid="chat-input"
             class="max-h-[144px] min-h-[24px] flex-1 resize-none bg-transparent text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40"
@@ -1775,6 +1631,7 @@
                       </details>
                     {/if}
 
+                    {#if msg.content || (msg.isStreaming && !msg.mcpToolCalls?.length)}
                     <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30">
                       {#if msg.isStreaming && isProcessing}
                         <div class="flex items-center gap-2 py-1">
@@ -1786,11 +1643,7 @@
                             <span class="shrink-0 font-mono text-[10px] text-cyber-text-dim">{promptTokens} tokens</span>
                           {/if}
                         </div>
-                      {/if}
-                      {#if msg.content}
-                        <div class="prose-cyber">{@html msg.isStreaming ? renderStreamingContent(msg.content) : renderMarkdown(msg.content)}</div>
-                      {/if}
-                      {#if msg.isStreaming && !msg.content && !isProcessing}
+                      {:else if msg.isStreaming && !msg.content}
                         <div class="flex items-center gap-2 py-1">
                           <div class="flex gap-1">
                             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 0ms"></span>
@@ -1807,6 +1660,9 @@
                             Stop
                           </button>
                         </div>
+                      {/if}
+                      {#if msg.content}
+                        <div class="prose-cyber">{@html msg.isStreaming ? renderStreamingContent(msg.content) : renderMarkdown(msg.content)}</div>
                       {/if}
                       {#if msg.isStreaming && msg.content}
                         <span class="inline-flex items-center gap-1.5">
@@ -1830,9 +1686,6 @@
                         </div>
                       {/if}
                     </div>
-
-                    {#if msg.imageUrls && msg.imageUrls.length > 0}
-                      <ImageGallery images={msg.imageUrls} alt="Knowledge graph image" />
                     {/if}
 
                     {#if !msg.isStreaming && msg.content}
@@ -1840,7 +1693,6 @@
                         {#if msg.role === 'assistant'}
                           <button
                             onclick={() => {
-                              // Find the user message right before this assistant message
                               const msgIdx = messages.findIndex((m) => m.id === msg.id);
                               if (msgIdx > 0) {
                                 const prevMsg = messages[msgIdx - 1];
@@ -1867,6 +1719,12 @@
 
                     {#if msg.mcpToolCalls && msg.mcpToolCalls.length > 0}
                       {#each msg.mcpToolCalls as toolCall (toolCall.id || toolCall.toolName + toolCall.timestamp)}
+                        {@const parsed = toolCall.parsedKG}
+                        {@const photoCount = parsed ? parsed.imagePaths.length : 0}
+                        {@const entityCount = parsed ? parsed.entities.length : 0}
+                        {@const relCount = parsed ? parsed.relationships.length : 0}
+                        {@const isRunning = !toolCall.result && !toolCall.isError}
+                        {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
                         <details class="group" open={true}>
                           <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}">
                             {#if toolCall.isError}
@@ -1877,19 +1735,105 @@
                               <span class="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyber-orange"></span>
                             {/if}
                             <span class="font-mono {toolCall.isError ? 'text-cyber-red' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{toolCall.toolName}</span>
+                            {#if isRunning}
+                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">searching knowledge graph...</span>
+                            {:else if parsed}
+                              <span class="flex items-center gap-1 text-[10px] text-cyber-text-dim/70">
+                                <span class="inline-flex items-center gap-0.5 rounded-full bg-cyber-cyan/10 px-1.5 py-0.5 text-cyber-cyan">{entityCount} entities</span>
+                                <span class="inline-flex items-center gap-0.5 rounded-full bg-cyber-purple/10 px-1.5 py-0.5 text-cyber-purple">{relCount} relations</span>
+                                {#if photoCount > 0}
+                                  <span class="inline-flex items-center gap-0.5 rounded-full bg-cyber-green/10 px-1.5 py-0.5 text-cyber-green">
+                                    <svg class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                    {photoCount} photos
+                                  </span>
+                                {/if}
+                              </span>
+                            {/if}
                             <span class="ml-auto text-cyber-text-dim/40">{formatTime(toolCall.timestamp)}</span>
                             <svg class="h-3 w-3 text-cyber-text-dim/50 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                           </summary>
-                          <div class="mt-1 space-y-1.5 rounded-lg border border-cyber-border/20 bg-cyber-bg/50 p-2.5">
-                            <div>
-                              <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Arguments</div>
-                              <pre class="max-h-32 overflow-auto rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] text-cyber-text leading-relaxed">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
-                            </div>
-                            {#if toolCall.result}
-                              <div>
-                                <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Result</div>
-                                <pre class="max-h-48 overflow-auto rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed {toolCall.isError ? 'text-cyber-red' : 'text-cyber-green'}">{formatJsonSafe(toolCall.result ?? '')}</pre>
+                          <div class="mt-1 space-y-2 rounded-lg border border-cyber-border/20 bg-cyber-bg/50 p-2.5">
+                            {#if isRunning}
+                              <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange">
+                                <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                <span>Querying knowledge graph...</span>
                               </div>
+                            {:else if parsed}
+                              {#if hasPhotos}
+                                <div>
+                                  <div class="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-green/80">
+                                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                    Photos
+                                  </div>
+                                  <ImageGallery images={msg.imageUrls} alt="Knowledge graph photo" />
+                                </div>
+                              {/if}
+                              {#if parsed.relationships.length > 0}
+                                <details class="group/rels">
+                                  <summary class="mb-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-purple/80 hover:text-cyber-purple transition-colors">
+                                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                                    Relationships
+                                    <span class="text-cyber-text-dim/40">({relCount})</span>
+                                    <svg class="ml-0.5 h-3 w-3 transition-transform group-open/rels:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                  </summary>
+                                  <div class="space-y-1">
+                                    {#each parsed.relationships.slice(0, 12) as rel}
+                                      <div class="rounded-md border border-cyber-border/30 bg-cyber-surface-2/40 px-2 py-1.5 text-[11px]">
+                                        <div class="flex flex-wrap items-center gap-1">
+                                          <span class="font-medium text-cyber-text">{rel.entity1}</span>
+                                          <svg class="h-2.5 w-2.5 shrink-0 text-cyber-text-dim/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                          <span class="font-medium text-cyber-text">{rel.entity2}</span>
+                                        </div>
+                                        {#if rel.description}
+                                          <p class="mt-0.5 text-cyber-text-dim/60 leading-relaxed">{rel.description}</p>
+                                        {/if}
+                                      </div>
+                                    {/each}
+                                    {#if parsed.relationships.length > 12}
+                                      <div class="text-center text-[10px] text-cyber-text-dim/50">+{parsed.relationships.length - 12} more</div>
+                                    {/if}
+                                  </div>
+                                </details>
+                              {/if}
+                              {#if parsed.entities.length > 0}
+                                <details class="group/entities">
+                                  <summary class="mb-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-cyber-cyan/80 hover:text-cyber-cyan transition-colors">
+                                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 000 20M12 2a14.5 14.5 0 010 20"/></svg>
+                                    Entities
+                                    <span class="text-cyber-text-dim/40">({entityCount})</span>
+                                    <svg class="ml-0.5 h-3 w-3 transition-transform group-open/entities:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                  </summary>
+                                  <div class="space-y-1">
+                                    {#each parsed.entities.slice(0, 12) as ent}
+                                      <div class="rounded-md border border-cyber-border/30 bg-cyber-surface-2/40 px-2 py-1.5 text-[11px]">
+                                        <div class="flex items-center gap-1.5">
+                                          <span class="font-medium text-cyber-text">{ent.entity}</span>
+                                          {#if ent.type}
+                                            <span class="rounded-full bg-cyber-purple/10 px-1.5 py-0.5 text-[9px] text-cyber-purple">{ent.type}</span>
+                                          {/if}
+                                        </div>
+                                        {#if ent.description}
+                                          <p class="mt-0.5 line-clamp-2 text-cyber-text-dim/70 leading-relaxed">{ent.description}</p>
+                                        {/if}
+                                      </div>
+                                    {/each}
+                                    {#if parsed.entities.length > 12}
+                                      <div class="text-center text-[10px] text-cyber-text-dim/50">+{parsed.entities.length - 12} more</div>
+                                    {/if}
+                                  </div>
+                                </details>
+                              {/if}
+                            {:else}
+                              <div>
+                                <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Arguments</div>
+                                <pre class="max-h-32 overflow-auto rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] text-cyber-text leading-relaxed">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+                              </div>
+                              {#if toolCall.result}
+                                <div>
+                                  <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Result</div>
+                                  <pre class="max-h-48 overflow-auto rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed {toolCall.isError ? 'text-cyber-red' : 'text-cyber-green'}">{formatJsonSafe(toolCall.result ?? '')}</pre>
+                                </div>
+                              {/if}
                             {/if}
                           </div>
                         </details>
