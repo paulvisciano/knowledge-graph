@@ -173,6 +173,19 @@
     }
   });
 
+  $effect(() => {
+    function onSpacePress(e: KeyboardEvent) {
+      if (e.key !== ' ' && e.code !== 'Space') return;
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
+      if (isActiveConversationStreaming || isTranscribing) return;
+      e.preventDefault();
+      handleMicClick();
+    }
+    window.addEventListener('keydown', onSpacePress);
+    return () => window.removeEventListener('keydown', onSpacePress);
+  });
+
   async function handleMicClick() {
     if (!audioRecorder || !recordingSupported) return;
 
