@@ -16,6 +16,14 @@ class TextureCache {
   private loaders = new Map<string, Set<(t: THREE.Texture) => void>>();
   private textureLoader = new THREE.TextureLoader();
   private fullResLru = new Map<string, Set<() => void>>();
+  /**
+   * In-flight HTMLImageElements keyed by URL. Three's `ImageLoader` creates
+   * an `<img>` per URL and assigns `image.src = url`, which is what actually
+   * holds the browser HTTP/1.1 connection slot. Setting `src = ''` on these
+   * cancels the pending fetch and frees the connection for other consumers
+   * (e.g. the Ingestion tab's `/documents/paginated` request).
+   */
+  private inFlightImages = new Map<string, HTMLImageElement>();
 
   /** Returns the cached texture for `url`, or `undefined` if not yet loaded. */
   get(url: string): THREE.Texture | undefined {
@@ -49,24 +57,34 @@ class TextureCache {
     if (onLoad) callbacks.add(onLoad);
     this.loaders.set(url, callbacks);
 
-    this.textureLoader.load(
+    const texture = this.textureLoader.load(
       url,
-      (texture: THREE.Texture) => this.onDone(url, texture),
+      (t: THREE.Texture) => this.onDone(url, t),
       undefined,
       (err: unknown) => {
         // On error the texture may still be partially loaded (or a default);
         // flush queued callbacks with whatever we have so requesters don't
         // hang forever, then drop the loaders entry.
         console.warn(`[TextureCache] failed to load texture: ${url}`, err);
+        this.inFlightImages.delete(url);
         const tex = this.cache.get(url);
         this.flush(url, tex);
       },
     );
 
+    // `TextureLoader.load` returns synchronously with a Texture whose
+    // `.image` is the HTMLImageElement created by ImageLoader. Track it so
+    // `abortInFlight()` can cancel the underlying fetch.
+    const img = texture.image as HTMLImageElement | undefined;
+    if (img && typeof img === 'object' && 'src' in img) {
+      this.inFlightImages.set(url, img);
+    }
+
     return undefined;
   }
 
   private onDone(url: string, texture: THREE.Texture): void {
+    this.inFlightImages.delete(url);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.generateMipmaps = true;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -162,6 +180,20 @@ class TextureCache {
     this.cache.clear();
     this.loaders.clear();
     this.fullResLru.clear();
+    this.inFlightImages.clear();
+  }
+
+  /**
+   * Cancels all in-flight texture image fetches and frees the browser
+   * HTTP/1.1 connection slots they were holding. Used when the canvas is
+   * unmounted (e.g. switching to the Ingest tab) so its pending image loads
+   * don't starve other consumers' fetches for tens of seconds.
+   */
+  abortInFlight(): void {
+    for (const img of this.inFlightImages.values()) {
+      img.src = '';
+    }
+    this.inFlightImages.clear();
   }
 
   size(): number {

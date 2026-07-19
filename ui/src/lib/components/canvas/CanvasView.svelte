@@ -3,6 +3,7 @@
   import type { KGNode } from '$lib/constants';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { LightragClient } from '$lib/services/lightrag-client';
+  import { textureCache } from '$lib/services/TextureCache';
   import { SceneManager } from './renderer/SceneManager';
   import { buildCanvasLayout } from './Layout';
   import NodeOverlay from './NodeOverlay.svelte';
@@ -135,6 +136,10 @@
     sceneManager?.stop();
     sceneManager?.dispose();
     sceneManager = undefined;
+    // Cancel any in-flight texture image fetches so their browser connection
+    // slots are released immediately — otherwise pending face-crop / photo
+    // fetches can block other tabs' API requests for tens of seconds.
+    textureCache.abortInFlight();
     mounted = false;
   });
 
