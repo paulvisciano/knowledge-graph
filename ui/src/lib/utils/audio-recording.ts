@@ -61,6 +61,16 @@ export class AudioRecorder {
       this.audioContext = new AudioContext();
       this._sampleRate = this.audioContext.sampleRate;
 
+      // Per autoplay policy, a fresh AudioContext can start in "suspended" state.
+      // When suspended, the AudioWorkletProcessor.process() is never called, so no
+      // audio chunks are ever produced -> "No audio data recorded". Resume explicitly.
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      if (this.audioContext.state !== 'running') {
+        throw new Error(`AudioContext not running (state: ${this.audioContext.state}). Microphone may be unavailable.`);
+      }
+
       this.workletReady = this.audioContext.audioWorklet.addModule(getWorkletBlobUrl());
       await this.workletReady;
 
@@ -76,7 +86,8 @@ export class AudioRecorder {
       };
 
       this.sourceNode.connect(workletNode);
-      workletNode.connect(this.audioContext.destination);
+      // Do NOT connect workletNode to audioContext.destination: that would route the
+      // microphone back to the speakers (echo/feedback) and is unnecessary for capture.
 
       workletNode.port.postMessage({ type: 'start' });
       this.recordingState = true;
