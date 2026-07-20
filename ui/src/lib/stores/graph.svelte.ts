@@ -38,6 +38,7 @@ class GraphStore {
     try {
       // LightRAG /graphs requires `label` (422 if omitted); default to 'default'
       const graph = await lightragClient.getGraph(label ?? 'default', nodeId, depth);
+      await this._enrichPhotoDates(graph.nodes);
       const lightragNodeIds = new Set(graph.nodes.map((n: KGNode) => n.id));
       const lightragEdgeIds = new Set(graph.edges.map((e: KGEdge) => e.id));
       // Preserve locally-added nodes that aren't in the backend response yet
@@ -103,6 +104,30 @@ class GraphStore {
     }
     if (Object.keys(updates).length > 0) {
       this.photoImages = { ...this.photoImages, ...updates };
+    }
+  }
+
+  private async _enrichPhotoDates(nodes: KGNode[]) {
+    const photoNodes = nodes.filter((n) =>
+      n.labels?.some((l) => /^(Photo|Image)$/i.test(l))
+      || n.properties?.entity_type === 'Photo'
+      || n.properties?.entity_type === 'Image'
+      || n.id?.includes('(Photo)')
+      || n.id?.includes('(Image)')
+    );
+    if (photoNodes.length === 0) return;
+    try {
+      const res = await fetch(`${KG_API_BASE}${API.kg.photoExifBulkDates}`);
+      if (!res.ok) return;
+      const dates = (await res.json()) as Record<string, { date_taken?: string; date_taken_friendly?: string }>;
+      for (const node of photoNodes) {
+        const sourceId = String(node.properties?.source_id ?? node.properties?.file_path ?? '');
+        const exif = dates[sourceId];
+        if (!exif) continue;
+        node.properties = { ...node.properties, ...exif };
+      }
+    } catch {
+      // EXIF enrichment is best-effort; positioning falls back to created_at.
     }
   }
 
