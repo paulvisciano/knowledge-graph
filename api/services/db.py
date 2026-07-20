@@ -101,6 +101,17 @@ async def init_db() -> None:
                 created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
                 updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
             );
+
+            -- Single-row app settings. id is fixed at 0; the CHECK constraint
+            -- rejects any other id, so reads/writes don't need a WHERE clause.
+            CREATE TABLE IF NOT EXISTS app_settings (
+                id INTEGER PRIMARY KEY DEFAULT 0,
+                face_detection_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                CONSTRAINT singleton CHECK (id = 0)
+            );
+            INSERT INTO app_settings (id, face_detection_enabled)
+            VALUES (0, FALSE)
+            ON CONFLICT (id) DO NOTHING;
         """)
     logger.info("Database tables initialized")
 
@@ -138,3 +149,31 @@ async def get_photo_exif(file_source: str) -> dict | None:
     if row and row["exif_data"]:
         return json.loads(row["exif_data"])
     return None
+
+
+async def get_app_settings() -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT face_detection_enabled FROM app_settings WHERE id = 0")
+    if row is None:
+        return {"face_detection_enabled": False}
+    return {"face_detection_enabled": row["face_detection_enabled"]}
+
+
+async def update_app_settings(updates: dict) -> dict:
+    allowed = {"face_detection_enabled"}
+    filtered = {k: v for k, v in updates.items() if k in allowed}
+    if not filtered:
+        return await get_app_settings()
+
+    set_clauses = []
+    args: list = []
+    for i, (col, val) in enumerate(filtered.items(), start=1):
+        set_clauses.append(f"{col} = ${i}")
+        args.append(val)
+    sql = f"UPDATE app_settings SET {', '.join(set_clauses)} WHERE id = 0"
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(sql, *args)
+    return await get_app_settings()
