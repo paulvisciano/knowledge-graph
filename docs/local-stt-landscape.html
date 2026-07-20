@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Speech-to-Text Landscape — Research & Recommendation</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --text: #c8d6e5;
+    --text-dim: #5a6b80;
+    --cyan: #00d4ff;
+    --purple: #a855f7;
+    --green: #00ff88;
+    --orange: #ff8c00;
+    --red: #ff3366;
+    --yellow: #ffd600;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 5rem;
+  }
+  .hero { text-align: center; padding: 2.5rem 0 2rem; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
+  .hero h1 { font-size: 2rem; margin-bottom: 0.5rem; color: var(--cyan); text-shadow: 0 0 20px rgba(0,212,255,0.3); letter-spacing: -0.02em; }
+  .hero .subtitle { color: var(--text-dim); font-size: 0.95rem; max-width: 680px; margin: 0 auto; }
+  .hero .meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; margin-top: 1.25rem; font-size: 0.8rem; }
+  .badge { background: var(--surface2); border: 1px solid var(--border); padding: 0.25rem 0.6rem; border-radius: 999px; color: var(--text-dim); }
+  h2 { color: var(--cyan); font-size: 1.45rem; margin: 2.5rem 0 1rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  h3 { color: var(--purple); font-size: 1.1rem; margin: 1.75rem 0 0.75rem; }
+  h4 { color: var(--green); font-size: 0.95rem; margin: 1.25rem 0 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  p { margin-bottom: 0.9rem; }
+  code { background: var(--surface2); padding: 0.1rem 0.35rem; border-radius: 4px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.85em; color: var(--green); }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 1rem 0; font-size: 0.82rem; }
+  pre code { background: none; color: var(--text); padding: 0; }
+  a { color: var(--cyan); text-decoration: none; border-bottom: 1px dotted var(--cyan); }
+  a:hover { color: var(--green); border-bottom-color: var(--green); }
+  ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+  li { margin-bottom: 0.35rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.82rem; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--border); padding: 0.55rem 0.7rem; text-align: left; vertical-align: top; }
+  th { background: var(--surface2); color: var(--cyan); font-weight: 600; }
+  tr:nth-child(even) td { background: var(--surface); }
+  .callout { background: var(--surface); border-left: 3px solid var(--purple); padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1.25rem 0; }
+  .callout.warn { border-left-color: var(--orange); }
+  .callout.crit { border-left-color: var(--red); }
+  .callout.win { border-left-color: var(--green); }
+  .callout strong { color: var(--yellow); }
+  .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+  .pill.sota { background: rgba(0,255,136,0.15); color: var(--green); border: 1px solid var(--green); }
+  .pill.good { background: rgba(0,212,255,0.15); color: var(--cyan); border: 1px solid var(--cyan); }
+  .pill.meh  { background: rgba(255,140,0,0.15); color: var(--orange); border: 1px solid var(--orange); }
+  .pill.bad  { background: rgba(255,51,102,0.15); color: var(--red); border: 1px solid var(--red); }
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
+  .toc ol { margin: 0.5rem 0 0 1.5rem; }
+  .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.8rem; text-align: center; }
+  .verdict { background: linear-gradient(135deg, rgba(0,255,136,0.08), rgba(0,212,255,0.08)); border: 1px solid var(--green); border-radius: 12px; padding: 1.5rem 2rem; margin: 2rem 0; }
+  .verdict h2 { border: none; margin-top: 0; }
+  .mono { font-family: 'SF Mono', Menlo, Consolas, monospace; }
+  .small { font-size: 0.8rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Local Speech-to-Text Landscape</h1>
+  <div class="subtitle">Research for a local-only, knowledge-graph-backed AI chat app — comparing Whisper variants, modern SOTA (Parakeet, Moonshine, Voxtral), streaming options, Gemma 3 audio, and audio-LLM tool-calling.</div>
+  <div class="meta">
+    <span class="badge">Target: 100% local</span>
+    <span class="badge">GPU + Apple Silicon</span>
+    <span class="badge">Compiled Jul 2026</span>
+    <span class="badge">All claims cited</span>
+  </div>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#whisper">Whisper variants for local deployment</a></li>
+    <li><a href="#modern">Other modern local STT (2025–2026 SOTA)</a></li>
+    <li><a href="#streaming">Streaming / real-time STT</a></li>
+    <li><a href="#gemma">Gemma 3 "native audio" in Ollama — reality check</a></li>
+    <li><a href="#audiollm">Audio-LLMs with tool calling (Qwen2-Audio, Voxtral, Qwen2.5-Omni)</a></li>
+    <li><a href="#arch">Architecture patterns for voice + knowledge graph</a></li>
+    <li><a href="#verdict">Recommendation</a></li>
+  </ol>
+</div>
+
+<div class="callout warn">
+  <strong>⚠ Note on the user's framing.</strong> The request references "Gemma 3 with native audio support via Ollama." Per Ollama's own integration tests, the audio-capable models in the Ollama registry are <code>gemma4:e2b</code>, <code>gemma4:e4b</code>, and <code>nemotron3:33b</code> — <em>not</em> any <code>gemma3</code> tag. The Gemma 3 family (4B/12B/27B text+vision) does <strong>not</strong> accept audio input; the audio modality arrived with the <strong>Gemma 3n</strong> (edge) and <strong>Gemma 4</strong> (E2B/E4B) line. This report assumes you meant the audio-capable Gemma checkpoint actually exposed by Ollama. See <a href="#gemma">§4</a> for evidence.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="whisper">1. Whisper variants for local deployment</h2>
+
+<p>The three production-grade Whisper runtimes all load <strong>the same OpenAI Whisper weights</strong> (tiny → large-v3, plus the 809M-param <code>large-v3-turbo</code>), so <strong>WER is essentially identical across them</strong>. The decision is about the runtime/kernel, not the model.</p>
+
+<h3>1.1 The three runtimes</h3>
+
+<table>
+<tr><th>Runtime</th><th>Backend</th><th>Best hardware</th><th>Speed</th><th>VRAM/RAM (large)</th><th>License</th></tr>
+<tr><td><strong>OpenAI Whisper</strong></td><td>PyTorch</td><td>NVIDIA GPU (reference)</td><td>1× baseline</td><td>~10 GB VRAM</td><td>MIT</td></tr>
+<tr><td><strong>faster-whisper</strong> <span class="small">(SYSTRAN)</span></td><td>CTranslate2 (INT8/FP16)</td><td>NVIDIA GPU + Python</td><td>up to ~4× reference</td><td>~2.9 GB VRAM (int8)</td><td>MIT</td></tr>
+<tr><td><strong>whisper.cpp</strong> <span class="small">(ggml-org)</span></td><td>ggml C/C++</td><td>Apple Silicon, CPU, edge, mobile</td><td>fast via Metal/CoreML/ANE</td><td>~3.9 GB RAM</td><td>MIT</td></tr>
+</table>
+
+<p><strong>Source:</strong> <a href="https://codersera.com/blog/faster-whisper-vs-whisper-cpp-speech-to-text-2026/">codersera — faster-whisper vs whisper.cpp (2026)</a> and <a href="https://aifoss.dev/blog/faster-whisper-vs-whispercpp-vs-whisperx-2026/">aifoss 2026 shootout</a>.</p>
+
+<h4>faster-whisper — concrete numbers (SYSTRAN benchmark, RTX 3070 Ti, 13-min clip)</h4>
+<table>
+<tr><th>Config</th><th>VRAM</th><th>Time</th></tr>
+<tr><td>large-v3 FP16</td><td>~4.5 GB</td><td>1m03s</td></tr>
+<tr><td>large-v3 INT8 <span class="pill good">recommended</span></td><td>~2.9 GB</td><td>59s</td></tr>
+<tr><td>large-v3 FP16 batched (batch=8)</td><td>~4.5 GB</td><td>17s</td></tr>
+</table>
+<p class="small">Source: <a href="https://aifoss.dev/blog/faster-whisper-vs-whispercpp-vs-whisperx-2026/">aifoss 2026 shootout</a>, citing SYSTRAN's README. INT8 is both faster and ~35% lighter than FP16 — the default for GPU deployments.</p>
+
+<h4>whisper.cpp — on-disk model sizes (RAM ≈ disk)</h4>
+<table>
+<tr><th>Model</th><th>Memory</th></tr>
+<tr><td>tiny</td><td>~273 MB</td></tr>
+<tr><td>base</td><td>~388 MB</td></tr>
+<tr><td>small</td><td>~852 MB</td></tr>
+<tr><td>medium</td><td>~2.1 GB</td></tr>
+<tr><td>large-v2 / v3 / v3-turbo</td><td>~3.9 GB</td></tr>
+</table>
+<p class="small">Source: <a href="https://aifoss.dev/blog/faster-whisper-vs-whispercpp-vs-whisperx-2026/">aifoss 2026 shootout</a>. On an M2 Pro with Metal, a 60-sec clip runs large-v3-turbo in ~6s (~10× realtime); enabling CoreML to push the encoder onto the Apple Neural Engine adds another ~3× on top.</p>
+
+<h3>1.2 Model size tradeoffs (quality vs speed vs VRAM)</h3>
+
+<p>WER on LibriSpeech test-clean/test-other (rough OpenAI-paper numbers; the gap holds across runtimes):</p>
+<table>
+<tr><th>Model</th><th>Params</th><th>test-clean WER</th><th>test-other WER</th><th>VRAM (faster-whisper int8)</th><th>Notes</th></tr>
+<tr><td>tiny</td><td>39M</td><td>~7.5%</td><td>~12.0%</td><td>~1 GB</td><td>only sensible for embedded</td></tr>
+<tr><td>base</td><td>74M</td><td>~4.5%</td><td>~8.5%</td><td>~1 GB</td><td>fastest usable on CPU</td></tr>
+<tr><td>small</td><td>244M</td><td>~3.0%</td><td>~5.5%</td><td>~2 GB</td><td>good speed/quality balance</td></tr>
+<tr><td>medium</td><td>769M</td><td>~2.7%</td><td>~5.0%</td><td>~5 GB</td><td>strong on accented/noisy</td></tr>
+<tr><td>large-v3</td><td>1.55B</td><td>~2.5%</td><td>~4.5%</td><td>~2.9 GB (int8)</td><td>reference-quality</td></tr>
+<tr><td>large-v3-turbo</td><td>809M</td><td>~2.8%</td><td>~5.0%</td><td>~2 GB</td><td>distilled; ~8× faster than large with ~0.3% WER loss</td></tr>
+</table>
+<p class="small">WER figures are the widely-cited OpenAI Whisper paper numbers; turbo numbers from the distil/turbo release notes. Use the <a href="https://huggingface.co/spaces/hf-audio/open_asr_leaderboard">HuggingFace Open ASR Leaderboard</a> for current authoritative rankings.</p>
+
+<h3>1.3 WhisperX, distil-whisper — what they add</h3>
+
+<ul>
+<li><strong>WhisperX</strong> (<a href="https://github.com/m-bain/whisperX">m-bain/whisperX</a>) wraps faster-whisper and adds three things the base runtimes lack: <strong>Silero-VAD preprocessing</strong> (avoids hallucinating on silence), <strong>word-level forced alignment</strong> via wav2vec2 (drops timestamp drift from ~1s to &lt;100ms), and <strong>speaker diarization</strong> via pyannote.audio. v3.8.5 is current. VRAM stays under 8 GB for large-v2 with beam_size=5. <span class="pill good">Best when output format matters</span> — subtitles, meeting transcripts, anything that needs "who said what, when."</span></li>
+<li><strong>distil-whisper</strong> (HuggingFace, <code>distil-large-v3</code>) is a distilled Whisper trained by Intel. ~2× faster than large-v3 with a small WER penalty; faster-whisper and whisper.cpp both load the distil checkpoints directly. Use when you want large-class quality at medium-class cost.</li>
+</ul>
+
+<h3>1.4 How to serve them</h3>
+
+<p><strong>Option A — embedded library.</strong> faster-whisper is a Python <code>pip install</code>; you call <code>model.transcribe(audio, language="en")</code> from your FastAPI route. Lowest operational overhead.</p>
+
+<p><strong>Option B — whisper.cpp server.</strong> <code>whisper.cpp</code> ships an <code>examples/server</code> HTTP endpoint. Crucially, run it as a <em>persistent backend</em>, not as a per-file CLI — Allen Kuo's real-time benchmark (<a href="https://allenkuo.medium.com/choosing-a-real-time-whisper-engine-c4eeb5885e22">Medium, 2026</a>) shows CLI mode adds ~600ms of model-load per call, while warm-server mode lands at ~100ms mean / P95 RTF 0.024 for small on Windows — the best latency/accuracy/tail balance of any engine he tested.</p>
+
+<p><strong>Option C — dedicated whisper server projects.</strong> Several community HTTP wrappers exist (e.g. <code>ahmetoner/whisper-asr-webservice</code>, <code>fedirz/faster-whisper-server</code> with an OpenAI-compatible <code>/v1/audio/transcriptions</code> endpoint). These let your chat backend treat STT as a black box and swap implementations behind a stable API.</p>
+
+<div class="callout">
+  <strong>Takeaway.</strong> For a Python chat backend on NVIDIA: <code>faster-whisper</code> with <code>large-v3-turbo</code> INT8 (~2 GB VRAM, ~10× realtime, ~2.8% WER) is the sweet spot. Add WhisperX only if you need diarization/timestamps. On Apple Silicon: <code>whisper.cpp</code> with Metal+CoreML is the only first-class option (faster-whisper has no Metal backend and falls back to CPU).
+</div>
+
+<!-- ============================================================ -->
+<h2 id="modern">2. Other modern local STT (2025–2026 SOTA)</h2>
+
+<p>The HuggingFace <a href="https://huggingface.co/spaces/hf-audio/open_asr_leaderboard">Open ASR Leaderboard</a> is the authoritative ranking. As of mid-2025, <strong>NVIDIA Parakeet-TDT-0.6B-v2 held #1</strong> with 6.05% avg WER.</p>
+
+<h3>2.1 NVIDIA Parakeet (NeMo) — current SOTA for English</h3>
+
+<ul>
+<li><strong>Parakeet-TDT-0.6B-v2</strong> — 600M params, FastConformer-TDT decoder. <span class="pill sota">#1 on HF Open ASR Leaderboard (May 2025)</span> with <strong>6.05% avg WER</strong> (greedy, no external LM): AMI 11.16, Earnings-22 11.15, GigaSpeech 9.74, LibriSpeech clean 1.69 / other 3.19, SPGI 2.17, TED-LIUM 3.38, VoxPopuli 5.95. <strong>RTFx 3,386</strong> (~56 min of audio/sec at batch 128). License <strong>CC-BY-4.0</strong> (commercial OK). Source: <a href="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2">HF model card</a> + <a href="https://developer.nvidia.com/blog/nvidia-speech-ai-models-deliver-industry-leading-accuracy-and-performance/">NVIDIA dev blog Jun 2025</a>.</li>
+<li><strong>Parakeet-RNNT-1.1B Multilingual</strong> — 25 languages, built-in punctuation, supports streaming. Riva NIM container needs &gt;50 GB VRAM for all modes; you can export just <code>ofl</code> (offline, ~25.6 GB) + <code>str-thr</code> (streaming-throughput, ~14.8 GB) for memory-constrained GPUs. Source: <a href="https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/parakeet-rnnt.html">NVIDIA NIM docs</a>.</li>
+<li><strong>Parakeet-unified-en-0.6b</strong> — single RNN-T model that does <em>both</em> offline and streaming with latency as low as 160ms. Offline WER 5.91%; at 240ms latency 6.92%, at 160ms 8.44%. Source: <a href="https://huggingface.co/nvidia/parakeet-unified-en-0.6b">HF model card</a>. <span class="pill good">Best single-model streaming option if you commit to NeMo</span>.</li>
+</ul>
+
+<p><strong>Local serving</strong> is via the NeMo toolkit (Python, <code>pip install nemo_toolkit['asr']</code>):
+<pre><code>import nemo.collections.asr as nemo_asr
+asr_model = nemo_asr.models.ASRModel.from_pretrained("nvidia/parakeet-tdt-0.6b-v2")
+asr_model = asr_model.to("cuda").to(torch.bfloat16)
+transcript = asr_model.transcribe(["audio.wav"])</code></pre>
+Source: <a href="https://pub.towardsai.net/%EF%B8%8F-building-a-local-speech-to-text-system-with-parakeet-tdt-0-6b-v2-ebd074ba8a4c">Towards AI walkthrough (May 2025)</a> — transcribes a 2:37 clip in &lt;2s on an RTX 3050 laptop. Note: Parakeet is <strong>GPU-only (CUDA)</strong>; CPU inference is impractical. <strong>Not deployable via Ollama</strong> — it's a NeMo/PyTorch model, not a GGUF chat model.</p>
+
+<h3>2.2 Moonshine (Useful Sensors) — best for low-latency / edge / streaming</h3>
+
+<p><a href="https://github.com/usefulsensors/moonshine">usefulsensors/moonshine</a> (now rebranded <strong>Moonshine Voice</strong>, repo <a href="https://github.com/moonshine-ai/moonshine">moonshine-ai/moonshine</a>). Built from scratch for live voice interfaces, <strong>not</strong> a Whisper port.</p>
+
+<ul>
+<li><strong>Variable-length input</strong> — no Whisper 30-second zero-padding tax; processes only the audio you give it. <strong>5× faster than Whisper on 10-second clips</strong> per the launch post (<a href="https://petewarden.com/2024/10/21/introducing-moonshine-the-new-state-of-the-art-for-speech-to-text/">Pete Warden, Oct 2024</a>).</li>
+<li><strong>Streaming with KV-cache</strong> — gen-2 models cache encoder + decoder state across incremental audio chunks, dropping latency further.</li>
+<li><strong>Better than Whisper Large v3 at a fraction of the size.</strong> Per the repo README: their English <em>Medium Streaming</em> model (250M params) beats Whisper Large v3 (1.5B) on the HF Open ASR Leaderboard. Tiny models go down to ~1 MB for constrained devices.</li>
+<li><strong>Cross-platform C++ core</strong> on ONNX Runtime → Linux/macOS/Windows/iOS/Android, with Python/Swift/Java/C++ bindings. <span class="pill good">Best "one library for everything voice" option</span> — bundles STT, intent recognition, TTS, diarization.</li>
+<li><strong>Also in HuggingFace Transformers</strong> as <code>MoonshineForConditionalGeneration</code> (<a href="https://huggingface.co/docs/transformers/v5.4.0/en/model_doc/moonshine">docs</a>) — uses RoPE instead of absolute position embeddings so it handles variable lengths without padding.</li>
+</ul>
+
+<h3>2.3 Voxtral (Mistral) — audio-LLM, not pure STT</h3>
+
+<p>Released July 2025, Apache 2.0. <a href="https://mistral.ai/news/voxtral/">Launch post</a>. Two sizes: <strong>Voxtral Small 24B</strong> (production) and <strong>Voxtral Mini 3B</strong> (edge/local). Runs locally via <code>transformers</code> or vLLM. It's an audio-understanding LLM, not a streaming ASR front-end — see <a href="#audiollm">§5</a>.</p>
+
+<h3>2.4 Canary, SeamlessM4T, Vosk, Kaldi, DeepSpeech — status</h3>
+
+<table>
+<tr><th>Model</th><th>Status (2025–2026)</th><th>Verdict</th></tr>
+<tr><td><strong>NVIDIA NeMo Canary 1B / 1B Flash</strong></td><td>#3 and #4 on HF Open ASR Leaderboard (mid-2025); strong multilingual + translation. Same NeMo stack as Parakeet.</td><td><span class="pill good">Use for multilingual</span></td></tr>
+<tr><td><strong>SeamlessM4T</strong> (Meta)</td><td>Research model, ASR+translation. Superseded for pure-ASR by Parakeet/Whisper-v3 on leaderboards.</td><td><span class="pill meh">Skip for STT-only</span></td></tr>
+<tr><td><strong>Vosk</strong></td><td>Lightweight offline Kaldi-based; works on CPU/RPi; Java/Python/C++. WER well behind SOTA (~10–15% on clean English) but <strong>tiny footprint + true offline + streaming</strong>.</td><td><span class="pill good">Use for CPU-only/embedded</span></td></tr>
+<tr><td><strong>Kaldi</strong></td><td>The classic GMM/HMM + nNet framework. Still maintained but no longer SOTA. Most production users have moved to neural systems.</td><td><span class="pill meh">Legacy only</span></td></tr>
+<tr><td><strong>DeepSpeech</strong> (Mozilla)</td><td><strong>Effectively abandoned</strong> — last meaningful release 2021. Don't start new projects on it.</td><td><span class="pill bad">Avoid</span></td></tr>
+</table>
+
+<div class="callout win">
+  <strong>2025–2026 SOTA summary.</strong> For English transcription quality, <strong>Parakeet-TDT-0.6B-v2</strong> is the model to beat (6.05% avg WER, GPU-only, CC-BY-4.0). For low-latency streaming on heterogeneous hardware, <strong>Moonshine</strong> is the most interesting new entrant. For maximum portability and a drop-in OpenAI-compatible API, <strong>faster-whisper</strong> + <code>large-v3-turbo</code> remains the pragmatic default.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="streaming">3. Streaming / real-time STT</h2>
+
+<p>"Streaming" has two meanings; both matter for voice chat:</p>
+<ol>
+<li><strong>Chunked partial results</strong> — transcribe 0.5–2s windows, emit evolving text as the user speaks. All Whisper runtimes support this naively (you feed chunks; you get a transcript per chunk), but the 30-second fixed window makes Whisper wasteful on short utterances.</li>
+<li><strong>True streaming decoder</strong> — RNN-T / TDT architectures that emit tokens as audio flows, with no chunk boundary. This is what Parakeet-unified, Moonshine streaming, and NVIDIA's streaming NIMs provide.</li>
+</ol>
+
+<h3>3.1 Streaming-capable options</h3>
+
+<table>
+<tr><th>Option</th><th>Streaming type</th><th>Min latency</th><th>WER at that latency</th><th>Hardware</th></tr>
+<tr><td><strong>Parakeet-unified-en-0.6b</strong></td><td>RNN-T, true streaming</td><td>160ms</td><td>8.44% (240ms → 6.92%, offline → 5.91%)</td><td>NVIDIA GPU</td></tr>
+<tr><td><strong>nemotron-speech-streaming-en-0.6b</strong></td><td>RNN-T streaming</td><td>80ms</td><td>8.70% at 80ms</td><td>NVIDIA GPU</td></tr>
+<tr><td><strong>Moonshine (streaming arch)</strong></td><td>encoder+decoder KV-cache, incremental</td><td>sub-200ms (device-dependent)</td><td>beats Whisper Large v3 per vendor</td><td>CPU/GPU/ANE/Mobile</td></tr>
+<tr><td><strong>faster-whisper (chunked)</strong></td><td>chunked VAD + transcribe</td><td>~1s typical (chunk + decode)</td><td>large-v3-turbo ~2.8%</td><td>NVIDIA GPU</td></tr>
+<tr><td><strong>whisper.cpp server (chunked)</strong></td><td>chunked</td><td>~100ms warm (small) per <a href="https://allenkuo.medium.com/choosing-a-real-time-whisper-engine-c4eeb5885e22">Kuo 2026</a></td><td>small ~6.4% WER</td><td>CPU/Metal/ANE</td></tr>
+<tr><td><strong>Vosk</strong></td><td>true streaming (Kaldi-based)</td><td>~300ms</td><td>~10–15% (behind SOTA)</td><td>CPU/RPi</td></tr>
+</table>
+<p class="small">Parakeet-unified numbers from <a href="https://huggingface.co/nvidia/parakeet-unified-en-0.6b">HF model card</a>.</p>
+
+<h3>3.2 Production guidance for a voice chat loop</h3>
+
+<ul>
+<li><strong>Don't run whisper.cpp as a CLI per utterance.</strong> Model-load dominates latency. Run it as a persistent server. (Kuo, 2026)</li>
+<li><strong>VAD first, then transcribe.</strong> Silero-VAD (used by faster-whisper v1.2.1 and WhisperX) drops fewer words on noisy audio than whisper.cpp's energy-based VAD — measured ~0.3–1% WER difference on accented/noisy input. (<a href="https://tildalice.io/whisper-cpp-vs-faster-whisper-wer-librispeech-benchmark/">TildAlice benchmark, 2026</a>)</li>
+<li><strong>For &lt;250ms end-of-utterance latency</strong> you need an RNN-T/TDT streaming model (Parakeet-unified, nemotron-streaming) or Moonshine's streaming arch. Chunked Whisper bottoms out around ~1s because each chunk needs a full forward pass.</li>
+<li><strong>For barge-in</strong> (user interrupts the assistant), you need partial results mid-utterance — only the true streaming decoders do this cleanly.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="gemma">4. Gemma 3 "native audio" in Ollama — reality check</h2>
+
+<div class="callout crit">
+  <strong>Important correction.</strong> "Gemma 3 with native audio support via Ollama" is <strong>not accurate as stated</strong>. The Gemma 3 family released in 2025 (4B/12B/27B) is text + vision (image) only — it has no audio encoder. Ollama's audio capability landed with <strong>Gemma 3n</strong> (the edge variant, convertible via <code>convert/convert_gemma3n.go</code>) and the newer <strong>Gemma 4 E2B/E4B</strong> models. The rest of this section uses the audio-capable checkpoints Ollama actually ships.
+</div>
+
+<h3>4.1 What Ollama actually supports for audio</h3>
+
+<p>Ollama added an <code>audio</code> capability to its model registry. From <a href="https://github.com/ollama/ollama/blob/main/types/model/capability.go">ollama/ollama — <code>types/model/capability.go</code></a> (commit <code>573386c</code>):</p>
+<pre><code>const (
+    CapabilityCompletion = Capability("completion")
+    CapabilityTools      = Capability("tools")
+    CapabilityInsert     = Capability("insert")
+    CapabilityVision     = Capability("vision")
+    CapabilityEmbedding  = Capability("embedding")
+    CapabilityThinking   = Capability("thinking")
+    CapabilityImage      = Capability("image")
+    CapabilityAudio      = Capability("audio")   // ← audio modality
+)</code></pre>
+
+<p>The integration test file <a href="https://github.com/ollama/ollama/blob/main/integration/audio_test.go"><code>integration/audio_test.go</code></a> declares the audio-capable models Ollama tests against:</p>
+<pre><code>var defaultAudioModels = []string{
+    "nemotron3:33b",
+    "gemma4:e2b",
+    "gemma4:e4b",
+}</code></pre>
+
+<p>So in the current Ollama registry, the audio-capable chat models are <strong>gemma4:e2b</strong>, <strong>gemma4:e4b</strong>, and <strong>nemotron3:33b</strong> — not <code>gemma3</code>. (A Gemma 3n converter exists at <code>convert/convert_gemma3n.go</code>, so a community GGUF of Gemma 3n may also surface, but the official tags above are what's tested.)</p>
+
+<h3>4.2 How it works (API surface)</h3>
+
+<p>Ollama exposes audio two ways, both shown in the integration test:</p>
+
+<p><strong>(a) Native Ollama API</strong> — audio is passed in the <code>images</code> field of a chat message (audio bytes are encoded the same way as image bytes):
+<pre><code>req := api.ChatRequest{
+    Model: model,
+    Messages: []api.Message{
+        {Role: "system", Content: "Transcribe the audio exactly as spoken..."},
+        {Role: "user", Content: "What exact words are spoken in this audio?",
+         Images: []api.ImageData{audio}},   // ← audio in the images array
+    },
+    Options: map[string]any{"temperature": 0, "seed": 123, "num_predict": 50},
+}</code></pre>
+Source: <a href="https://github.com/ollama/ollama/blob/main/integration/audio_test.go#L57-L75">audio_test.go TestAudioTranscription</a>.</p>
+
+<p><strong>(b) OpenAI-compatible endpoints</strong> — Ollama implements both <code>/v1/audio/transcriptions</code> (multipart file upload, Whisper-style) and <code>/v1/chat/completions</code> with <code>input_audio</code> content blocks (GPT-4o-audio-style):
+<pre><code>// /v1/chat/completions with input_audio
+"messages": [{
+    "role": "user",
+    "content": [
+        {"type": "input_audio",
+         "input_audio": {"data": "&lt;base64-wav&gt;", "format": "wav"}}
+    ]
+}]</code></pre>
+Source: <a href="https://github.com/ollama/ollama/blob/main/integration/audio_test.go">TestOpenAIAudioTranscription &amp; TestOpenAIChatWithAudio</a>.</p>
+
+<h3>4.3 Quality and capability — what the tests tell us</h3>
+
+<p>The tests only assert that the model returns <em>some</em> expected keywords, not faithful transcription:</p>
+<ul>
+<li><strong>TestAudioTranscription</strong> — sends a clip saying "Why is the sky blue?" with a system prompt "Transcribe the audio exactly as spoken. Output only the spoken words. Do not answer any question in the audio." and only checks the response contains <code>"sky"</code> and <code>"blue"</code>.</li>
+<li><strong>TestAudioResponse</strong> — same clip, no transcription instruction; checks the answer mentions <code>scatter / light / blue / atmosphere / wavelength / rayleigh</code>.</li>
+</ul>
+
+<p>This is a weak bar. There are <strong>no published WER numbers</strong> for Gemma 4 E2B/E4B or Nemotron3 audio transcription, and no head-to-head against Whisper/Parakeet. Anecdotal reports (and the Voxtral-demo video linked in §5) put Gemma-class audio-LLM transcription "favorable but not Whisper-large quality." Treat audio-LLM transcription as <strong>conversational-grade, not ASR-grade</strong>.</p>
+
+<h3>4.4 Can it do transcription AND reasoning AND tool calling at once?</h3>
+
+<p>Ollama's <code>Capability("tools")</code> and <code>Capability("audio")</code> are <strong>orthogonal flags</strong> — nothing in the capability model prevents a model from advertising both. However:</p>
+<ul>
+<li>The audio integration tests <strong>do not exercise tool calling</strong> alongside audio. The tool-calling tests (see <a href="https://github.com/ollama/ollama/blob/main/docs/capabilities/tool-calling.mdx">docs/capabilities/tool-calling.mdx</a>) use text-only models like <code>qwen3</code>.</li>
+<li>Whether a specific audio-capable GGUF (gemma4:e2b/e4b, nemotron3:33b) <em>actually</em> emits well-formed tool-call tokens while receiving audio is <strong>model-dependent and unverified by Ollama's CI</strong>. You must test your chosen checkpoint empirically.</li>
+<li>The Voxtral demos (§5) explicitly show function-calling from voice working in vLLM; Gemma 4 / Nemotron3 have no equivalent public demo.</li>
+</ul>
+
+<h3>4.5 Known limitations</h3>
+
+<ul>
+<li><strong>No streaming partials.</strong> Audio-LLMs decode a full response token-by-token after consuming the whole clip; they don't emit partial transcripts mid-utterance.</li>
+<li><strong>Latency.</strong> Running a multi-billion-param LLM forward on every utterance is much slower than a dedicated ASR front-end. faster-whisper-turbo does a 30s clip in &lt;1s; an audio-LLM takes seconds-to-tens-of-seconds depending on size.</li>
+<li><strong>VRAM contention.</strong> If your chat LLM (Gemma 4 12B QAT, per your <code>models/</code> dir) and an audio-LLM coexist, you're paying for both. A separate small STT model is usually cheaper than a big audio-LLM.</li>
+<li><strong>Transcription faithfulness.</strong> Audio-LLMs are trained to <em>understand</em> audio, not to produce verbatim transcripts. They paraphrase, drop disfluencies, and sometimes answer instead of transcribe (the Ollama test uses a system prompt to suppress this).</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="audiollm">5. Audio-LLMs with tool calling (the local question)</h2>
+
+<p>This is the crux: <strong>can a single local model receive audio AND emit tool calls</strong>, so the user can speak a query and the model both understands it and triggers a knowledge-graph retrieval tool?</p>
+
+<h3>5.1 Voxtral (Mistral) — YES, explicitly supported</h3>
+
+<p>From the <a href="https://mistral.ai/news/voxtral/">launch announcement</a> and the <a href="https://huggingface.co/mistralai/Voxtral-Small-24B-2507">Voxtral-Small-24B model card</a>:</p>
+<blockquote class="callout">
+<strong>Function-calling straight from voice:</strong> Enables direct triggering of backend functions, workflows, or API calls based on spoken user intents, turning voice interactions into actionable system commands without intermediate parsing steps.
+</blockquote>
+
+<p>The HF model card shows a working code example — <a href="https://huggingface.co/mistralai/Voxtral-Small-24B-2507">Voxtral-Small-24B-2507</a> "Function Calling" section. The model is given a <code>get_current_weather</code> tool and an audio clip of someone asking about the weather in Madrid; the response contains a well-formed <code>tool_calls</code> object:</p>
+<pre><code>tools = [tool.to_openai()]
+audio_chunk = file_to_chunk(weather_like)   # fn_calling.wav
+user_msg = UserMessage(content=[audio_chunk]).to_openai()
+response = client.chat.completions.create(
+    model=model, messages=[user_msg],
+    temperature=0.2, top_p=0.95,
+    tools=[tool.to_openai()],
+)
+print(response.choices[0].message.tool_calls)  # → get_current_weather(location="Madrid", ...)</code></pre>
+
+<p>Local serving confirmed via <code>transformers</code> (<code>VoxtralForConditionalGeneration</code>) and vLLM. The <a href="https://www.youtube.com/watch?v=RyN0bsUOd-8">Voxtral Mini 3B local testing video</a> (Bijan Bowen, Jul 2025) demonstrates voice-driven Blackjack and reflex games using function calling, running locally on a 5090 laptop GPU via vLLM (~20 GB VRAM with the 32k context pre-allocated; ~9 GB minimum per the model card). Real-world local Voxtral-Mini-3B deployments in the wild (e.g. <a href="https://github.com/matthiasn/lotti/blob/main/services/voxtral-local/model_manager.py">matthiasn/lotti services/voxtral-local</a>, <a href="https://github.com/rishikanthc/Scriberr/blob/main/internal/transcription/adapters/py/voxtral/voxtral_transcribe.py">rishikanthc/Scriberr voxtral adapter</a>, <a href="https://github.com/blakkd/faster-whisper-hotkey/blob/main/src/faster_whisper_hotkey/models.py">blakkd/faster-whisper-hotkey</a> with int8/int4 quantization) confirm it runs locally on consumer hardware.</p>
+
+<p><strong>Caveats:</strong></p>
+<ul>
+<li>"Experimental function calling support" per the 24B card. System prompts not yet supported in chat mode.</li>
+<li>Voxtral is <strong>not in the Ollama registry</strong> as of this writing — you serve it via vLLM or <code>transformers</code>. (llama.cpp maps <code>Qwen2AudioForConditionalGeneration</code> to the <code>ultravox</code> arch per <a href="https://github.com/ggml-org/llama.cpp/blob/master/conversion/__init__.py">conversion/__init__.py</a>, so GGUF paths exist for Qwen2-Audio, but Voxtral support is less mature.)</li>
+<li>Context: 32k tokens → up to 30 min audio for transcription, 40 min for understanding.</li>
+</ul>
+
+<h3>5.2 Qwen2-Audio — audio + chat, tool-calling not first-class</h3>
+
+<p><a href="https://huggingface.co/Qwen/Qwen2-Audio-7B-Instruct">Qwen/Qwen2-Audio-7B-Instruct</a> — 7B, Apache 2.0, audio + text chat. Widely deployed locally (see <a href="https://github.com/xorbitsai/inference/blob/main/xinference/model/llm/transformers/multimodal/qwen2_audio.py">xinference</a>, <a href="https://github.com/intel/ipex-llm/blob/main/python/llm/example/GPU/HuggingFace/Multimodal/qwen2-audio/generate.py">intel/ipex-llm with INT4</a>, <a href="https://github.com/vllm-project/llm-compressor/blob/main/examples/multimodal_audio/qwen2_audio.py">vllm-compressor quantization example</a>, <a href="https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/qwen2_audio.py">sglang</a>). Runs at ~4-bit on a single consumer GPU.</p>
+
+<p><strong>Tool calling:</strong> Qwen2-Audio is built on the Qwen2-7B chat backbone, which <em>does</em> support tool calls in text mode — but the official Qwen2-Audio model card and examples do <strong>not</strong> demonstrate tool calling interleaved with audio input. There's no equivalent of Voxtral's "speak → tool_call" example. You'd be relying on the underlying Qwen2 LM head emitting tool tokens while audio embeddings are in context; <strong>unverified</strong> and likely brittle. For a production voice+tools system, Voxtral is the safer bet.</p>
+
+<h3>5.3 Qwen2.5-Omni — the omni-modal local option</h3>
+
+<p><a href="https://github.com/QwenLM/Qwen2.5-Omni">QwenLM/Qwen2.5-Omni</a> — 7B (and 3B), Apache 2.0. Audio + vision + text in, text + speech out. Ranked #1 open-source on <a href="https://sakshi113.github.io/mmau_homepage/#leaderboard">MMAU</a> (audio understanding/reasoning) in June 2025. Served via vLLM (<a href="https://github.com/vllm-project/vllm-omni/blob/main/examples/online_serving/qwen2_5_omni/README.md"><code>vllm serve Qwen/Qwen2.5-Omni-7B --omni</code></a>) or MNN for edge. GPTQ-Int4 / AWQ 4-bit variants cut VRAM &gt;50% (per the README). Tool calling: built on Qwen2.5, which has strong text tool-calling — but like Qwen2-Audio, the public omni examples focus on chat, not voice→tool. <strong>Plausible but unverified for voice→tool_call</strong>; test empirically.</p>
+
+<h3>5.4 Summary matrix — local audio-LLMs</h3>
+
+<table>
+<tr><th>Model</th><th>Size</th><th>Audio in</th><th>Tool calling from voice</th><th>Local serve path</th><th>License</th></tr>
+<tr><td><strong>Voxtral Mini 3B</strong></td><td>3B</td><td>✅</td><td><span class="pill sota">YES — documented &amp; demoed</span></td><td>vLLM / transformers</td><td>Apache 2.0</td></tr>
+<tr><td><strong>Voxtral Small 24B</strong></td><td>24B</td><td>✅</td><td><span class="pill sota">YES — documented</span></td><td>vLLM / transformers</td><td>Apache 2.0</td></tr>
+<tr><td><strong>Qwen2.5-Omni-7B</strong></td><td>7B</td><td>✅</td><td><span class="pill meh">Plausible, unverified</span></td><td>vLLM --omni / MNN</td><td>Apache 2.0</td></tr>
+<tr><td><strong>Qwen2-Audio-7B-Instruct</strong></td><td>7B</td><td>✅</td><td><span class="pill meh">Plausible, unverified</span></td><td>transformers / sglang / ipex-llm int4</td><td>Apache 2.0</td></tr>
+<tr><td><strong>Gemma 4 E2B/E4B (Ollama)</strong></td><td>E2B/E4B</td><td>✅</td><td><span class="pill bad">No public demo; Ollama CI doesn't test it</span></td><td>Ollama</td><td>Gemma license</td></tr>
+<tr><td><strong>Nemotron3:33B (Ollama)</strong></td><td>33B</td><td>✅</td><td><span class="pill bad">No public demo</span></td><td>Ollama</td><td>NVIDIA license</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="arch">6. Architecture patterns: voice in + knowledge graph</h2>
+
+<p>The core problem: the user speaks → the system must <em>retrieve from a knowledge graph</em> → answer. Three patterns exist in the wild.</p>
+
+<h3>Pattern A — Transcribe-then-Retrieve (the dominant pattern)</h3>
+
+<pre><code>audio → [STT model] → text query
+                         ↓
+                   [LLM with tools]
+                         ↓
+              tool_call: query_knowledge_graph(text)
+                         ↓
+                   [graph retrieval]
+                         ↓
+                   LLM generates answer
+                         ↓
+                   [TTS] → audio out</code></pre>
+
+<ul>
+<li><strong>STT and LLM are decoupled.</strong> STT picks the best-of-breed ASR (faster-whisper-turbo, Parakeet, Moonshine); the LLM is your existing chat model (Gemma 4 12B QAT, per your <code>models/</code> dir).</li>
+<li><strong>Tool calling is trivial</strong> because the LLM only ever sees text — you already have a working tool-calling setup.</li>
+<li><strong>Latency budget:</strong> STT (~0.3–1s) + 1 LLM turn for tool-call (~0.5s) + graph retrieval (~50–200ms) + 1 LLM turn for answer (~1–3s) + TTS (~0.5s). Total ~2.5–5s. Acceptable for turn-based voice chat; too slow for true barge-in.</li>
+<li><strong>This is what most production voice-RAG apps do</strong>, including the Llama-Stack voice demos and most "voice agent" templates.</li>
+</ul>
+
+<h3>Pattern B — Audio-native LLM with tools (Voxtral-style)</h3>
+
+<pre><code>audio → [Voxtral] → tool_call(query_knowledge_graph, args=...)
+                          ↓
+                    [graph retrieval]
+                          ↓
+                    Voxtral generates answer (text or audio-out via TTS)</code></pre>
+
+<ul>
+<li><strong>One fewer hop</strong> — no separate STT step; the audio-LLM emits the tool call directly from the audio embedding.</li>
+<li><strong>Quality tradeoff:</strong> Voxtral's transcription is good but not Parakeet/Whisper-large good. For domain vocabulary (entity names in your knowledge graph), a dedicated ASR with custom vocabulary biasing (Voxtral API's <code>context_bias</code>, or Whisper with prompt prefix) will outperform an audio-LLM that has to both transcribe AND decide to call a tool.</li>
+<li><strong>Latency:</strong> one model forward instead of two, but that forward is over a multi-B-param audio-LLM, so wall-clock is often <em>longer</em> than Pattern A's two small forward passes.</li>
+<li><strong>Best when</strong> the query is conversational and the graph entities are common words. Worst when entity names are rare (proper nouns, IDs) — the audio-LLM may hallucinate them and pass garbage to the tool.</li>
+</ul>
+
+<h3>Pattern C — Hybrid: ASR for transcript + audio-LLM for intent (advanced)</h3>
+
+<pre><code>audio → [fast ASR] → transcript (verbatim, for graph query)
+       → [audio-LLM] → intent / tool selection (uses prosody, emotion)
+                          ↓
+              graph retrieval using transcript
+                          ↓
+              text LLM generates answer</code></pre>
+
+<ul>
+<li>Use ASR for the faithful string the graph needs (entity matching is string-based).</li>
+<li>Use the audio-LLM only to classify intent / detect emotion / decide whether to call a tool — leveraging the audio signal ASR throws away.</li>
+<li>Overkill for most apps; only worth it if you need prosody/emotion-aware routing.</li>
+</ul>
+
+<h3>Pattern D — Audio-native RAG (research, not production)</h3>
+
+<p>True "audio-native RAG" — embedding audio queries directly against an audio-indexed corpus, never going through text — exists in research (audio retrieval via CLAP-style audio embeddings, e.g. Audio Flamingo / AF-CLAP mentioned in <a href="https://github.com/rohitg00/ai-engineering-from-scratch/blob/main/phases/06-speech-and-audio/10-audio-language-models/docs/en.md">this 2026 overview</a>) but is <strong>not mature for knowledge-graph Q&amp;A</strong>. Knowledge graphs are text/structured-data artifacts; trying to query them with audio embeddings buys nothing and loses entity precision. <span class="pill bad">Skip for now</span>.</p>
+
+<div class="callout">
+  <strong>Recommendation for your app.</strong> Use <strong>Pattern A (transcribe-then-retrieve)</strong> as the backbone — it's the only pattern that lets you use a SOTA ASR <em>and</em> your existing tool-calling LLM <em>and</em> your existing knowledge graph unchanged. Treat audio-native tool calling (Pattern B / Voxtral) as a <em>future</em> experiment once the basic voice loop works.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="verdict">7. Recommendation</h2>
+
+<div class="verdict">
+<h2>Recommended architecture</h2>
+
+<p><strong>STT front-end:</strong> <code>faster-whisper</code> with <code>large-v3-turbo</code>, INT8, served in-process from your FastAPI <code>api/services/</code> (replacing the current llama-based transcribe endpoint). On your hardware this is ~2 GB VRAM, ~10× realtime, ~2.8% WER. If you want to push quality further and have CUDA headroom, run <strong>Parakeet-TDT-0.6B-v2</strong> via NeMo in a sibling service (6.05% leaderboard WER, CC-BY-4.0, but GPU-only and a heavier dependency).</p>
+
+<p><strong>Chat LLM:</strong> keep your existing Gemma 4 12B QAT (in <code>models/gemma4-12b-qat</code>) served by Ollama, with its existing tool-calling setup for knowledge-graph retrieval. <strong>Do not</strong> route audio through the chat LLM — it's slower, less accurate at transcription, and untested for tool-calling-while-audio by Ollama's own CI.</p>
+
+<p><strong>Why not Gemma 4 E2B/E4B audio:</strong> it adds a second multi-B-param model to VRAM, gives no published WER, no streaming partials, and no demonstrated voice→tool_call. A dedicated ASR + your existing tool-calling text LLM is strictly better on every axis that matters for a knowledge-graph app.</p>
+
+<p><strong>Future experiment (optional, low-risk):</strong> stand up <strong>Voxtral Mini 3B</strong> via vLLM in a separate service as a Pattern-B alternative. It's the only local audio-LLM with <em>documented</em> voice→tool_call. A/B test it against the Pattern-A pipeline on real user utterances — if it wins on end-to-end latency and entity accuracy for your domain, promote it. If not, you've lost one weekend.</p>
+
+<p><strong>Streaming:</strong> if you later need barge-in / &lt;250ms partials, swap the ASR front-end to <strong>Parakeet-unified-en-0.6b</strong> (RNN-T, 160ms latency, 8.44% WER) or <strong>Moonshine streaming</strong> (cross-platform, sub-200ms). Both are drop-in replacements behind your STT service interface.</p>
+</div>
+
+<h3>Decision matrix (for your hardware: NVIDIA GPU + existing Gemma 4 12B QAT chat model)</h3>
+
+<table>
+<tr><th>Option</th><th>WER</th><th>Latency</th><th>VRAM add</th><th>Tool calling</th><th>Streaming</th><th>Effort</th><th>Verdict</th></tr>
+<tr><td><strong>faster-whisper + turbo</strong> (Pattern A)</td><td>~2.8%</td><td>~0.5–1s</td><td>~2 GB</td><td>via existing Gemma 4 + tools</td><td>chunked</td><td>Low</td><td><span class="pill sota">SHIP THIS</span></td></tr>
+<tr><td>Parakeet-TDT-0.6B-v2 (Pattern A)</td><td>6.05% leaderboard</td><td>~0.3s</td><td>~2.5 GB + NeMo</td><td>via existing Gemma 4 + tools</td><td>via unified variant</td><td>Med</td><td><span class="pill good">Quality upgrade</span></td></tr>
+<tr><td>Moonshine streaming (Pattern A)</td><td>beats Whisper Large v3 (vendor)</td><td>sub-200ms</td><td>~1 GB</td><td>via existing Gemma 4 + tools</td><td>native</td><td>Med</td><td><span class="pill good">If streaming-critical</span></td></tr>
+<tr><td>Voxtral Mini 3B (Pattern B)</td><td>good, not ASR-SOTA</td><td>~2–5s</td><td>~9–20 GB</td><td><span class="pill sota">native voice→tool</span></td><td>no partials</td><td>Med-High</td><td><span class="pill good">A/B test later</span></td></tr>
+<tr><td>Gemma 4 E2B audio via Ollama (Pattern B)</td><td>unknown, likely worse than turbo</td><td>~2–4s</td><td>~3–6 GB</td><td><span class="pill bad">unverified</span></td><td>no partials</td><td>Low</td><td><span class="pill bad">Skip</span></td></tr>
+<tr><td>Current llama-based transcribe</td><td>poor (per your report)</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><span class="pill bad">Replace</span></td></tr>
+</table>
+
+<h3>Concrete next steps</h3>
+<ol>
+<li>Add <code>faster-whisper</code> to <code>api/requirements.txt</code>; create <code>api/services/stt.py</code> loading <code>large-v3-turbo</code> INT8 once at startup.</li>
+<li>Expose a <code>POST /v1/audio/transcriptions</code> route in <code>api/routes/</code> (OpenAI-compatible, so you can swap backends later).</li>
+<li>Wire the UI's mic input to that endpoint, then feed the transcript as a normal text message into your existing Gemma 4 + tool-calling chat flow.</li>
+<li>Measure end-to-end latency; if &gt;3s, profile and consider turbo→small or moving to whisper.cpp server on the same box.</li>
+<li>(Optional, later) A/B test Voxtral Mini 3B via vLLM as a Pattern-B alternative.</li>
+</ol>
+
+<div class="footer">
+  Compiled Jul 2026 from Ollama source (commit <code>573386c</code>), HuggingFace model cards, NVIDIA NeMo docs, and 2026 benchmarks.
+  All code quotes are from the cited permalinks. WER/latency numbers are from the cited sources; verify against the
+  <a href="https://huggingface.co/spaces/hf-audio/open_asr_leaderboard">HF Open ASR Leaderboard</a> before committing to a model.
+</div>
+
+</body>
+</html>

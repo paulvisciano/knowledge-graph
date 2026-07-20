@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transcription Challenge — Evaluation & Recommendations</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --text: #c8d6e5;
+    --text-dim: #5a6b80;
+    --cyan: #00d4ff;
+    --purple: #a855f7;
+    --green: #00ff88;
+    --orange: #ff8c00;
+    --red: #ff3366;
+    --yellow: #ffd600;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 5rem;
+  }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 2.5rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  .hero h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    color: var(--cyan);
+    text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+    letter-spacing: -0.02em;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  .hero .meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    font-size: 0.8rem;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.3em 0.75em;
+    border-radius: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  }
+  code {
+    background: var(--surface2);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.78em;
+    color: var(--cyan);
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  }
+
+  /* TL;DR / Recommendation banner */
+  .recommendation {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.08), rgba(0, 212, 255, 0.06));
+    border: 1px solid rgba(0, 255, 136, 0.25);
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    margin-bottom: 2.5rem;
+  }
+  .recommendation h2 {
+    border: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    color: var(--green);
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .recommendation p { font-size: 0.9rem; }
+  .recommendation strong { color: var(--green); }
+
+  /* Summary cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+  }
+  .summary-card .num {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 0.35rem;
+  }
+  .summary-card .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+  .summary-card.cyan { border-left: 3px solid var(--cyan); }
+  .summary-card.cyan .num { color: var(--cyan); }
+  .summary-card.yellow { border-left: 3px solid var(--yellow); }
+  .summary-card.yellow .num { color: var(--yellow); }
+  .summary-card.orange { border-left: 3px solid var(--orange); }
+  .summary-card.orange .num { color: var(--orange); }
+  .summary-card.red { border-left: 3px solid var(--red); }
+  .summary-card.red .num { color: var(--red); }
+  .summary-card.green { border-left: 3px solid var(--green); }
+  .summary-card.green .num { color: var(--green); }
+  .summary-card.purple { border-left: 3px solid var(--purple); }
+  .summary-card.purple .num { color: var(--purple); }
+
+  /* Sections */
+  h2 {
+    font-size: 1.3rem;
+    margin: 2.5rem 0 1rem;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  h2 .icon { font-size: 1.1rem; }
+  h3 {
+    font-size: 1rem;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--cyan);
+  }
+  h4 {
+    font-size: 0.85rem;
+    margin: 1rem 0 0.4rem;
+    color: var(--purple);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { margin-bottom: 0.8rem; font-size: 0.9rem; }
+  ul, ol { margin: 0.5rem 0 1rem 1.5rem; font-size: 0.9rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Option cards */
+  .option {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .option-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .option-severity {
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 0.5rem;
+  }
+  .sev-green { background: var(--green); box-shadow: 0 0 8px rgba(0, 255, 136, 0.5); }
+  .sev-yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(255, 214, 0, 0.4); }
+  .sev-orange { background: var(--orange); box-shadow: 0 0 8px rgba(255, 140, 0, 0.4); }
+  .sev-red { background: var(--red); box-shadow: 0 0 8px rgba(255, 51, 102, 0.5); }
+  .sev-purple { background: var(--purple); box-shadow: 0 0 8px rgba(168, 85, 247, 0.5); }
+  .option-title { flex: 1; }
+  .option-title h3 { margin: 0 0 0.25rem; color: var(--text); font-size: 1rem; }
+  .option-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    margin-top: 0.4rem;
+  }
+  .tag {
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-weight: 500;
+  }
+  .tag.good { background: rgba(0, 255, 136, 0.12); color: var(--green); }
+  .tag.bad { background: rgba(255, 51, 102, 0.12); color: var(--red); }
+  .tag.warn { background: rgba(255, 214, 0, 0.12); color: var(--yellow); }
+  .tag.info { background: rgba(0, 212, 255, 0.12); color: var(--cyan); }
+  .tag.neutral { background: var(--surface2); color: var(--text-dim); }
+  .tag.file { background: var(--surface2); color: var(--purple); }
+
+  .option-body {
+    padding: 1rem 1.5rem 1.25rem;
+  }
+  .option-body h4 { margin-top: 0; }
+  .option-body p { font-size: 0.85rem; }
+
+  .pros-cons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-top: 0.75rem;
+  }
+  @media (max-width: 640px) {
+    .pros-cons { grid-template-columns: 1fr; gap: 0.75rem; }
+  }
+  .pros, .cons {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+  .pros { border-left: 3px solid var(--green); }
+  .cons { border-left: 3px solid var(--red); }
+  .pros h5, .cons h5 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.5rem;
+  }
+  .pros h5 { color: var(--green); }
+  .cons h5 { color: var(--red); }
+  .pros ul, .cons ul { margin: 0; padding-left: 1.1rem; font-size: 0.82rem; }
+  .pros li, .cons li { margin-bottom: 0.25rem; }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1rem 0 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    min-width: 640px;
+  }
+  th, td {
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface2);
+    color: var(--cyan);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+  }
+  tr:hover td { background: rgba(0, 212, 255, 0.03); }
+  td .pill {
+    display: inline-block;
+    padding: 0.1em 0.5em;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .pill.g { background: rgba(0,255,136,0.12); color: var(--green); }
+  .pill.y { background: rgba(255,214,0,0.12); color: var(--yellow); }
+  .pill.o { background: rgba(255,140,0,0.12); color: var(--orange); }
+  .pill.r { background: rgba(255,51,102,0.12); color: var(--red); }
+
+  /* Callouts */
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+  }
+  .callout.warn { border-left-color: var(--yellow); }
+  .callout.bad { border-left-color: var(--red); }
+  .callout.good { border-left-color: var(--green); }
+  .callout strong { color: var(--text); }
+
+  /* Architecture diagram (text-based) */
+  .arch {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0 1.5rem;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    overflow-x: auto;
+    line-height: 1.5;
+    color: var(--text-dim);
+    white-space: pre;
+  }
+  .arch .hl { color: var(--cyan); }
+  .arch .hl-g { color: var(--green); }
+  .arch .hl-o { color: var(--orange); }
+  .arch .hl-r { color: var(--red); }
+  .arch .hl-p { color: var(--purple); }
+
+  /* Project cards */
+  .project {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .project h4 {
+    margin: 0 0 0.4rem;
+    color: var(--cyan);
+    font-size: 0.9rem;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .project a { color: var(--purple); text-decoration: none; font-size: 0.8rem; }
+  .project p { font-size: 0.82rem; margin-bottom: 0.4rem; }
+  .project .pattern { font-size: 0.78rem; color: var(--green); font-family: monospace; }
+
+  hr.divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
+  }
+
+  .footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Transcription Challenge — Evaluation & Recommendations</h1>
+  <p class="subtitle">How should voice input flow into a local knowledge-graph chat app? An evaluation of three options, the broader local-STT landscape, and how open-source voice chat solutions architect this.</p>
+  <div class="meta">
+    <span class="badge">Local-only constraint</span>
+    <span class="badge">Gemma 4 12B · llama.cpp</span>
+    <span class="badge">LightRAG + MCP tools</span>
+    <span class="badge">Date: Jul 2026</span>
+  </div>
+</div>
+
+<!-- ═══ Recommendation ═══ -->
+<div class="recommendation">
+  <h2><span>🏆</span> Recommendation</h2>
+  <p>
+    <strong>Adopt a hybrid of Option 1 + Option 3.</strong> Use a dedicated <strong>Whisper.cpp server</strong>
+    (already scaffolded on port <code>8090</code>) to transcribe audio → text, then feed the transcript into the
+    <strong>existing text pipeline</strong> so the LLM can call <code>query_knowledge_graph</code> via MCP tools.
+    Upgrade the Whisper model from <code>base.en</code> to <code>medium.en</code> or <code>large-v3</code> for
+    usable quality. Keep Gemma's native-audio path as an <em>optional</em> fallback for general-knowledge chat
+    where KG retrieval is not needed. This mirrors the pattern used by every production open-source voice chat
+    app surveyed (Open WebUI, AnythingLLM, LobeChat, LibreChat) — all transcribe first, then run their normal
+    text RAG/tool pipeline.
+  </p>
+</div>
+
+<!-- ═══ Summary cards ═══ -->
+<div class="summary-grid">
+  <div class="summary-card red"><div class="num">3</div><div class="label">Options evaluated</div></div>
+  <div class="summary-card green"><div class="num">1</div><div class="label">Recommended approach</div></div>
+  <div class="summary-card cyan"><div class="num">7+</div><div class="label">Local STT engines surveyed</div></div>
+  <div class="summary-card purple"><div class="num">6</div><div class="label">OSS chat apps studied</div></div>
+  <div class="summary-card orange"><div class="num">0</div><div class="label">Production apps using audio-direct-to-LLM</div></div>
+  <div class="summary-card yellow"><div class="num">~1-3s</div><div class="label">Added latency for STT step</div></div>
+</div>
+
+<!-- ═══ The problem ═══ -->
+<h2><span class="icon">🎯</span> The Problem</h2>
+<p>
+  Voice input in this app has a fundamental architectural tension. The chat's value comes from querying a local
+  knowledge graph (LightRAG) via MCP tool calls — the LLM decides to call
+  <code>query_knowledge_graph</code> based on the user's <strong>text</strong>. When the user speaks, there are
+  two sub-problems that must be solved <em>in order</em>:
+</p>
+<ol>
+  <li><strong>Speech → Text</strong> (transcription / STT) — turn the audio blob into accurate text.</li>
+  <li><strong>Text → Knowledge Graph → Answer</strong> — the existing pipeline: the LLM receives the transcript as a user message, decides whether to call <code>query_knowledge_graph</code> (an OpenAI-style <code>tools</code> declaration served by the MCP server at <code>/mcp</code>), receives the retrieval result as a <code>tool</code> message, then generates the final answer.</li>
+</ol>
+<p>
+  Gemma 4 12B (via llama.cpp with the <code>mmproj</code> projector) accepts audio natively through the
+  OpenAI-compatible <code>input_audio</code> content part. That lets you skip step 1 — but, as we'll see, it
+  also undermines step 2.
+</p>
+
+<h4>Current state in the codebase</h4>
+<ul>
+  <li><strong>Audio capture:</strong> <code>ui/src/lib/utils/audio-recording.ts</code> — AudioWorklet captures PCM, encodes WAV, base64-encodes for the API.</li>
+  <li><strong>Transcription endpoint:</strong> <code>API.llama.transcriptions</code> → <code>/whisper/inference</code> (proxied by nginx at <code>docker/nginx/nginx.conf:112</code> to <code>whisper:8090</code>, the whisper-server started in <code>scripts/start-llama-servers.sh:100-113</code>).</li>
+  <li><strong>Model-based transcribe (the "poor" path):</strong> routing audio to the Gemma LLM itself as an <code>input_audio</code> part — see <code>ui/src/routes/+page.svelte:481</code> and <code>:489-493</code>. This is what produces poor transcription. It is <em>not</em> the whisper-server.</li>
+  <li><strong>Direct-audio chat path:</strong> <code>+page.svelte:471-487</code> builds an OpenAI <code>input_audio</code> content part and sends it to <code>/v1/chat/completions</code> on the Gemma model. When this path is taken, the LLM <em>can</em> still be passed the <code>tools</code> array (<code>+page.svelte:541-544</code>) — but see "Why tool-calling breaks" below.</li>
+  <li><strong>KG query pipeline:</strong> <code>ui/src/lib/services/mcp-client.svelte.ts</code> exposes MCP tools as OpenAI tool definitions; <code>+page.svelte:744-789</code> executes returned <code>tool_calls</code> by calling <code>mcpClient.callTool()</code>, which hits the FastMCP server at <code>mcp-services/src/knowledge_graph_mcp/server.py</code>, which in turn calls LightRAG.</li>
+  <li><strong>Whisper server already exists:</strong> <code>docker/whisper/Dockerfile</code> builds <code>whisper.cpp</code>'s <code>whisper-server</code>; <code>scripts/download-models.sh:55-58</code> downloads <code>ggml-base.en.bin</code>.</li>
+</ul>
+
+<div class="callout warn">
+  <strong>Clarification on "poor transcription".</strong> The poor quality comes from using the <em>Gemma LLM
+  itself</em> to transcribe audio (the <code>input_audio</code> path), <strong>not</strong> from the whisper-server.
+  The whisper-server is scaffolded but uses the tiny <code>base.en</code> model — its quality is mediocre but
+  predictable, and is trivially upgradeable. This distinction matters because it changes which option is
+  actually broken.
+</div>
+
+<!-- ═══ Architecture diagram ═══ -->
+<h3>Current architecture (text path vs. direct-audio path)</h3>
+<div class="arch"><span class="hl-g">TEXT PATH (works, KG is queried):</span>
+  User types ─▶ /v1/chat/completions (messages=[{role:user, content:"text"}], tools=[query_knowledge_graph])
+             ─▶ Gemma 4 12B decides to call tool
+             ─▶ mcpClient.callTool("query_knowledge_graph", {q, mode:"local"})
+             ─▶ FastMCP /mcp  ─▶ LightRAG /query  ─▶ NetworkX + BGE-M3 + Postgres
+             ─▶ tool result back to Gemma  ─▶ final answer with KG context ✅
+
+<span class="hl-r">DIRECT-AUDIO PATH (KG retrieval unreliable/broken):</span>
+  User speaks ─▶ WAV base64 ─▶ /v1/chat/completions
+             (messages=[{role:user, content:[{type:"input_audio",...},{type:"text",...}]}], tools=[...])
+             ─▶ Gemma consumes audio tokens (~few hundred) + tries to reason
+             ─▶ Tool-calling degrades: audio tokens crowd context, model often
+                answers directly from what it heard instead of calling tools
+             ─▶ KG rarely queried  ❌  (plus transcription itself is poor)
+
+<span class="hl-o">RECOMMENDED PATH (transcribe-then-retrieve):</span>
+  User speaks ─▶ WAV ─▶ /whisper/inference (whisper.cpp server, upgraded model)
+             ─▶ transcript text
+             ─▶ same as TEXT PATH above ✅  (KG reliably queried, tools work)</div>
+
+<!-- ═══ Option 1 ═══ -->
+<h2><span class="icon">①</span> The Three Options Evaluated</h2>
+
+<div class="option">
+  <div class="option-header">
+    <div class="option-severity sev-yellow"></div>
+    <div class="option-title">
+      <h3>Option 1 — Send audio directly to Gemma (native multimodal)</h3>
+      <div class="option-meta">
+        <span class="tag neutral">already implemented</span>
+        <span class="tag warn">no transcription step</span>
+        <span class="tag bad">KG retrieval unreliable</span>
+        <span class="tag file">+page.svelte:481</span>
+      </div>
+    </div>
+  </div>
+  <div class="option-body">
+    <p>
+      Gemma 4 12B is loaded with its <code>mmproj</code> projector (<code>scripts/start-llama-servers.sh:21,39-40</code>),
+      giving llama.cpp's OpenAI-compatible server the ability to accept
+      <code>{type:"input_audio", input_audio:{data, format:"wav"}}</code> content parts. The UI already builds
+      these parts (<code>+page.svelte:471-487</code>) and logs that it's sending them (<code>:489-493</code>).
+      No separate STT step is needed — the model "listens" and responds.
+    </p>
+    <h4>Why it "seems to work well"</h4>
+    <p>
+      For general-knowledge questions ("what's the capital of France?"), Gemma understands the audio and answers
+      directly. The experience feels magical — one round trip, no transcription latency.
+    </p>
+    <h4>Why it breaks the knowledge graph</h4>
+    <ul>
+      <li><strong>Tool-calling degrades with audio input.</strong> The <code>tools</code> array <em>is</em> sent alongside audio (<code>+page.svelte:541-544</code>), but in practice the model tends to answer from what it heard rather than emit a structured <code>tool_call</code>. Audio tokens consume context and attention; the model's instruction-following for tool emission is measurably worse than on text-only turns. Community reports on Ollama/llama.cpp multi-modal + tools confirm this is a known weak spot, not a bug specific to this app.</li>
+      <li><strong>Transcription quality is poor.</strong> Gemma is an LLM, not an ASR model. Its "understanding" of audio is good enough for casual Q&amp;A but produces paraphrased, lossy, and sometimes hallucinated interpretations of the actual words. For KG queries where exact entity names ("Paul", "Aurora", "Baja trip") matter, paraphrasing silently breaks retrieval.</li>
+      <li><strong>No transcript in the transcript.</strong> The user's spoken words never become a discrete text string the UI can show, edit, or retry. If the model mishears, the user can't correct it — the audio is opaque.</li>
+      <li><strong>Cost per turn is higher.</strong> Audio tokens (~hundreds) are evaluated on every request, and the entire audio must be re-sent on multi-turn follow-ups if the conversation references it.</li>
+    </ul>
+    <div class="pros-cons">
+      <div class="pros">
+        <h5>Pros</h5>
+        <ul>
+          <li>Simplest architecture — no STT service.</li>
+          <li>Lowest latency for general Q&amp;A (one round trip).</li>
+          <li>Model can pick up tone/prosody.</li>
+          <li>Already wired up in the UI.</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <h5>Cons</h5>
+        <ul>
+          <li>Knowledge-graph queries are unreliable — the whole point of the app.</li>
+          <li>LLM-as-transcriber hallucinates &amp; paraphrases entity names.</li>
+          <li>No visible/correctable transcript.</li>
+          <li>Tool-calling + audio is a known weak combination in llama.cpp.</li>
+          <li>Higher per-turn token cost.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="option">
+  <div class="option-header">
+    <div class="option-severity sev-red"></div>
+    <div class="option-title">
+      <h3>Option 2 — Transcribe via the Gemma model itself (the "poor" endpoint)</h3>
+      <div class="option-meta">
+        <span class="tag bad">poor quality</span>
+        <span class="tag warn">wrong tool for the job</span>
+        <span class="tag neutral">no extra service</span>
+      </div>
+    </div>
+  </div>
+  <div class="option-body">
+    <p>
+      This is the path that <em>currently</em> produces poor transcription: asking the Gemma LLM to "transcribe"
+      the audio (either by prompting it to output the text, or by using it as an ad-hoc STT endpoint). The
+      transcript is then intended to feed the text pipeline so KG tools work. The architecture is sound —
+      transcribe-then-retrieve is the right pattern — but the <strong>transcriber is wrong</strong>.
+    </p>
+    <h4>Why an LLM is a bad transcriber</h4>
+    <ul>
+      <li><strong>Not trained for WER.</strong> Whisper and its kin are trained on hundreds of thousands of hours of audio with explicit ASR objectives. Gemma's audio capability is a side-channel of multimodal pretraining; it has no ASR loss.</li>
+      <li><strong>Paraphrasing, not verbatim.</strong> Ask an LLM "what did I say?" and it summarizes. ASR must output the exact words, including names and proper nouns the LLM may not have in its vocabulary. Entity names like "Aurora" or "Baja" get autocorrected to common words.</li>
+      <li><strong>Hallucinations.</strong> LLMs hallucinate filler when uncertain; ASR models are trained to output blank/uncertain markers instead.</li>
+      <li><strong>Latency &amp; cost.</strong> A 12B model generating a transcript is far slower and more expensive than a dedicated 74M-parameter Whisper encoder running on the same GPU.</li>
+    </ul>
+    <div class="callout bad">
+      <strong>Verdict:</strong> Reject. Using Gemma as the transcriber gives you the worst of both worlds — LLM
+      latency <em>and</em> poor ASR quality — for no benefit over a dedicated Whisper model. The fix is not to
+      tune the prompt; it's to use a model designed for ASR.
+    </div>
+    <div class="pros-cons">
+      <div class="pros">
+        <h5>Pros</h5>
+        <ul>
+          <li>No additional service to run.</li>
+          <li>Output is text → KG pipeline works downstream.</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <h5>Cons</h5>
+        <ul>
+          <li>Quality is fundamentally poor — wrong model class.</li>
+          <li>Slow (12B generating text vs. 74M ASR encoder).</li>
+          <li>Hallucinated/paraphrased entity names break KG retrieval.</li>
+          <li>Same VRAM as the chat LLM — no parallelism possible.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="option">
+  <div class="option-header">
+    <div class="option-severity sev-green"></div>
+    <div class="option-title">
+      <h3>Option 3 — Separate Whisper server (dedicated ASR)</h3>
+      <div class="option-meta">
+        <span class="tag good">already scaffolded</span>
+        <span class="tag good">right tool for the job</span>
+        <span class="tag warn">needs model upgrade</span>
+        <span class="tag file">docker/whisper/Dockerfile</span>
+        <span class="tag file">port 8090</span>
+      </div>
+    </div>
+  </div>
+  <div class="option-body">
+    <p>
+      A dedicated <code>whisper-server</code> (from whisper.cpp) already runs on port <code>8090</code> and is
+      proxied at <code>/whisper/inference</code>. The UI already calls it via
+      <code>transcribeAudio()</code> in <code>audio-recording.ts:276-299</code> and feeds the result to
+      <code>handleSend(..., transcript)</code> at <code>+page.svelte:200-208</code>. The only problem is that
+      it's running the <code>base.en</code> model — the second-smallest Whisper model — which is why quality is
+      mediocre. <strong>The infrastructure is correct; the model is undersized.</strong>
+    </p>
+    <h4>What's already in place</h4>
+    <ul>
+      <li><code>docker/whisper/Dockerfile</code> — builds whisper.cpp's <code>whisper-server</code> with <code>-DWHISPER_BUILD_SERVER=ON</code>.</li>
+      <li><code>scripts/start-llama-servers.sh:100-113</code> — starts <code>whisper-server -m ggml-base.en.bin -l en --convert -t 4</code> on port 8090, with health check.</li>
+      <li><code>scripts/download-models.sh:55-58</code> — downloads <code>ggml-base.en.bin</code>.</li>
+      <li><code>docker/nginx/nginx.conf:112-113</code> — proxies <code>/whisper/</code> → <code>whisper:8090</code>.</li>
+      <li><code>ui/src/lib/utils/audio-recording.ts:276</code> — <code>transcribeAudio()</code> posts WAV as multipart form data, parses <code>result.text</code>.</li>
+    </ul>
+    <h4>The one-line fix</h4>
+    <p>
+      Swap <code>ggml-base.en.bin</code> for <code>ggml-medium.en.bin</code> (or <code>large-v3.bin</code> for
+      best quality). Update two env vars / two script lines and re-download. Medium.en roughly <strong>halves
+      WER</strong> vs. base.en at ~2× latency on Metal; large-v3 is SOTA but heavier.
+    </p>
+    <div class="callout good">
+      <strong>Verdict:</strong> Adopt. This is the right architecture and it's already 90% built. The only real
+      work is upgrading the model and wiring the UI so the mic button always goes through
+      <code>transcribeAudio()</code> → text pipeline (which it already does in
+      <code>handleMicClick</code> at <code>+page.svelte:189-223</code>).
+    </div>
+    <div class="pros-cons">
+      <div class="pros">
+        <h5>Pros</h5>
+        <ul>
+          <li>Right model class — trained for ASR, low WER.</li>
+          <li>Transcript is discrete text → KG tools work reliably.</li>
+          <li>Small model (74M–1.5B) runs alongside the 12B LLM without contention.</li>
+          <li>User-visible, editable, retryable transcript.</li>
+          <li>Already scaffolded end-to-end in this repo.</li>
+          <li>Matches the pattern used by every surveyed OSS chat app.</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <h5>Cons</h5>
+        <ul>
+          <li>Adds ~1-3s latency per voice turn (acceptable for chat).</li>
+          <li>Current <code>base.en</code> model is too weak — must upgrade.</li>
+          <li>Extra ~150MB-1.5GB VRAM/disk for the Whisper weights.</li>
+          <li>No prosody/tone conveyed to the LLM (rarely needed for KG Q&amp;A).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Additional suggestions ═══ -->
+<h2><span class="icon">②</span> Additional Suggestions (beyond the 3 options)</h2>
+
+<h3>A. Hybrid: transcribe for RAG, also send audio for context</h3>
+<p>
+  Run Option 3 as the primary path, but <em>also</em> include the <code>input_audio</code> part in the LLM
+  request alongside the transcript text. The LLM gets the accurate transcript (so it can call tools reliably)
+  <em>and</em> the audio (so it can pick up tone, hesitation, emphasis). Cost: extra audio tokens per turn.
+  Benefit: marginal — rarely useful for a knowledge-graph assistant. Worth knowing about, not worth building
+  first.
+</p>
+
+<h3>B. Upgrade to a faster / better STT engine</h3>
+<p>
+  <code>whisper.cpp</code> is fine, but if latency or quality becomes a bottleneck, consider these drop-in
+  alternatives (all local, all OpenAI-compatible or wrappable):
+</p>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Engine</th><th>Backend</th><th>Best model</th><th>WER (avg)</th><th>Latency</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>whisper.cpp</strong> (current)</td><td>C/C++, Metal/CUDA</td><td>large-v3 / medium.en</td><td><span class="pill g">~5-9%</span></td><td><span class="pill y">medium</span></td><td>Already running. Swap model file to upgrade.</td></tr>
+    <tr><td><strong>faster-whisper</strong></td><td>CTranslate2 (Python)</td><td>large-v3</td><td><span class="pill g">~5-9%</span></td><td><span class="pill g">fast</span></td><td>~4× faster than openai/whisper, lower VRAM. Used by Open WebUI.</td></tr>
+    <tr><td><strong>WhisperX</strong></td><td>faster-whisper + alignment</td><td>large-v3</td><td><span class="pill g">~5-9%</span></td><td><span class="pill y">medium</span></td><td>Adds word-level timestamps &amp; speaker diarization. Overkill for chat.</td></tr>
+    <tr><td><strong>distil-whisper</strong></td><td>Distilled Whisper</td><td>distil-large-v3</td><td><span class="pill y">~7-10%</span></td><td><span class="pill g">very fast</span></td><td>~6× faster, slightly worse WER. English-only. Good for streaming.</td></tr>
+    <tr><td><strong>NVIDIA Parakeet</strong> (NeMo)</td><td>NeMo / Riva</td><td>parakeet-tdt-1.1b</td><td><span class="pill g">~4-6%</span></td><td><span class="pill g">fast</span></td><td>2025 SOTA for English. More setup, GPU-friendly.</td></tr>
+    <tr><td><strong>Moonshine</strong> (Useful Sensors)</td><td>ONNX</td><td>moonshine-base/tiny</td><td><span class="pill y">~7-9%</span></td><td><span class="pill g">very fast</span></td><td>Low-latency, optimized for edge. Good if running on CPU/Mac.</td></tr>
+    <tr><td><strong>Vosk</strong></td><td>Kaldi-based</td><td>vosk-model-en-us-0.22</td><td><span class="pill o">~12-15%</span></td><td><span class="pill g">very fast</span></td><td>Streaming, lightweight, offline. Quality lags Whisper.</td></tr>
+    <tr><td><strong>Gemma 4 audio</strong> (LLM)</td><td>llama.cpp mmproj</td><td>—</td><td><span class="pill r">unreliable</span></td><td><span class="pill o">slow</span></td><td>Not an ASR model. Paraphrases &amp; hallucinates. (Option 1/2.)</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="" style="font-size:0.78rem;color:var(--text-dim);">
+  WER figures are rough averages on common English benchmarks (LibriSpeech, ESB). Your numbers will vary with
+  microphone quality, accent, and background noise. Treat the ranking, not the exact percentages, as the signal.
+</p>
+
+<h3>C. Streaming STT for low-latency "walkie-talkie" feel</h3>
+<p>
+  If sub-second response becomes a goal, switch from the current "record → upload full WAV → wait" flow to
+  streaming partial transcripts while the user is still speaking. Options:
+</p>
+<ul>
+  <li><strong>whisper.cpp streaming</strong> — <code>whisper-server</code> supports incremental <code>/inference</code> calls on sliding windows; not true streaming but good enough.</li>
+  <li><strong>WhisperLive / whisper_streaming</strong> — community wrappers that feed chunked audio to Whisper and emit partial results over WebSocket.</li>
+  <li><strong>Vosk</strong> — true streaming STT over WebSocket, lowest latency, lower quality.</li>
+  <li><strong>Moonshine</strong> — designed for low-latency edge use; partial-result support via ONNX streaming.</li>
+</ul>
+<p>
+  For a knowledge-graph assistant, full-utterance transcription is almost certainly fine — the KG query and LLM
+  generation together take longer than the STT step. Don't pursue streaming until STT is the bottleneck.
+</p>
+
+<h3>D. Intent-routing layer (optional, for later)</h3>
+<p>
+  Add a tiny classifier (or a second, cheaper LLM call) that looks at the transcript and decides: <em>does this
+  need the KG?</em> If yes → run the full tool-calling pipeline. If no (general knowledge, smalltalk, math) →
+  skip retrieval and answer directly. This is the pattern Home Assistant's voice pipeline uses (STT → intent →
+  action) and what advanced Open WebUI setups approximate with "RAG on/off" toggles. It saves latency and KG
+  load on questions that don't need it. Not needed now — the LLM's own tool-choice already does this implicitly —
+  but worth noting as the system scales.
+</p>
+
+<h3>E. Voice activity detection (VAD) before STT</h3>
+<p>
+  Today the user holds a key to record. For hands-free "push to talk" or always-on modes, add Silero VAD
+  (tiny, ~2MB, runs in browser or server-side) to chunk audio at speech boundaries and trim silence. This
+  reduces Whisper latency (less silence to process) and avoids hallucinations Whisper is known to produce on
+  long silent tails.
+</p>
+
+<h3>F. A dedicated audio-LLM with real tool-calling (future watch)</h3>
+<p>
+  None of the surveyed production apps do this today, but the landscape is moving:
+</p>
+<ul>
+  <li><strong>Qwen2-Audio</strong> — audio-native LLM, Qwen2-based, supports function calling, runnable locally via vLLM/sglang/transformers. The most plausible "audio in + tools work" path if you wanted to escape transcribe-then-retrieve. Requires swapping out the Gemma stack.</li>
+  <li><strong>Voxtral</strong> (Mistral) — audio-native, strong on audio understanding, but tool-calling support is less mature than Qwen2-Audio.</li>
+  <li><strong>Gemma 3n</strong> — has true audio strands (unlike Gemma 4 which is vision+text); Ollama has a converter. Early. Tool-calling + audio unproven.</li>
+</ul>
+<p>
+  These are worth tracking but not worth adopting now. The transcribe-then-retrieve pattern is battle-tested,
+  works with your current Gemma model, and won't be obsolete even if audio-LLMs improve — you'd just gain an
+  optional shortcut path.
+</p>
+
+<!-- ═══ How others solve it ═══ -->
+<h2><span class="icon">🌍</span> How Other Open-Source AI Chat Solutions Solve This</h2>
+<p>
+  Survey of production open-source voice-enabled chat apps. The pattern is overwhelmingly consistent:
+  <strong>transcribe first with a dedicated STT service, then run the normal text RAG/tool pipeline.</strong>
+  None send audio directly to a multimodal LLM and skip retrieval.
+</p>
+
+<div class="project">
+  <h4>Open WebUI <a href="https://github.com/open-webui/open-webui" target="_blank">↗ repo</a></h4>
+  <p><strong>STT:</strong> Local faster-whisper (in-process) by default; OpenAI Whisper API and other providers optional. Configurable via <code>WHISPER_MODEL</code> (tiny → large).</p>
+  <p><strong>RAG flow:</strong> Audio recorded in browser → transcribed to text client-side → text submitted as a normal chat message → RAG pipeline (hybrid vector + BM25, reranker) runs on the text → LLM generates. Voice input is just an input modality; everything downstream is text.</p>
+  <p class="pattern">Pattern: (a) transcribe-first, then text RAG. ✅</p>
+</div>
+
+<div class="project">
+  <h4>AnythingLLM <a href="https://github.com/Mintplex-Labs/anything-llm" target="_blank">↗ repo</a></h4>
+  <p><strong>STT:</strong> Browser-native Web Speech API (free, uses the browser's built-in STT) by default; local Whisper as an option.</p>
+  <p><strong>RAG flow:</strong> Transcript text drops into the chat composer → user sends → AnythingLLM's vector-search RAG runs on the text → LLM. Voice is an input convenience only.</p>
+  <p class="pattern">Pattern: (a) transcribe-first, then text RAG. ✅</p>
+</div>
+
+<div class="project">
+  <h4>LobeChat <a href="https://github.com/lobehub/lobe-chat" target="_blank">↗ repo</a></h4>
+  <p><strong>STT:</strong> Pluggable STT providers — OpenAI Whisper API, Azure, browser Web Speech, and local Whisper via plugin. Local-capable.</p>
+  <p><strong>RAG flow:</strong> STT → text in composer → LLM (with optional knowledge base / tools). Same text pipeline either way.</p>
+  <p class="pattern">Pattern: (a) transcribe-first, then text RAG/tools. ✅</p>
+</div>
+
+<div class="project">
+  <h4>LibreChat <a href="https://github.com/danny-avila/LibreChat" target="_blank">↗ repo</a></h4>
+  <p><strong>STT:</strong> Browser Web Speech API for input; OpenAI Whisper API for server-side. Local Whisper possible via custom endpoint.</p>
+  <p><strong>Tools/RAG:</strong> Transcript becomes a normal user message → agents/tools/RAG run on text. Voice doesn't bypass retrieval.</p>
+  <p class="pattern">Pattern: (a) transcribe-first. ✅</p>
+</div>
+
+<div class="project">
+  <h4>Home Assistant / Wyoming protocol <a href="https://github.com/home-assistant/addons/tree/master/wyoming" target="_blank">↗ docs</a></h4>
+  <p><strong>STT:</strong> Pluggable via Wyoming protocol — Whisper (faster-whisper), Vosk, and others. Fully local.</p>
+  <p><strong>Flow:</strong> STT → intent recognition (HA's intent engine or LLM) → action (home-assistant API calls, which are effectively "tools"). The canonical "transcribe → intent → tool-call" pipeline, identical in spirit to transcribe → LLM → MCP tool-call.</p>
+  <p class="pattern">Pattern: (a) + (D) intent-routing. ✅</p>
+</div>
+
+<div class="project">
+  <h4>WhisperLive / whisper_streaming <a href="https://github.com/collabora/WhisperLive" target="_blank">↗ repo</a></h4>
+  <p><strong>STT:</strong> Streaming Whisper over WebSocket, partial transcripts. Not a chat app, but a reusable STT component many local chat setups plug into.</p>
+  <p><strong>Use:</strong> Drop-in for the "streaming STT" suggestion above if low-latency voice chat becomes a goal.</p>
+  <p class="pattern">Pattern: STT infrastructure, consumed by (a) downstream. ✅</p>
+</div>
+
+<div class="project">
+  <h4>Big-AGI / Continuum</h4>
+  <p>Voice input via browser Web Speech API → text → normal LLM/tool flow. No audio-native LLM path.</p>
+  <p class="pattern">Pattern: (a) transcribe-first. ✅</p>
+</div>
+
+<div class="callout good">
+  <strong>Takeaway from the survey.</strong> The industry consensus is unambiguous: <em>dedicated STT → text →
+  retrieval/tools</em>. The "send audio straight to the LLM" pattern (Option 1) is essentially absent from
+  production open-source chat apps, both because audio-native LLMs with reliable tool-calling are immature and
+  because text is the lingua franca every downstream stage already speaks. Your app should follow the same
+  pattern.
+</div>
+
+<!-- ═══ Comparison matrix ═══ -->
+<h2><span class="icon">⚖️</span> Side-by-Side Comparison</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Criterion</th>
+      <th>Opt 1 — Gemma audio direct</th>
+      <th>Opt 2 — Gemma as transcriber</th>
+      <th>Opt 3 — Whisper server</th>
+      <th>Hybrid (Opt 1+3)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Transcription quality</td>
+      <td><span class="pill r">poor</span> (LLM paraphrases)</td>
+      <td><span class="pill r">poor</span> (LLM paraphrases)</td>
+      <td><span class="pill g">good→great</span> (upgrade model)</td>
+      <td><span class="pill g">good→great</span></td>
+    </tr>
+    <tr>
+      <td>KG retrieval works reliably</td>
+      <td><span class="pill r">no</span> (tool-calling degrades w/ audio)</td>
+      <td><span class="pill y">yes</span> (text downstream)</td>
+      <td><span class="pill g">yes</span></td>
+      <td><span class="pill g">yes</span></td>
+    </tr>
+    <tr>
+      <td>Latency per voice turn</td>
+      <td><span class="pill g">lowest</span> (1 round trip)</td>
+      <td><span class="pill o">high</span> (12B generates transcript)</td>
+      <td><span class="pill y">+1-3s</span> for STT</td>
+      <td><span class="pill o">+1-3s + audio tokens</span></td>
+    </tr>
+    <tr>
+      <td>VRAM / compute overhead</td>
+      <td>shared with LLM</td>
+      <td>shared with LLM, blocks it</td>
+      <td>+150MB-1.5GB separate</td>
+      <td>separate + extra audio tokens</td>
+    </tr>
+    <tr>
+      <td>User-visible transcript</td>
+      <td><span class="pill r">no</span></td>
+      <td><span class="pill g">yes</span></td>
+      <td><span class="pill g">yes</span> (editable, retryable)</td>
+      <td><span class="pill g">yes</span></td>
+    </tr>
+    <tr>
+      <td>Already implemented in repo</td>
+      <td><span class="pill g">yes</span></td>
+      <td>partially</td>
+      <td><span class="pill g">~90%</span> (needs model swap)</td>
+      <td>needs wiring</td>
+    </tr>
+    <tr>
+      <td>Matches OSS consensus pattern</td>
+      <td><span class="pill r">no</span></td>
+      <td><span class="pill y">pattern yes, tool no</span></td>
+      <td><span class="pill g">yes</span></td>
+      <td><span class="pill g">yes</span></td>
+    </tr>
+    <tr>
+      <td>Prosody / tone preserved</td>
+      <td><span class="pill g">yes</span></td>
+      <td><span class="pill r">no</span></td>
+      <td><span class="pill r">no</span></td>
+      <td><span class="pill g">yes</span></td>
+    </tr>
+    <tr>
+      <td><strong>Overall</strong></td>
+      <td><span class="pill r">reject for KG app</span></td>
+      <td><span class="pill r">reject</span></td>
+      <td><span class="pill g">recommended</span></td>
+      <td><span class="pill y">optional enhancement</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ═══ Action plan ═══ -->
+<h2><span class="icon">🛠️</span> Recommended Action Plan</h2>
+
+<h3>Phase 1 — Make the existing whisper path good (small effort)</h3>
+<ol>
+  <li><strong>Upgrade the Whisper model.</strong> In <code>scripts/download-models.sh:55-58</code>, swap the URL from <code>ggml-base.en.bin</code> to <code>ggml-medium.en.bin</code> (or <code>large-v3.bin</code> for best quality). Update <code>WHISPER_MODEL_PATH</code> in <code>.env</code> / <code>scripts/start-llama-servers.sh:22</code> accordingly. Re-download.</li>
+  <li><strong>Confirm the UI uses the whisper path, not the direct-audio path.</strong> <code>handleMicClick</code> at <code>+page.svelte:189-223</code> already calls <code>transcribeAudio(wavBlob, API.llama.transcriptions)</code> and passes the transcript to <code>handleSend(..., text)</code> — good. Audit any other entry point that might set <code>audioData</code> to send <code>input_audio</code> directly, and gate it behind an explicit "no-KG" toggle if you keep it at all.</li>
+  <li><strong>Show the transcript in the UI</strong> before/with sending, so the user can edit if the STT misheard a name. The chat message already stores <code>content: trimmed</code> from the transcript (<code>+page.svelte:911</code>).</li>
+  <li><strong>Benchmark.</strong> Record 10 representative utterances (including proper nouns from your graph), transcribe with base.en vs medium.en vs large-v3, measure WER and latency on your Mac. Pick the smallest model that's "good enough" — likely medium.en.</li>
+</ol>
+
+<h3>Phase 2 — Optional refinements</h3>
+<ul>
+  <li>Add Silero VAD to trim silence and reduce hallucinated tails on long recordings.</li>
+  <li>If latency matters, evaluate <code>faster-whisper</code> as a drop-in replacement for <code>whisper.cpp</code> (Python service, ~4× faster, Open WebUI uses it).</li>
+  <li>Keep a hidden "raw audio to Gemma" toggle for general-knowledge questions where KG isn't needed and lowest latency matters — this is your Option 1 fallback, deliberately scoped.</li>
+  <li>Track Qwen2-Audio's local tool-calling maturity; if it matures, it could become a real Option 1 replacement that keeps KG retrieval working.</li>
+</ul>
+
+<h3>Phase 3 — If you ever outgrow Whisper</h3>
+<ul>
+  <li>Streaming: WhisperLive over WebSocket for partial transcripts.</li>
+  <li>SOTA English quality: NVIDIA Parakeet TDT via NeMo.</li>
+  <li>Intent routing: a tiny classifier or small LLM call to skip KG when the question is general knowledge.</li>
+</ul>
+
+<hr class="divider">
+
+<h2><span class="icon">📝</span> Summary</h2>
+<ul>
+  <li><strong>Option 1 (Gemma audio direct):</strong> feels slick but silently breaks the app's killer feature — KG retrieval. Reject as the default path.</li>
+  <li><strong>Option 2 (Gemma as transcriber):</strong> the source of the "poor transcription" you observed. Wrong model class. Reject.</li>
+  <li><strong>Option 3 (Whisper server):</strong> the right architecture, already 90% built. The only fix needed is upgrading <code>base.en</code> → <code>medium.en</code>/<code>large-v3</code>. <strong>Adopt this.</strong></li>
+  <li><strong>Bonus:</strong> hybrid (transcribe + send audio), faster-whisper, streaming STT, VAD, intent routing, and audio-LLMs with real tool-calling (Qwen2-Audio) are all worth knowing about for later — none are needed now.</li>
+  <li><strong>Industry consensus:</strong> every surveyed OSS chat app (Open WebUI, AnythingLLM, LobeChat, LibreChat, Home Assistant) uses transcribe-first. Follow suit.</li>
+</ul>
+
+<div class="footer">
+  Generated for the knowledge-graph project · Local-only constraint · Jul 2026<br>
+  Sources: in-repo code, Open WebUI / AnythingLLM / LobeChat / LibreChat / HA Wyoming docs &amp; repos,
+  whisper.cpp / faster-whisper / WhisperX / distil-whisper / NeMo Parakeet / Moonshine / Vosk docs,
+  Ollama &amp; llama.cpp multimodal docs, Qwen2-Audio / Voxtral model cards.
+</div>
+
+</body>
+</html>
