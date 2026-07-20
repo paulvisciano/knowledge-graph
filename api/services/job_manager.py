@@ -46,7 +46,27 @@ async def create_job(
     skip_faces: bool = False,
     insert: bool = True,
 ) -> Job:
+    """Create a processing job for a file, deduplicating on file_source.
+
+    Re-uploading a file that already has a successful (or still-running) job
+    must not spawn a second job — otherwise the second job re-runs the whole
+    pipeline (EXIF entities, relations, VLM) against an already-ingested
+    photo, producing the flood of LightRAG "already exists" 400s and leaving
+    duplicate job rows.  If the most recent job for this file_source is
+    complete or in-flight, return it.  Only failed/cancelled jobs allow a
+    fresh job (legitimate retry).
+    """
     import time
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT * FROM jobs WHERE file_source = $1 ORDER BY created_at DESC LIMIT 1",
+            file_source,
+        )
+
+        if existing and existing["status"] in ("complete", "processing", "pending"):
+            return Job(**dict(existing))
 
     job_id = uuid.uuid4().hex[:12]
     now = time.time()

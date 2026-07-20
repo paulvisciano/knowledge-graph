@@ -237,6 +237,37 @@ async def _create_relation_verified(
         "relation_data": relation_data,
     }).encode("utf-8")
 
+    # Pre-flight: if the edge already exists, skip the POST entirely.  The
+    # post-creation "exists" path below also detects this, but only after
+    # LightRAG has logged a 400 "already exists" ERROR for the POST.  On
+    # reprocessing runs every relation would otherwise spam the LightRAG
+    # log with one rejected POST per edge.  Querying the source subgraph is
+    # cheap (one GET) and silences that noise at the source.
+    try:
+        def _preflight(se: str = source_entity) -> bool:
+            req = Request(
+                f"{base_url}/graphs?label={url_quote(se, safe='')}",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for edge in data.get("edges", []):
+                src = edge.get("source", "")
+                tgt = edge.get("target", "")
+                if (src == source_entity and tgt == target_entity) or (
+                    src == target_entity and tgt == source_entity
+                ):
+                    return True
+            return False
+
+        if await asyncio.to_thread(_preflight):
+            logger.info("[Relation] '%s' -> '%s' preflight found existing edge, skipping POST", source_entity, target_entity)
+            return {"status": "exists", "source": source_entity, "target": target_entity}
+    except Exception as exc:
+        # Preflight is best-effort — if the subgraph fetch fails, fall through
+        # to the normal POST path rather than blocking the relation.
+        logger.debug("[Relation] preflight subgraph fetch failed for '%s' -> '%s': %s", source_entity, target_entity, exc)
+
     exists_retries_left = max_attempts
     busy_deadline = time.monotonic() + _PIPELINE_BUSY_TOTAL_TIMEOUT
     busy_sleep = 2.0
@@ -1253,18 +1284,12 @@ async def create_exif_relations(
     base_url = lightrag_url.rstrip("/")
     results: dict[str, Any] = {"entities_created": [], "relations_created": []}
 
-    # Create the photo entity node
-    photo_result = await _create_entity_verified(
-        base_url, photo_name,
-        {"description": f"Photo: {file_source}", "entity_type": "Photo", "source_id": file_source},
-    )
-    photo_result["entity_name"] = photo_name
-    photo_result["entity_type"] = "Photo"
-    results["entities_created"].append(photo_result)
-
-    await asyncio.sleep(1.0)
-
-    existing_labels = set()
+    # Fetch the label list once and reuse it for both the photo entity and the
+    # EXIF dimension entities.  Checking here before POSTing the photo entity
+    # is what stops the "Entity '... (Photo)' already exists" 400 spam when a
+    # photo is reprocessed or re-uploaded — the photo node is the one entity
+    # that's guaranteed to already exist on a re-run.
+    existing_labels: set[str] = set()
     try:
         def _get_labels() -> list[str]:
             req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
@@ -1273,6 +1298,22 @@ async def create_exif_relations(
         existing_labels = set(await asyncio.to_thread(_get_labels))
     except Exception as exc:
         logger.warning("[EXIF Relations] Failed to get existing labels: %s", exc)
+
+    photo_match = _find_matching_entity(photo_name, existing_labels)
+    if photo_match:
+        logger.info("[EXIF Relations] Photo entity '%s' matches existing '%s', reusing", photo_name, photo_match)
+        photo_result = {"status": "exists", "entity_name": photo_match, "entity_type": "Photo"}
+    else:
+        photo_result = await _create_entity_verified(
+            base_url, photo_name,
+            {"description": f"Photo: {file_source}", "entity_type": "Photo", "source_id": file_source},
+        )
+        existing_labels.add(photo_name)
+    photo_result["entity_name"] = photo_result.get("entity_name") or photo_name
+    photo_result["entity_type"] = "Photo"
+    results["entities_created"].append(photo_result)
+
+    await asyncio.sleep(1.0)
 
     for dim in exif_dimensions:
         entity_name = dim["name"]
