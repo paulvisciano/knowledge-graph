@@ -34,6 +34,14 @@
   let searchQuery = $state('');
   let error = $state('');
   let reprocessingIds: string[] = $state([]);
+
+  // When the user types a filter, fetch a large page so the client-side
+  // predicate can match against every document, not just the current 20-row
+  // page.  Without this, a doc on page 2+ is invisible to the filter.  The
+  // lightrag-client clamps page_size to [10, 200], so 200 is the max.
+  // searchPageSize is only used while a query is active; default paging is
+  // preserved when the box is cleared.
+  const searchPageSize = 200;
   let summaryDoc: DocStatus | null = $state(null);
   let summaryFullContent: string | null = $state(null);
   let summaryLoading: boolean = $state(false);
@@ -53,12 +61,15 @@
   async function loadDocs() {
     loading = true;
     try {
-      const res = await lightragClient.getDocumentsPaginated(page, pageSize);
+      const filtering = searchQuery.trim().length > 0;
+      const effectivePageSize = filtering ? searchPageSize : pageSize;
+      const effectivePage = filtering ? 1 : page;
+      const res = await lightragClient.getDocumentsPaginated(effectivePage, effectivePageSize);
       docs = res.documents;
       totalDocs = res.total;
-      totalPages = res.total_pages;
-      hasNext = res.has_next;
-      hasPrev = res.has_prev;
+      totalPages = filtering ? 1 : res.total_pages;
+      hasNext = filtering ? false : res.has_next;
+      hasPrev = filtering ? false : res.has_prev;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load documents';
     } finally {
@@ -66,8 +77,17 @@
     }
   }
 
+  // Fetch on mount, on filter change, and on page change.  The poller below
+  // keeps the list fresh every 5s.  Splitting the immediate-fetch effect from
+  // the interval effect avoids double-firing on mount while still reacting to
+  // searchQuery/page changes without waiting for the next tick.
   $effect(() => {
+    searchQuery;
+    page;
     loadDocs();
+  });
+
+  $effect(() => {
     const interval = setInterval(loadDocs, 5000);
     return () => clearInterval(interval);
   });
