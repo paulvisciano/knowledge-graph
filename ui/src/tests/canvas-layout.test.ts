@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildCanvasLayout, classifyKind } from '$lib/components/canvas/Layout';
+import { TIME_BUCKET_SPACING } from '$lib/components/canvas/renderer/constants';
 import type { KGNode, KGEdge } from '$lib/constants';
 
 function makeNode(id: string, entityType: string, props: Record<string, unknown> = {}): KGNode {
@@ -53,10 +54,10 @@ describe('buildCanvasLayout', () => {
     const d3 = photo('p3', { date_taken_friendly: '2024-03-01' });
     const out = buildCanvasLayout([d1, d2, d3], [], {}, {});
     const zOf = new Map(out.map((n) => [n.id, n.cellZ]));
-    // Sorted ascending by date: Jan(0) < Mar(1) < Jun(2) → cellZ 0,1,2
+    // Sorted ascending by date: Jan(0) < Mar(1) < Jun(2) → cellZ 0, S, 2S
     expect(zOf.get('p1')).toBe(0);
-    expect(zOf.get('p3')).toBe(1);
-    expect(zOf.get('p2')).toBe(2);
+    expect(zOf.get('p3')).toBe(1 * TIME_BUCKET_SPACING);
+    expect(zOf.get('p2')).toBe(2 * TIME_BUCKET_SPACING);
   });
 
   it('spreads photos in the same time bucket across a 2D grid on X and Y', () => {
