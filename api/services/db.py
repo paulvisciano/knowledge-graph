@@ -151,6 +151,36 @@ async def get_photo_exif(file_source: str) -> dict | None:
     return None
 
 
+async def get_bulk_photo_dates() -> dict[str, dict[str, str]]:
+    """Return {file_source: {date_taken, date_taken_friendly}} for every photo
+    that has EXIF date data. Used by the UI to position Photo nodes on the
+    canvas by the date the photo was taken (from EXIF) rather than the
+    LightRAG node-creation/upload timestamp (created_at).
+    """
+    import json
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT file_source, exif_data FROM photo_metadata")
+    out: dict[str, dict[str, str]] = {}
+    for row in rows:
+        try:
+            data = json.loads(row["exif_data"]) if row["exif_data"] else {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+        date_taken = data.get("date_taken")
+        friendly = data.get("date_taken_friendly")
+        if not (date_taken or friendly):
+            continue
+        entry: dict[str, str] = {}
+        if date_taken:
+            entry["date_taken"] = str(date_taken)
+        if friendly:
+            entry["date_taken_friendly"] = str(friendly)
+        out[row["file_source"]] = entry
+    return out
+
+
 async def get_app_settings() -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
