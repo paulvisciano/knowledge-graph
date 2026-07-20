@@ -8,7 +8,8 @@ Personal knowledge graph stack: LightRAG + local LLMs + custom UI.
 - **Homebrew** — install: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 - **Docker Desktop** — install: `brew install --cask docker`, then open it and allocate at least 8 GB RAM in Settings → Resources
 - **llama.cpp** — install: `brew install llama.cpp`. **Must be version 9750+** (commit `bf533823c` or later, from June 2026+) for `gemma4uv` projector support. Older versions will crash when loading the mmproj with `unknown projector type: gemma4uv`. Check with `llama-server --version` and upgrade if needed: `brew upgrade llama.cpp`.
-- **~10 GB disk space** for model files
+- **whisper.cpp** — install: `brew install whisper-cpp`. Provides `whisper-server`, which runs the transcription model on the Metal GPU on the host (same pattern as llama-server). Required for voice memo transcription; if missing, `start-llama-servers.sh` skips it with a warning and the chat UI disables audio transcription.
+- **~11 GB disk space** for model files (includes Whisper)
 
 ## Quick Start
 
@@ -24,10 +25,18 @@ git submodule update --init --recursive
 cp .env.example .env
 # All config in one file — model names, ports, storage backends. No separate LightRAG config needed.
 
-# 3. Download model files (see "Model Files" below)
+# 3. Download model files
+./scripts/download-models.sh
+# Pulls all five GGUF/model files into ~/models/ (or $MODEL_DIR if set in .env).
+# Re-runnable — skips files that already exist.
 
-# 4. Start llama-servers on host (Metal GPU)
+# 4. Start llama-servers + whisper-server on the host (Metal GPU)
 ./scripts/start-llama-servers.sh
+# Starts four host processes:
+#   • llama-server (LLM + mmproj vision)        :8080
+#   • llama-server (BGE-M3 embeddings)          :8081
+#   • llama-server (bge-reranker-v2-m3)         :8082
+#   • whisper-server (ggml-large-v3-turbo)     :8090
 
 # 5. Start Docker services
 docker compose up -d --build
@@ -38,7 +47,7 @@ open http://localhost:3000
 
 ## Model Files
 
-You need four GGUF files in `~/models/` (or set `MODEL_DIR` in `.env`):
+`scripts/download-models.sh` downloads everything automatically. You need five files in `~/models/` (or wherever `MODEL_DIR` in `.env` points):
 
 | Model | File | Size |
 |-------|------|------|
@@ -46,6 +55,7 @@ You need four GGUF files in `~/models/` (or set `MODEL_DIR` in `.env`):
 | Vision projection (mmproj) | `mmproj-BF16.gguf` | ~2.3 GB |
 | Embedding (BGE-M3) | `bge-m3-Q4_K_M.gguf` | ~1.1 GB |
 | Reranker (bge-reranker-v2-m3) | `bge-reranker-v2-m3-Q4_K_M.gguf` | ~418 MB |
+| Transcription (Whisper) | `whisper/ggml-large-v3-turbo.bin` | ~1.5 GB |
 
 > **Why mmproj?** Gemma 4 has a vision architecture, but in llama.cpp the vision encoder weights are a separate file. The base GGUF contains only the language model — `mmproj-BF16.gguf` is the vision projection that maps image pixels into the model's embedding space. Without it, `llama-server` cannot process images. The start script passes it via `--mmproj`.
 >
@@ -60,17 +70,31 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
 │   └── mmproj-BF16.gguf
 ├── bge-m3/
 │   └── bge-m3-Q4_K_M.gguf
-└── bge-reranker-v2-m3/
-    └── bge-reranker-v2-m3-Q4_K_M.gguf
+├── bge-reranker-v2-m3/
+│   └── bge-reranker-v2-m3-Q4_K_M.gguf
+└── whisper/
+    └── ggml-large-v3-turbo.bin
 ```
 
 
 
 ## Verify
 
+Host llama-servers + whisper-server:
+
+```sh
+curl -sf http://localhost:8080/health   # LLM (Gemma 4 12B + mmproj)
+curl -sf http://localhost:8081/health   # Embeddings (BGE-M3)
+curl -sf http://localhost:8082/health   # Reranker (bge-reranker-v2-m3)
+curl -sf http://localhost:8090/health   # Whisper transcription
+```
+
+Docker services:
+
 ```sh
 curl -sf http://localhost:9621/health   # LightRAG
-curl -sf http://localhost:8000/health   # API backend
+curl -sf http://localhost:8000/health   # Knowledge Graph API
+open http://localhost:3000              # Nexus UI
 ```
 
 ## Stop Everything
