@@ -27,6 +27,7 @@ services:
       dockerfile: Dockerfile
     container_name: knowledge-graph-lightrag
     restart: unless-stopped
+    mem_limit: 2g
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +111,7 @@ services:
     image: knowledge-graph-mcp:latest
     container_name: knowledge-graph-mcp
     restart: unless-stopped
+    mem_limit: 256m
     env_file:
       - .env
     environment:
@@ -130,30 +132,11 @@ services:
     networks:
       - internal
 
-  whisper:
-    build:
-      context: .
-      dockerfile: docker/whisper/Dockerfile
-    image: knowledge-graph-whisper:latest
-    container_name: knowledge-graph-whisper
-    restart: unless-stopped
-    volumes:
-      - ./models/whisper:/models:ro
-    ports:
-      - "${WHISPER_PORT:-8090}:8090"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
-    networks:
-      - internal
-
   postgres:
     image: pgvector/pgvector:pg18
     container_name: knowledge-graph-postgres
     restart: unless-stopped
+    mem_limit: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lightrag}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
@@ -197,7 +180,7 @@ services:
       - "${API_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    mem_limit: ${API_MEMORY_LIMIT:-8g}
+    mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
@@ -213,8 +196,10 @@ services:
       dockerfile: ui/Dockerfile
     container_name: knowledge-graph-nexus
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       LLAMA_HOST: "${LLAMA_HOST:-host.docker.internal}"
+      WHISPER_HOST: "${WHISPER_HOST:-host.docker.internal}"
     ports:
       - "${NEXUS_PORT:-3000}:3000"
     depends_on:

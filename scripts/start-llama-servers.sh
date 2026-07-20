@@ -19,7 +19,7 @@ LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
 EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-obliterated/mmproj-BF16.gguf}"
-WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-base.en.bin}"
+WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-large-v3-turbo.bin}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"
@@ -103,7 +103,7 @@ if [[ -f "$WHISPER_MODEL_PATH" ]]; then
         echo "Starting whisper transcription server on port ${WHISPER_PORT}..."
         "$WHISPER_SERVER" \
             -m "$WHISPER_MODEL_PATH" \
-            -l en --convert -t 4 \
+            -l auto --convert -t 4 \
             --host 0.0.0.0 --port "$WHISPER_PORT" \
             &>/tmp/whisper-server.log &
         PIDS+=($!)
