@@ -12,6 +12,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
+# Per-thumbnail generation locks. Keyed by cache_path so concurrent requests
+# for the same uncached thumbnail serialize instead of racing on the same
+# file (which produced corrupted JPEGs that got cached permanently).
+_thumb_locks: dict[str, asyncio.Lock] = {}
+_thumb_locks_guard = asyncio.Lock()
+
+# Caps concurrent thumbnail generations. PIL's native (non-Python) memory
+# for decoding a 3MB RAW JPEG is ~400MB RSS per image; unbounded concurrency
+# (37+ parallel photo loads on initial page render) exhausted the 1g
+# mem_limit and triggered OOM kills (exit 137), dropping every in-flight
+# connection with "Empty reply from server". 2 keeps peak native RSS under
+# 1g while letting the event loop stay responsive to other requests.
+_thumb_gen_sem = asyncio.Semaphore(2)
+
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
@@ -33,6 +47,13 @@ from api.services.job_manager import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/images", tags=["images"])
+
+
+async def _resolve_skip_faces(request_skip_faces: bool) -> bool:
+    settings = await db_module.get_app_settings()
+    if not settings.get("face_detection_enabled", False):
+        return True
+    return request_skip_faces
 
 LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve().parent.parent.parent / "known_faces"))
@@ -250,7 +271,7 @@ async def process_image_sse(
     insert: Optional[str] = Form(None),
 ):
     skip_exif_bool = _parse_bool(skip_exif)
-    skip_faces_bool = _parse_bool(skip_faces)
+    skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
     insert_bool = _parse_bool(insert, default=True)
 
     suffix = os.path.splitext(file.filename or "image.jpg")[1]
@@ -283,7 +304,7 @@ async def process_image_json(
     insert: Optional[str] = Form(None),
 ):
     skip_exif_bool = _parse_bool(skip_exif)
-    skip_faces_bool = _parse_bool(skip_faces)
+    skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
     insert_bool = _parse_bool(insert, default=True)
 
     suffix = os.path.splitext(file.filename or "image.jpg")[1]
@@ -469,20 +490,39 @@ async def get_photo(filename: str, w: Optional[str] = None):
     if cache_path.is_file():
         return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
 
-    try:
-        from PIL import Image, ImageOps
+    async with _thumb_locks_guard:
+        lock = _thumb_locks.get(str(cache_path))
+        if lock is None:
+            lock = asyncio.Lock()
+            _thumb_locks[str(cache_path)] = lock
 
-        img = await asyncio.to_thread(Image.open, str(file_path))
-        img = await asyncio.to_thread(ImageOps.exif_transpose, img)
-        img = img.copy()
-        img.thumbnail((w_int, w_int), Image.Resampling.LANCZOS)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        await asyncio.to_thread(img.save, str(cache_path), "JPEG", quality=85)
-        return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
-    except Exception as exc:
-        logger.warning("Thumbnail generation failed for '%s' (w=%s): %s — serving raw", filename, w, exc)
-        return FileResponse(str(file_path))
+    async with lock:
+        if cache_path.is_file():
+            return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
+
+        try:
+            from PIL import Image, ImageOps
+
+            def _generate() -> bytes:
+                img = Image.open(str(file_path))
+                img = ImageOps.exif_transpose(img)
+                img = img.copy()
+                img.thumbnail((w_int, w_int), Image.Resampling.LANCZOS)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, "JPEG", quality=85)
+                return buf.getvalue()
+
+            async with _thumb_gen_sem:
+                data = await asyncio.to_thread(_generate)
+            tmp_path = cache_path.with_suffix(".jpg.tmp")
+            tmp_path.write_bytes(data)
+            os.replace(str(tmp_path), str(cache_path))
+            return FileResponse(str(cache_path), media_type="image/jpeg", headers=cache_headers)
+        except Exception as exc:
+            logger.warning("Thumbnail generation failed for '%s' (w=%s): %s — serving raw", filename, w, exc)
+            return FileResponse(str(file_path))
 
 
 @router.get("/exif/{file_source:path}")
@@ -995,7 +1035,7 @@ async def reprocess_image(
     pipeline (EXIF, faces, VLM, LightRAG insert). Returns an SSE stream.
     """
     skip_exif_bool = _parse_bool(skip_exif)
-    skip_faces_bool = _parse_bool(skip_faces)
+    skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
 
     file_path = INPUT_DIR / file_source
     if not file_path.exists():
@@ -1019,7 +1059,7 @@ async def create_image_job(
     insert: Optional[str] = Form(None),
 ):
     skip_exif_bool = _parse_bool(skip_exif)
-    skip_faces_bool = _parse_bool(skip_faces)
+    skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
     insert_bool = _parse_bool(insert, default=True)
 
     file_source = file.filename or "uploaded_image"
