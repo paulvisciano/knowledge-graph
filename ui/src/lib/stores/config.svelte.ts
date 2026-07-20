@@ -27,6 +27,7 @@ interface AppConfig {
 class ConfigStore {
   private config: AppConfig = { systemPrompt: DEFAULT_SYSTEM_PROMPT };
   private loaded = $state(false);
+  faceDetectionEnabled = $state(false);
 
   get systemPrompt(): string {
     return this.config.systemPrompt;
@@ -48,7 +49,34 @@ class ConfigStore {
     } catch {
       // Use default — config.json is optional
     }
+    try {
+      const res = await fetch('/api/kg/settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.face_detection_enabled === 'boolean') {
+          this.faceDetectionEnabled = data.face_detection_enabled;
+        }
+      }
+    } catch {
+    }
     this.loaded = true;
+  }
+
+  async saveFaceDetection(enabled: boolean): Promise<boolean> {
+    try {
+      const res = await fetch('/api/kg/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ face_detection_enabled: enabled }),
+      });
+      if (res.ok) {
+        this.faceDetectionEnabled = enabled;
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   async save(prompt: string) {
