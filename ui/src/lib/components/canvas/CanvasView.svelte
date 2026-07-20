@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { fade } from 'svelte/transition';
   import type { KGNode } from '$lib/constants';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { LightragClient } from '$lib/services/lightrag-client';
   import { textureCache } from '$lib/services/TextureCache';
   import { SceneManager } from './renderer/SceneManager';
+  import { TIME_BUCKET_SPACING } from './renderer/constants';
   import { buildCanvasLayout, buildTimeIndex } from './Layout';
   import type { TimeIndex } from './Layout';
   import NodeOverlay from './NodeOverlay.svelte';
@@ -71,15 +73,18 @@
       return;
     }
     const labels = timeIndex.indexToLabel;
-    if (camChunkZ < 0) {
+    // Time buckets are spaced TIME_BUCKET_SPACING chunks apart, so divide the
+    // camera chunk Z by the spacing to recover the dense bucket index.
+    const bucketIdx = Math.round(camChunkZ / TIME_BUCKET_SPACING);
+    if (bucketIdx < 0) {
       dateLabel = labels[0];
       return;
     }
-    if (camChunkZ >= labels.length) {
+    if (bucketIdx >= labels.length) {
       dateLabel = labels[labels.length - 1];
       return;
     }
-    dateLabel = labels[camChunkZ];
+    dateLabel = labels[bucketIdx];
   }
 
   function rebuildLayout(): void {
@@ -231,7 +236,9 @@
     <span class="date-indicator-icon" aria-hidden="true">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
     </span>
-    <span class="date-indicator-label">{dateLabel}</span>
+    {#key dateLabel}
+      <span class="date-indicator-label" in:fade={{ duration: 220 }}>{dateLabel}</span>
+    {/key}
   </div>
 {/if}
 

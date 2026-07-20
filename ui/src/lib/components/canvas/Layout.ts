@@ -21,7 +21,7 @@
 import type { KGNode, KGEdge } from '$lib/constants';
 import { API } from '$lib/constants';
 import type { CanvasNode, NodeKind } from './renderer/types';
-import { CHUNK_SIZE } from './renderer/constants';
+import { CHUNK_SIZE, TIME_BUCKET_SPACING } from './renderer/constants';
 
 const KG_API_BASE = '/api/kg';
 
@@ -42,6 +42,17 @@ function isPhotoNode(node: {
     (node.id ?? '').includes('(Photo)') ||
     (node.id ?? '').includes('(Image)')
   );
+}
+
+/** True if a Photo node is a stale placeholder from incomplete processing
+ *  (no backing image file). These must be excluded from the layout — their
+ *  `created_at` timestamp lands them in the newest time bucket, which centers
+ *  the camera on an empty layer with no real photos. */
+function isStalePhotoNode(node: {
+  properties?: Record<string, unknown>;
+}): boolean {
+  const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+  return !sourceId || sourceId === 'manual_creation';
 }
 
 /** True if the node represents a Person entity. */
@@ -126,8 +137,29 @@ function parseNodeDate(node: KGNode): Date | null {
     return isNaN(d.getTime()) ? null : d;
   }
   if (typeof raw === 'string') {
-    const d = new Date(raw);
+    const d = parseExifDateString(raw) ?? new Date(raw);
     return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Parse the two EXIF date string formats produced by the backend:
+ *   - "YYYY:MM:DD HH:MM:SS"  (raw EXIF DateTimeOriginal, colons in date)
+ *   - "YYYY-MM-DD at HH:MM"  (date_taken_friendly, human form)
+ * Both are unparseable by `new Date()`, so normalize before constructing.
+ * Returns `null` for any other shape.
+ */
+function parseExifDateString(raw: string): Date | null {
+  const m1 = raw.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (m1) {
+    const [, Y, Mo, D, H, Mi, S] = m1;
+    return new Date(`${Y}-${Mo}-${D}T${H}:${Mi}:${S ?? '00'}`);
+  }
+  const m2 = raw.match(/^(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{2}):(\d{2})$/);
+  if (m2) {
+    const [, Y, Mo, D, H, Mi] = m2;
+    return new Date(`${Y}-${Mo}-${D}T${H}:${Mi}:00`);
   }
   return null;
 }
@@ -258,7 +290,7 @@ interface TimePlan {
 function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   const photoDate = new Map<string, Date>();
   for (const n of nodes) {
-    if (!isPhotoNode(n)) continue;
+    if (!isPhotoNode(n) || isStalePhotoNode(n)) continue;
     const d = parseNodeDate(n);
     if (d) photoDate.set(n.id, d);
   }
@@ -338,12 +370,12 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
 
   // Photos: direct bucket.
   for (const n of nodes) {
-    if (!isPhotoNode(n)) continue;
+    if (!isPhotoNode(n) || isStalePhotoNode(n)) continue;
     const d = photoDate.get(n.id);
     if (!d) continue;
     const key = bucketKeyOf(d);
     const idx = bucketIndex.get(key);
-    if (idx !== undefined) cellZOf.set(n.id, idx);
+    if (idx !== undefined) cellZOf.set(n.id, idx * TIME_BUCKET_SPACING);
   }
 
   // Non-photos: inherit most-recent connected photo's bucket.
@@ -361,7 +393,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
       const t = d.getTime();
       if (!best || t > best.t) best = { idx, t };
     }
-    if (best) cellZOf.set(n.id, best.idx);
+    if (best) cellZOf.set(n.id, best.idx * TIME_BUCKET_SPACING);
   }
 
   // Fallback: ingestion order, appended after the time buckets.
@@ -370,7 +402,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (cellZOf.has(n.id)) continue;
-    cellZOf.set(n.id, fallbackIdx);
+    cellZOf.set(n.id, fallbackIdx * TIME_BUCKET_SPACING);
     fallbackIdx++;
   }
 
@@ -527,7 +559,7 @@ export function buildCanvasLayout(
   const photosByBucket = new Map<number, KGNode[]>();
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    if (classifyKind(node) !== 'photo') continue;
+    if (classifyKind(node) !== 'photo' || isStalePhotoNode(node)) continue;
     const z = timePlan.cellZOf.get(node.id) ?? i;
     const arr = photosByBucket.get(z);
     if (arr) arr.push(node);
@@ -565,7 +597,7 @@ export function buildCanvasLayout(
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const kind = classifyKind(node);
-    if (kind !== 'photo') continue;
+    if (kind !== 'photo' || isStalePhotoNode(node)) continue;
     const depth = depthPlan.depthOf.get(node.id) ?? 0;
     const grid = gridPosOf.get(node.id) ?? { x: 0, y: 0 };
     // Relationship depth is a minor parallax offset layered on top of the

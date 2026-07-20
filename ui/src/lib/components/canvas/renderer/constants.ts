@@ -66,6 +66,16 @@ export const VELOCITY_DECAY = 0.9;
 /** Initial camera Z (distance from the z=0 plane of the canvas). */
 export const INITIAL_CAMERA_Z = 250;
 
+/**
+ * Gap (in chunks) between consecutive time buckets along the depth axis.
+ * Spacing buckets several chunks apart ensures each month/layer sits fully
+ * outside the visible depth range of its neighbors, so the user must
+ * deliberately zoom to travel between time periods instead of seeing every
+ * bucket at once. 6 chunks (960 world units) exceeds DEPTH_FADE_END (700),
+ * so adjacent buckets fade fully out of view before the next comes into focus.
+ */
+export const TIME_BUCKET_SPACING = 6;
+
 /** Minimum camera Z — prevents flying through the canvas. */
 export const MIN_CAMERA_Z = 5;
 

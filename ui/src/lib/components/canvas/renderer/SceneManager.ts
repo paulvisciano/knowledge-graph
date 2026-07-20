@@ -179,25 +179,32 @@ export class SceneManager {
    * above them; the min is just above the oldest (z=0) plane so the user
    * can't fly past the oldest photos.
    */
-  private updateDepthBounds(nodes: CanvasNode[]): void {
-    if (nodes.length === 0) {
-      this._maxCameraZ = MAX_CAMERA_Z;
-      this._minCameraZ = MIN_CAMERA_Z;
-      this._camera.far = CAMERA_FAR_MIN;
-      this._camera.updateProjectionMatrix();
-      return;
-    }
-    let maxCellZ = 0;
-    for (const n of nodes) if (n.cellZ > maxCellZ) maxCellZ = n.cellZ;
-    const newestZ = maxCellZ * CHUNK_SIZE + CHUNK_SIZE;
-    this._maxCameraZ = newestZ + INITIAL_CAMERA_Z;
-    this._minCameraZ = MIN_CAMERA_Z;
-    const far = Math.max(CAMERA_FAR_MIN, this._maxCameraZ + CHUNK_SIZE * (RENDER_DISTANCE + CHUNK_FADE_MARGIN + 1));
-    if (this._camera.far !== far) {
-      this._camera.far = far;
-      this._camera.updateProjectionMatrix();
-    }
-  }
+   private updateDepthBounds(nodes: CanvasNode[]): void {
+     if (nodes.length === 0) {
+       this._maxCameraZ = MAX_CAMERA_Z;
+       this._minCameraZ = MIN_CAMERA_Z;
+       this._camera.far = CAMERA_FAR_MIN;
+       this._camera.updateProjectionMatrix();
+       return;
+     }
+     let maxCellZ = 0;
+     let minCellZ = Infinity;
+     for (const n of nodes) {
+       if (n.cellZ > maxCellZ) maxCellZ = n.cellZ;
+       if (n.cellZ < minCellZ) minCellZ = n.cellZ;
+     }
+     const newestZ = maxCellZ * CHUNK_SIZE + CHUNK_SIZE;
+     this._maxCameraZ = newestZ + INITIAL_CAMERA_Z;
+     // Keep the camera at least INITIAL_CAMERA_Z above the oldest bucket so
+     // zooming in past the oldest photos can't fly the camera inside the
+     // photo plane (which renders a blank scene).
+     this._minCameraZ = Math.max(MIN_CAMERA_Z, minCellZ * CHUNK_SIZE + INITIAL_CAMERA_Z);
+     const far = Math.max(CAMERA_FAR_MIN, this._maxCameraZ + CHUNK_SIZE * (RENDER_DISTANCE + CHUNK_FADE_MARGIN + 1));
+     if (this._camera.far !== far) {
+       this._camera.far = far;
+       this._camera.updateProjectionMatrix();
+     }
+   }
 
   /** Moves the camera to face the newest photos at a comfortable viewing distance. */
   private centerOnLayout(nodes: CanvasNode[]): void {
