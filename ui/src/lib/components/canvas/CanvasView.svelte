@@ -5,7 +5,8 @@
   import { LightragClient } from '$lib/services/lightrag-client';
   import { textureCache } from '$lib/services/TextureCache';
   import { SceneManager } from './renderer/SceneManager';
-  import { buildCanvasLayout } from './Layout';
+  import { buildCanvasLayout, buildTimeIndex } from './Layout';
+  import type { TimeIndex } from './Layout';
   import NodeOverlay from './NodeOverlay.svelte';
   import type { CanvasNode } from './renderer/types';
 
@@ -36,6 +37,9 @@
   let tooltipX = $state(0);
   let tooltipY = $state(0);
 
+  let timeIndex: TimeIndex | null = null;
+  let dateLabel = $state<string | null>(null);
+
   function clearSelection(): void {
     selectedNodeId = null;
     selectedCanvasNode = null;
@@ -56,6 +60,26 @@
     sm.onHoverNode = (nodeId) => {
       hoveredNodeId = nodeId;
     };
+    sm.onChunkChange = (_cx, _cy, cz) => {
+      updateDateLabel(cz);
+    };
+  }
+
+  function updateDateLabel(camChunkZ: number): void {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) {
+      dateLabel = null;
+      return;
+    }
+    const labels = timeIndex.indexToLabel;
+    if (camChunkZ < 0) {
+      dateLabel = labels[0];
+      return;
+    }
+    if (camChunkZ >= labels.length) {
+      dateLabel = labels[labels.length - 1];
+      return;
+    }
+    dateLabel = labels[camChunkZ];
   }
 
   function rebuildLayout(): void {
@@ -66,8 +90,13 @@
       graphStore.photoImages,
       graphStore.personImages,
     );
+    timeIndex = buildTimeIndex(graphStore.nodes, graphStore.edges);
     sceneManager.setNodes(nodes);
     lastAppliedAt = Date.now();
+    if (timeIndex.indexToLabel.length > 0) {
+      const startZ = Math.floor(sceneManager.camera.position.z / 160);
+      updateDateLabel(startZ);
+    }
   }
 
   function scheduleRebuild(): void {
@@ -113,9 +142,6 @@
     if (containerEl && graphStore.nodes.length > 0) {
         sceneManager = new SceneManager(containerEl);
         wireSceneManager(sceneManager);
-        sceneManager.onChunkChange = (cx, cy, cz) => {
-          console.debug('[CanvasView] chunk change', { cx, cy, cz });
-        };
         rebuildLayout();
         sceneManager.start();
         firstLayoutApplied = true;
@@ -197,6 +223,15 @@
 {#if hoveredNodeId && !selectedNodeId}
   <div class="hover-tooltip" style="left: {tooltipX + 14}px; top: {tooltipY + 14}px;">
     Click to view details
+  </div>
+{/if}
+
+{#if dateLabel}
+  <div class="date-indicator" aria-live="polite">
+    <span class="date-indicator-icon" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    </span>
+    <span class="date-indicator-label">{dateLabel}</span>
   </div>
 {/if}
 
@@ -308,5 +343,36 @@
     pointer-events: none;
     backdrop-filter: blur(4px);
     transition: opacity 0.12s ease;
+  }
+
+  .date-indicator {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    background: rgba(10, 14, 23, 0.88);
+    border: 1px solid rgba(0, 212, 255, 0.35);
+    border-radius: 8px;
+    color: #00d4ff;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    transition: opacity 0.18s ease;
+  }
+  .date-indicator-icon {
+    display: flex;
+    align-items: center;
+    opacity: 0.85;
+  }
+  .date-indicator-label {
+    font-variant-numeric: tabular-nums;
   }
 </style>

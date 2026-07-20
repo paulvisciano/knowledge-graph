@@ -11,6 +11,7 @@
  */
 import * as THREE from 'three';
 import {
+  CHUNK_FADE_MARGIN,
   CHUNK_SIZE,
   DRIFT_AMOUNT,
   DRIFT_LERP,
@@ -20,6 +21,7 @@ import {
   MAX_CAMERA_Z,
   MAX_VELOCITY,
   MIN_CAMERA_Z,
+  RENDER_DISTANCE,
   VELOCITY_DECAY,
   VELOCITY_LERP,
   ZOOMING_VEL_THRESHOLD,
@@ -39,8 +41,8 @@ import type { CanvasNode } from './types';
 const CAMERA_FOV = 60;
 /** Near clipping plane. */
 const CAMERA_NEAR = 0.1;
-/** Far clipping plane. */
-const CAMERA_FAR = 2000;
+/** Minimum far clipping plane — used when no layout is applied yet. */
+const CAMERA_FAR_MIN = 2000;
 /** Dark canvas background. */
 const BACKGROUND_COLOR = 0x0a0e17;
 /** Wheel zoom step (world units per click, applied directly to camera Z). */
@@ -82,6 +84,15 @@ export class SceneManager {
   private _hoveredNodeId: string | null = null;
   private _cursorMode: 'idle' | 'grabbing' | 'pointer' = 'idle';
 
+  // Dynamic camera Z bounds derived from the layout's depth (time) range.
+  // Newest photos sit at maxCellZ*CHUNK_SIZE; the camera starts just above
+  // that and can zoom down toward 0 (oldest). Updated by setNodes.
+  private _maxCameraZ = MAX_CAMERA_Z;
+  private _minCameraZ = MIN_CAMERA_Z;
+  private _lastChunkX = Infinity;
+  private _lastChunkY = Infinity;
+  private _lastChunkZ = Infinity;
+
   /** Optional callback fired when the camera crosses a chunk boundary. */
   onChunkChange?: (cx: number, cy: number, cz: number) => void;
 
@@ -114,7 +125,7 @@ export class SceneManager {
       CAMERA_FOV,
       width / height,
       CAMERA_NEAR,
-      CAMERA_FAR,
+      CAMERA_FAR_MIN,
     );
     this._camera.position.set(0, 0, INITIAL_CAMERA_Z);
 
@@ -155,28 +166,57 @@ export class SceneManager {
    * @param nodes - all canvas nodes.
    */
   setNodes(nodes: CanvasNode[]): void {
+    this.updateDepthBounds(nodes);
     if (!this._userMoved && nodes.length > 0) {
       this.centerOnLayout(nodes);
     }
     this._chunkManager.setLayout(nodes);
   }
 
-  /** Moves the camera to face the origin chunk at a comfortable viewing distance. */
+  /**
+   * Derive dynamic camera Z bounds + far clipping plane from the layout's
+   * depth (time) range. Newest photos at maxCellZ get a starting camera Z
+   * above them; the min is just above the oldest (z=0) plane so the user
+   * can't fly past the oldest photos.
+   */
+  private updateDepthBounds(nodes: CanvasNode[]): void {
+    if (nodes.length === 0) {
+      this._maxCameraZ = MAX_CAMERA_Z;
+      this._minCameraZ = MIN_CAMERA_Z;
+      this._camera.far = CAMERA_FAR_MIN;
+      this._camera.updateProjectionMatrix();
+      return;
+    }
+    let maxCellZ = 0;
+    for (const n of nodes) if (n.cellZ > maxCellZ) maxCellZ = n.cellZ;
+    const newestZ = maxCellZ * CHUNK_SIZE + CHUNK_SIZE;
+    this._maxCameraZ = newestZ + INITIAL_CAMERA_Z;
+    this._minCameraZ = MIN_CAMERA_Z;
+    const far = Math.max(CAMERA_FAR_MIN, this._maxCameraZ + CHUNK_SIZE * (RENDER_DISTANCE + CHUNK_FADE_MARGIN + 1));
+    if (this._camera.far !== far) {
+      this._camera.far = far;
+      this._camera.updateProjectionMatrix();
+    }
+  }
+
+  /** Moves the camera to face the newest photos at a comfortable viewing distance. */
   private centerOnLayout(nodes: CanvasNode[]): void {
     if (nodes.length === 0) {
       this._camera.position.set(0, 0, INITIAL_CAMERA_Z);
       this._basePos.set(0, 0, INITIAL_CAMERA_Z);
       return;
     }
-    // Center on the first photo's chunk rather than the full-layout centroid.
-    // Time-bucket layouts are wide; the centroid lands in empty space between
-    // clusters. The first node is in the earliest time bucket (cellX=0), which
-    // is the densest origin area the user should see first.
-    const first = nodes[0];
-    const targetX = first.cellX * CHUNK_SIZE + first.localX;
-    const targetY = first.cellY * CHUNK_SIZE + first.localY;
-    this._camera.position.set(targetX, targetY, INITIAL_CAMERA_Z);
-    this._basePos.set(targetX, targetY, INITIAL_CAMERA_Z);
+    // Center on the newest time bucket (highest cellZ) — that's where the
+    // user starts. X=0 is the center of each layer's within-bucket spread, and
+    // Y is the first cluster band. Zooming in (decreasing camera z) travels
+    // back in time.
+    let newest = nodes[0];
+    for (const n of nodes) if (n.cellZ > newest.cellZ) newest = n;
+    const targetX = 0;
+    const targetY = 0;
+    const targetZ = newest.cellZ * CHUNK_SIZE + INITIAL_CAMERA_Z;
+    this._camera.position.set(targetX, targetY, targetZ);
+    this._basePos.set(targetX, targetY, targetZ);
   }
 
   /** Begins the RAF loop. Safe to call once; idempotent if already running. */
@@ -238,17 +278,16 @@ export class SceneManager {
       this._basePos.z,
     );
 
-    const prevChunkX = Math.floor(this._basePos.x / CHUNK_SIZE);
-    const prevChunkY = Math.floor(this._basePos.y / CHUNK_SIZE);
-    const prevChunkZ = Math.floor(this._basePos.z / CHUNK_SIZE);
-
     const velMag = this._velocity.length();
     this._chunkManager.update(this._basePos, velMag);
 
     const cx = Math.floor(this._basePos.x / CHUNK_SIZE);
     const cy = Math.floor(this._basePos.y / CHUNK_SIZE);
     const cz = Math.floor(this._basePos.z / CHUNK_SIZE);
-    if (cx !== prevChunkX || cy !== prevChunkY || cz !== prevChunkZ) {
+    if (cx !== this._lastChunkX || cy !== this._lastChunkY || cz !== this._lastChunkZ) {
+      this._lastChunkX = cx;
+      this._lastChunkY = cy;
+      this._lastChunkZ = cz;
       this.onChunkChange?.(cx, cy, cz);
     }
 
@@ -283,8 +322,8 @@ export class SceneManager {
     this._basePos.y += this._velocity.y * VELOCITY_LERP;
     this._basePos.z += this._velocity.z * VELOCITY_LERP;
 
-    if (this._basePos.z < MIN_CAMERA_Z) this._basePos.z = MIN_CAMERA_Z;
-    if (this._basePos.z > MAX_CAMERA_Z) this._basePos.z = MAX_CAMERA_Z;
+    if (this._basePos.z < this._minCameraZ) this._basePos.z = this._minCameraZ;
+    if (this._basePos.z > this._maxCameraZ) this._basePos.z = this._maxCameraZ;
 
     this._velocity.multiplyScalar(VELOCITY_DECAY);
     if (this._velocity.lengthSq() < 1e-6) this._velocity.set(0, 0, 0);
@@ -363,8 +402,8 @@ export class SceneManager {
     e.preventDefault();
     // Inverted: scroll up (deltaY < 0) zooms in (z decreases), scroll down zooms out.
     this._basePos.z += e.deltaY * WHEEL_ZOOM_STEP;
-    if (this._basePos.z < MIN_CAMERA_Z) this._basePos.z = MIN_CAMERA_Z;
-    if (this._basePos.z > MAX_CAMERA_Z) this._basePos.z = MAX_CAMERA_Z;
+    if (this._basePos.z < this._minCameraZ) this._basePos.z = this._minCameraZ;
+    if (this._basePos.z > this._maxCameraZ) this._basePos.z = this._maxCameraZ;
     this._pointer.dragged = true;
     this._userMoved = true;
   };

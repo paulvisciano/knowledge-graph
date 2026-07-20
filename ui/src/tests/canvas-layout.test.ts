@@ -47,71 +47,54 @@ describe('buildCanvasLayout', () => {
     expect(out.every((n) => n.kind === 'photo')).toBe(true);
   });
 
-  it('assigns stable cellX from time buckets (monotonic by date)', () => {
+  it('assigns stable cellZ from time buckets (monotonic by date, oldest=0)', () => {
     const d1 = photo('p1', { date_taken_friendly: '2024-01-01' });
     const d2 = photo('p2', { date_taken_friendly: '2024-06-01' });
     const d3 = photo('p3', { date_taken_friendly: '2024-03-01' });
     const out = buildCanvasLayout([d1, d2, d3], [], {}, {});
-    const xOf = new Map(out.map((n) => [n.id, n.cellX]));
-    // Sorted by date: Jan < Mar < Jun → cellX 0,1,2
-    expect(xOf.get('p1')).toBe(0);
-    expect(xOf.get('p3')).toBe(1);
-    expect(xOf.get('p2')).toBe(2);
+    const zOf = new Map(out.map((n) => [n.id, n.cellZ]));
+    // Sorted ascending by date: Jan(0) < Mar(1) < Jun(2) → cellZ 0,1,2
+    expect(zOf.get('p1')).toBe(0);
+    expect(zOf.get('p3')).toBe(1);
+    expect(zOf.get('p2')).toBe(2);
   });
 
-  it('places photos in different clusters on different cellY bands', () => {
-    // Two photo hubs in separate clusters (each connected to a different
-    // person, no edge between the photos) → two distinct hub bands.
-    const nodes = [photo('p1'), photo('p2'), person('David'), person('Sarah')];
-    const edges = [
-      makeEdge('e1', 'p1', 'David'),
-      makeEdge('e2', 'p2', 'Sarah'),
-    ];
-    const out = buildCanvasLayout(nodes, edges, {}, {});
-    const byId = new Map(out.map((n) => [n.id, n]));
-    expect(byId.get('p1')!.cellY).not.toBe(byId.get('p2')!.cellY);
-  });
-
-  it('places photos in the same cluster on the same cellY band', () => {
-    // Make David the clear hub by raising the median degree above 1:
-    //   David(4) — p1, p2, Miami, Sarah
-    //   Miami(3) — David, Party, Event1
-    //   Party(2) — Miami, Event1
-    //   Event1(2)— Miami, Party
-    // Degrees: David=4, Miami=3, Party=2, Event1=2, p1=1, p2=1, Sarah=1.
-    // Median of [1,1,1,2,2,3,4] = 2 → hubs = {David, Miami, Party, Event1}.
-    // p1 (deg 1) inherits David's band; p2 (deg 1) inherits David's band.
+  it('spreads photos in the same time bucket across a 2D grid on X and Y', () => {
+    // 4 photos with the same date → same cellZ bucket → arranged in a 2x2 grid
+    // centered on (0,0) so they fill the viewport width AND height.
     const nodes = [
-      photo('p1'), photo('p2'), person('David'),
-      location('Miami'), event('Party'), event('Event1'), person('Sarah'),
+      photo('p1', { date_taken_friendly: '2024-01-01' }),
+      photo('p2', { date_taken_friendly: '2024-01-01' }),
+      photo('p3', { date_taken_friendly: '2024-01-01' }),
+      photo('p4', { date_taken_friendly: '2024-01-01' }),
     ];
-    const edges = [
-      makeEdge('e1', 'p1', 'David'),
-      makeEdge('e2', 'p2', 'David'),
-      makeEdge('e3', 'David', 'Miami'),
-      makeEdge('e4', 'David', 'Sarah'),
-      makeEdge('e5', 'Miami', 'Party'),
-      makeEdge('e6', 'Miami', 'Event1'),
-      makeEdge('e7', 'Party', 'Event1'),
-    ];
-    const out = buildCanvasLayout(nodes, edges, {}, {});
+    const out = buildCanvasLayout(nodes, [], {}, {});
     const byId = new Map(out.map((n) => [n.id, n]));
-    expect(byId.get('p1')!.cellY).toBe(byId.get('p2')!.cellY);
+    // All in the same time bucket (cellZ=0).
+    expect(out.every((n) => n.cellZ === 0)).toBe(true);
+    // Grid side = ceil(sqrt(4)) = 2, half = 0.5 → grid coords {-1,0} x {-1,0}.
+    // At least one pair differs in cellX and at least one pair differs in cellY.
+    const xs = new Set(out.map((n) => n.cellX));
+    const ys = new Set(out.map((n) => n.cellY));
+    expect(xs.size).toBeGreaterThan(1);
+    expect(ys.size).toBeGreaterThan(1);
   });
 
-  it('cellZ is 0 for all photos when nothing is focused', () => {
+  it('cellX is 0 for all photos when nothing is focused', () => {
     const nodes = [photo('p1'), person('David'), location('Miami')];
     const edges = [makeEdge('e1', 'p1', 'David'), makeEdge('e2', 'David', 'Miami')];
     const out = buildCanvasLayout(nodes, edges, {}, {});
-    expect(out.every((n) => n.cellZ === 0)).toBe(true);
+    expect(out.every((n) => n.cellX === 0)).toBe(true);
   });
 
-  it('cellZ reflects relationship depth from the focused photo', () => {
+  it('cellX reflects relationship depth from the focused photo', () => {
     // Chain: p1 — David — p2 — Miami — p3. Focus p1.
     //   1-hop from p1: {David}  → depth 0 (with p1)
     //   2-hop from p1: {p2}     → depth 1
     //   3-hop from p1: {Miami}  → depth 2 (beyond 2-hop)
     //   4-hop from p1: {p3}     → depth 2
+    // Each photo is its own time bucket (no dates) → xIdx=0, so
+    // cellX = depth * 3 (the parallax offset layered on the within-bucket spread).
     const nodes = [photo('p1'), photo('p2'), photo('p3'), person('David'), location('Miami')];
     const edges = [
       makeEdge('e1', 'p1', 'David'),
@@ -120,10 +103,10 @@ describe('buildCanvasLayout', () => {
       makeEdge('e4', 'Miami', 'p3'),
     ];
     const out = buildCanvasLayout(nodes, edges, {}, {}, 'p1');
-    const byId = new Map(out.map((n) => [n.id, n.cellZ]));
+    const byId = new Map(out.map((n) => [n.id, n.cellX]));
     expect(byId.get('p1')).toBe(0);
-    expect(byId.get('p2')).toBe(1);
-    expect(byId.get('p3')).toBe(2);
+    expect(byId.get('p2')).toBe(3);
+    expect(byId.get('p3')).toBe(6);
   });
 
   it('is deterministic: same inputs → same outputs', () => {

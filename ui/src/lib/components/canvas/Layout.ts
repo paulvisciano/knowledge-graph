@@ -3,12 +3,16 @@
  *
  * Turns `KGNode[]` + `KGEdge[]` into `CanvasNode[]` by assigning each node a
  * stable chunk-cell coordinate `(cellX, cellY, cellZ)` and a within-chunk
- * offset `(localX, localY, localZ)`. The strategy (see
- * `docs/infinite-canvas-report.html` §data) is:
+ * offset `(localX, localY, localZ)`. The strategy is a **time-depth layout**:
+ * photos are spread along the camera's depth axis (Z) by date taken, so the
+ * user zooms in to travel back through time instead of panning sideways.
  *
- *   cellX = time bucket  (primary axis — new photos scroll in from +X)
+ *   cellZ = time bucket  (primary axis — newest at z=0, older at -1,-2,… so
+ *           zooming in (camera z decreasing) reveals progressively older
+ *           photos)
  *   cellY = cluster band (hubMap grouping → dense band index)
- *   cellZ = relationship depth (0 = focused + 1-hop, 1 = 2-hop, 2 = far; 0 when nothing focused)
+ *   cellX = relationship depth (0 = focused + 1-hop, 1 = 2-hop, 2 = far; 0
+ *           when nothing focused) — minor parallax axis
  *
  * No Three.js / DOM access here — this module is pure data and must be
  * deterministic: two calls with the same input produce identical coords.
@@ -233,17 +237,23 @@ function buildClusterAssignment(nodes: KGNode[], edges: KGEdge[]): ClusterAssign
 // ---------------------------------------------------------------------------
 
 interface TimePlan {
-  /** nodeId → cellX (monotonic bucket index). */
-  cellXOf: Map<string, number>;
+  /** nodeId → cellZ (monotonic bucket index, oldest = 0, newest = highest). */
+  cellZOf: Map<string, number>;
+  /** Sorted bucket key → human-readable date label (e.g. "2024-06"). */
+  bucketLabel: Map<string, string>;
+  /** Dense bucket index → bucket key (for date-indicator lookups). */
+  indexToBucket: string[];
 }
 
 /**
- * Assign each photo a time-bucket index along cellX. Non-photo nodes inherit
- * the bucket of their most-recent connected photo (by edge). Nodes with no
- * photo connection fall back to ingestion-order index.
+ * Assign each photo a time-bucket index along cellZ, oldest→newest ascending.
+ * Newest photos land at the highest cellZ (closest to the camera at +Z);
+ * older photos at lower cellZ. Zooming in (camera z decreasing) travels
+ * toward older photos. Non-photo nodes inherit the bucket of their most-recent
+ * connected photo. Nodes with no photo connection fall back to ingestion order.
  *
  * Buckets are days by default; if the photo-date span exceeds ~180 days we
- * switch to month buckets so the X axis stays bounded.
+ * switch to month buckets so the Z axis stays bounded.
  */
 function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   const photoDate = new Map<string, Date>();
@@ -253,9 +263,12 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     if (d) photoDate.set(n.id, d);
   }
 
-  // Decide granularity: if span > 180 days → month buckets; if > 2 days →
-  // day buckets; otherwise per-photo (each photo gets its own cellX) so a
-  // burst of same-day photos doesn't pile into one chunk.
+  // Decide granularity for the depth (time) axis. The goal is a moderate
+  // number of depth layers (~4-16) with multiple photos per layer so the
+  // 2D within-bucket grid fills the viewport. Per-photo granularity (one
+  // layer per photo) would stack photos in a narrow single-file line along
+  // Z, defeating the width spread. Prefer the FINEST granularity that keeps
+  // at least ~3 photos per layer (more layers = more zoom travel).
   let granularity: 'month' | 'day' | 'photo' = 'photo';
   if (photoDate.size > 0) {
     let minT = Infinity;
@@ -266,8 +279,20 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
       if (t > maxT) maxT = t;
     }
     const spanDays = (maxT - minT) / 86_400_000;
-    if (spanDays > 180) granularity = 'month';
-    else if (spanDays > 2) granularity = 'day';
+    const photoCount = photoDate.size;
+    const dayBuckets = Math.max(1, Math.ceil(spanDays));
+    const monthBuckets = Math.max(1, Math.ceil(spanDays / 30));
+    const perDay = photoCount / dayBuckets;
+    const perMonth = photoCount / monthBuckets;
+    if (perDay >= 3 && dayBuckets <= 16) {
+      granularity = 'day';
+    } else if (perMonth >= 3 && monthBuckets <= 16) {
+      granularity = 'month';
+    } else if (monthBuckets <= 16) {
+      granularity = 'month';
+    } else {
+      granularity = 'month';
+    }
   }
 
   const bucketKeyOf = (d: Date): string => {
@@ -276,15 +301,28 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     return d.getTime().toString();
   };
 
-  // Collect & sort unique bucket keys → dense index.
+  // Collect & sort unique bucket keys ascending (oldest→newest). Oldest gets
+  // cellZ=0 (furthest from camera); newest gets the highest cellZ (closest to
+  // camera). Zooming in (camera z decreasing) travels back in time.
   const bucketKeys = new Set<string>();
   for (const d of photoDate.values()) {
     bucketKeys.add(bucketKeyOf(d));
   }
   const sortedBuckets = Array.from(bucketKeys).sort();
   const bucketIndex = new Map<string, number>();
+  const indexToBucket: string[] = [];
+  const bucketLabel = new Map<string, string>();
   for (let i = 0; i < sortedBuckets.length; i++) {
     bucketIndex.set(sortedBuckets[i], i);
+    indexToBucket.push(sortedBuckets[i]);
+    bucketLabel.set(
+      sortedBuckets[i],
+      sortedBuckets[i].length === 7
+        ? sortedBuckets[i] // month key YYYY-MM
+        : sortedBuckets[i].length === 10
+          ? sortedBuckets[i] // day key YYYY-MM-DD
+          : new Date(Number(sortedBuckets[i])).toISOString().slice(0, 10),
+    );
   }
 
   // Build adjacency (nodeId → neighbor nodeIds) for photo-inheritance.
@@ -296,7 +334,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     adjacency.get(e.target)!.push(e.source);
   }
 
-  const cellXOf = new Map<string, number>();
+  const cellZOf = new Map<string, number>();
 
   // Photos: direct bucket.
   for (const n of nodes) {
@@ -305,13 +343,13 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     if (!d) continue;
     const key = bucketKeyOf(d);
     const idx = bucketIndex.get(key);
-    if (idx !== undefined) cellXOf.set(n.id, idx);
+    if (idx !== undefined) cellZOf.set(n.id, idx);
   }
 
   // Non-photos: inherit most-recent connected photo's bucket.
   for (const n of nodes) {
     if (isPhotoNode(n)) continue;
-    if (cellXOf.has(n.id)) continue;
+    if (cellZOf.has(n.id)) continue;
     const neighbors = adjacency.get(n.id) ?? [];
     let best: { idx: number; t: number } | null = null;
     for (const nid of neighbors) {
@@ -323,7 +361,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
       const t = d.getTime();
       if (!best || t > best.t) best = { idx, t };
     }
-    if (best) cellXOf.set(n.id, best.idx);
+    if (best) cellZOf.set(n.id, best.idx);
   }
 
   // Fallback: ingestion order, appended after the time buckets.
@@ -331,12 +369,12 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   let fallbackIdx = baseCount;
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
-    if (cellXOf.has(n.id)) continue;
-    cellXOf.set(n.id, fallbackIdx);
+    if (cellZOf.has(n.id)) continue;
+    cellZOf.set(n.id, fallbackIdx);
     fallbackIdx++;
   }
 
-  return { cellXOf };
+  return { cellZOf, bucketLabel, indexToBucket };
 }
 
 // ---------------------------------------------------------------------------
@@ -349,15 +387,15 @@ interface DepthPlan {
 }
 
 /**
- * Assign each node a relationship-depth bucket relative to `selectedNodeId`.
+ * Assign each node a relationship-depth bucket relative to `selectedNodeId`,
+ * used for the cellX (minor horizontal parallax) axis.
  *
- *  - depth 0: the focused node itself + its 1-hop neighbors (sit at the
- *    camera plane for the "focus and get more details" feel).
- *  - depth 1: 2-hop neighbors (drop back one Z-layer for parallax).
- *  - depth 2: everything else (background).
+ *  - depth 0: the focused node itself + its 1-hop neighbors.
+ *  - depth 1: 2-hop neighbors (shifted one X-layer for parallax).
+ *  - depth 2: everything else.
  *
  * When `selectedNodeId` is null/undefined or not in the graph, every node
- * gets depth 0 so the whole graph sits on one plane.
+ * gets depth 0 so the whole graph sits on one X plane.
  */
 function buildDepthPlan(
   nodes: KGNode[],
@@ -417,21 +455,39 @@ function photoFilename(node: KGNode): string | null {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+export interface TimeIndex {
+  /** Dense bucket index → human-readable date label. */
+  readonly indexToLabel: readonly string[];
+}
+
+/**
+ * Build a time-only index for the date indicator overlay. Returns the same
+ * bucket ordering as `buildCanvasLayout` without the cost of computing
+ * clusters/depth. Index 0 is the newest bucket.
+ */
+export function buildTimeIndex(nodes: KGNode[], edges: KGEdge[]): TimeIndex {
+  const plan = buildTimePlan(nodes, edges);
+  return {
+    indexToLabel: plan.indexToBucket.map((k) => plan.bucketLabel.get(k) ?? k),
+  };
+}
+
 /**
  * Build the full canvas layout — a `CanvasNode[]` ready to hand to
  * `SceneManager.setNodes`.
  *
- * Layout axes (Phase 2 — knowledge-aware, see
- * `docs/infinite-canvas-report.html` §data):
+ * Layout axes — **time-depth layout** (zoom = time travel):
  *
- *  - cellX = time bucket index (monotonic). New photos scroll in from +X.
+ *  - cellZ = time bucket index (newest = 0, older = 1, 2, …). The camera
+ *    starts facing the newest photos; zooming in (decreasing camera z) moves
+ *    toward older photos. This is the primary browsing axis.
  *  - cellY = cluster band: each hub's cluster occupies a stable, dense
  *    horizontal band derived from `buildClusterAssignment` (degree-based
  *    hubMap). Non-hub nodes inherit their hub's band so a cluster reads as a
  *    contiguous row.
- *  - cellZ = relationship depth from the focused node (0 = neighbors of the
- *    focused node, 1 = 2-hop, 2 = far; 0 when nothing is focused). This is the
- *    "focus and get more details" parallax depth called out in the report.
+ *  - cellX = relationship depth from the focused node (0 = neighbors of the
+ *    focused node, 1 = 2-hop, 2 = far; 0 when nothing is focused). Minor
+ *    horizontal parallax axis.
  *
  * Within a chunk cell, photos are spread on a square grid sized to the cell's
  * node count so they never overlap. Only photo/image nodes are rendered to
@@ -445,9 +501,9 @@ function photoFilename(node: KGNode): string | null {
  * @param personImages `nodeId → face-crop URL` for person nodes (reserved for
  *                     later phases; person nodes are not rendered on the canvas).
  * @param selectedNodeId optional focused node id — when set, its 1-hop
- *                     neighbors sit at `cellZ=0`, 2-hop at `cellZ=1`, and
- *                     everything else at `cellZ=2`. When unset, all nodes use
- *                     `cellZ=0`. This is the depth-of-field parallax axis.
+ *                     neighbors sit at `cellX=0`, 2-hop at `cellX=1`, and
+ *                     everything else at `cellX=2`. When unset, all nodes use
+ *                     `cellX=0`. Minor horizontal parallax axis.
  */
 export function buildCanvasLayout(
   nodes: KGNode[],
@@ -465,6 +521,38 @@ export function buildCanvasLayout(
   // into a compact vertical stack. Each band occupies one chunk-Y row.
   const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
 
+  // Group photo nodes by their time bucket (cellZ) so we can spread each
+  // layer across the screen. Without this, all photos in a bucket share
+  // cellX=0 (when nothing is focused) and collapse into a narrow column.
+  const photosByBucket = new Map<number, KGNode[]>();
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (classifyKind(node) !== 'photo') continue;
+    const z = timePlan.cellZOf.get(node.id) ?? i;
+    const arr = photosByBucket.get(z);
+    if (arr) arr.push(node);
+    else photosByBucket.set(z, [node]);
+  }
+  // Assign each photo a 2D grid cell (gridX, gridY) within its time bucket,
+  // centered on (0, 0) so each layer fills the viewport width AND height
+  // without exceeding RENDER_DISTANCE. A 1D line would push most photos
+  // thousands of chunks outside the visible window.
+  const gridPosOf = new Map<string, { x: number; y: number }>();
+  for (const [, bucketNodes] of photosByBucket) {
+    bucketNodes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const count = bucketNodes.length;
+    const side = Math.max(1, Math.ceil(Math.sqrt(count)));
+    const half = (side - 1) / 2;
+    for (let i = 0; i < count; i++) {
+      const gx = i % side;
+      const gy = Math.floor(i / side);
+      gridPosOf.set(bucketNodes[i].id, {
+        x: Math.round(gx - half),
+        y: Math.round(gy - half),
+      });
+    }
+  }
+
   const provisional: {
     node: KGNode;
     kind: NodeKind;
@@ -478,14 +566,14 @@ export function buildCanvasLayout(
     const node = nodes[i];
     const kind = classifyKind(node);
     if (kind !== 'photo') continue;
-    const cellX = timePlan.cellXOf.get(node.id) ?? i;
-
-    const hubId = clusters.hubOf.get(node.id) ?? node.id;
-    const band = clusters.bandOfHub.get(hubId) ?? 0;
-    const cellY = band % yBandsPerChunk;
-
     const depth = depthPlan.depthOf.get(node.id) ?? 0;
-    const cellZ = depth;
+    const grid = gridPosOf.get(node.id) ?? { x: 0, y: 0 };
+    // Relationship depth is a minor parallax offset layered on top of the
+    // within-bucket grid so focusing still pulls neighbors closer.
+    const cellX = grid.x + depth * 3;
+    const cellY = grid.y;
+
+    const cellZ = timePlan.cellZOf.get(node.id) ?? i;
 
     const cellKey = `${cellX},${cellY},${cellZ}`;
     provisional.push({ node, kind, cellX, cellY, cellZ, cellKey });
