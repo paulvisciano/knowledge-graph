@@ -1571,7 +1571,13 @@ async def wait_for_lightrag_processing(
 
         try:
             docs = await asyncio.to_thread(_fetch_documents)
-            doc_list = docs if isinstance(docs, list) else docs.get("documents", docs.get("data", []))
+            if isinstance(docs, list):
+                doc_list = docs
+            elif isinstance(docs.get("statuses"), dict):
+                # LightRAG shape: {"statuses": {"processed": [...], "pending": [...], "failed": [...]}}
+                doc_list = [d for v in docs["statuses"].values() for d in v]
+            else:
+                doc_list = docs.get("documents", docs.get("data", []))
 
             for doc in doc_list:
                 if not isinstance(doc, dict):
