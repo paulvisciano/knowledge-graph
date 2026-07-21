@@ -411,7 +411,7 @@ CHUNK_OFFSETS     = run(() =&gt; {
         <tr class="done"><td><strong>2. Layout &amp; selection</strong> <span class="tag green">✓ done</span></td><td>Knowledge-aware layout (time/cluster/depth), photos-only render, raycast click selection, <code>NodeOverlay</code> with EXIF + connected entities.</td><td class="ok">Medium</td><td>Yes — route flag <code>?view=canvas</code>.</td></tr>
         <tr><td><strong>3. Filter &amp; detail</strong></td><td><code>FilterBar</code>, match-mask fade, facet chips, focus camera.</td><td>Low</td><td>Yes.</td></tr>
         <tr><td><strong>4. Chat bridge</strong></td><td>Reference → highlight → flyTo; bidirectional links; streaming parse.</td><td class="ok">Low — additive.</td><td>Yes.</td></tr>
-        <tr><td><strong>5. Cut over</strong></td><td>Make canvas the default, delete <code>GraphCanvas.svelte</code> force-graph path and <code>3d-force-graph</code> dependency.</td><td class="amber">Medium — removes ~1600 lines + a dep.</td><td>Last.</td></tr>
+        <tr class="done"><td><strong>5. Cut over</strong> <span class="tag green">✓ done</span></td><td>Make canvas the default, delete <code>GraphCanvas.svelte</code> force-graph path and <code>3d-force-graph</code> dependency.</td><td class="ok">Medium — removed ~1600 lines + 4 deps.</td><td>Last — shipped.</td></tr>
       </tbody>
     </table>
     <p>Each phase is independently shippable and reversible. Phase 0 alone should recover most of the lost performance on the current UI.</p>
