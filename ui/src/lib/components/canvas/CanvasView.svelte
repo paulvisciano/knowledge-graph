@@ -220,11 +220,6 @@
   </div>
 {/if}
 
-<div class="phase-badge">
-  <span class="badge-label">Canvas view (Phase 2)</span>
-  <a class="badge-link" href="?view=graph">← back to force graph</a>
-</div>
-
 {#if hoveredNodeId && !selectedNodeId}
   <div class="hover-tooltip" style="left: {tooltipX + 14}px; top: {tooltipY + 14}px;">
     Click to view details
