@@ -62,11 +62,23 @@
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
+  let playPromise: Promise<void> | null = null;
+
   function togglePlay() {
     const a = audioEl;
     if (!a) return;
     if (a.paused || a.ended) {
-      void a.play();
+      // play() returns a Promise. If pause() or a new play() interrupts it,
+      // the browser rejects with AbortError ("play() was interrupted by pause()").
+      // Track the in-flight promise so we can guard against races and swallow
+      // the expected AbortError instead of surfacing it as an uncaught promise.
+      const p = a.play();
+      if (p) {
+        playPromise = p.then(() => { playPromise = null; }).catch((err) => {
+          playPromise = null;
+          if (err?.name !== 'AbortError') console.warn('Audio play failed:', err);
+        });
+      }
     } else {
       a.pause();
     }
@@ -110,6 +122,10 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    // Stop the event from bubbling to window so the global space-bar listener
+    // in +page.svelte (which toggles voice recording) doesn't also fire when
+    // the user activates this audio player via keyboard.
+    e.stopPropagation();
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       togglePlay();
@@ -160,7 +176,14 @@
       a.removeEventListener('loadedmetadata', onLoaded);
       a.removeEventListener('durationchange', onDuration);
       cancelRaf();
-      try { a.pause(); } catch {}
+      // Wait for any in-flight play() to settle before pausing; calling pause()
+      // while play() is still resolving is what triggers AbortError.
+      const p = playPromise;
+      if (p) {
+        p.finally(() => { try { a.pause(); } catch {} });
+      } else {
+        try { a.pause(); } catch {}
+      }
     };
   });
 </script>

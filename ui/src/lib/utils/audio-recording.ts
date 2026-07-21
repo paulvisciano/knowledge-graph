@@ -40,60 +40,80 @@ function getWorkletBlobUrl(): string {
 }
 
 export class AudioRecorder {
+  // One long-lived AudioContext + MediaStream for the recorder's entire
+  // lifetime. Chrome throws "AudioContext encountered an error from the audio
+  // device or the WebAudio renderer" when AudioContexts are created and closed
+  // in rapid succession (the audio hardware doesn't release fast enough, and
+  // subsequent contexts enter an errored state whose worklet process() never
+  // fires -> "No audio data recorded"). Keeping both hot and just toggling the
+  // capture flag between recordings is the pattern used by WhatsApp/Discord web
+  // voice. The mic stays warm while the page is open and is fully released by
+  // destroy() on teardown.
   private stream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
   private recordedChunks: Float32Array[] = [];
   private recordingState = false;
   private _sampleRate = 0;
-  private workletReady: Promise<void> | null = null;
+  private initialized = false;
+
+  private async init(): Promise<void> {
+    if (this.initialized) return;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    this.stream = stream;
+
+    const ctx = new AudioContext();
+    this.audioContext = ctx;
+    this._sampleRate = ctx.sampleRate;
+
+    // Per autoplay policy, a fresh AudioContext can start in "suspended" state.
+    // When suspended, the AudioWorkletProcessor.process() is never called, so no
+    // audio chunks are ever produced -> "No audio data recorded". Resume explicitly.
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    if (ctx.state !== 'running') {
+      throw new Error(`AudioContext not running (state: ${ctx.state}). Microphone may be unavailable.`);
+    }
+
+    await ctx.audioWorklet.addModule(getWorkletBlobUrl());
+
+    this.sourceNode = ctx.createMediaStreamSource(stream);
+
+    // One persistent worklet node. We toggle its recording flag via postMessage
+    // rather than tearing it down and recreating it per recording.
+    const workletNode = new AudioWorkletNode(ctx, 'pcm-processor');
+    this.workletNode = workletNode;
+    workletNode.port.onmessage = (event) => {
+      if (event.data.type === 'audio' && this.recordingState) {
+        this.recordedChunks.push(new Float32Array(event.data.samples));
+      }
+    };
+
+    this.sourceNode.connect(workletNode);
+    // Do NOT connect workletNode to ctx.destination: that would route the
+    // microphone back to the speakers (echo/feedback) and is unnecessary for capture.
+
+    this.initialized = true;
+  }
 
   async startRecording(): Promise<void> {
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-
-      this.audioContext = new AudioContext();
-      this._sampleRate = this.audioContext.sampleRate;
-
-      // Per autoplay policy, a fresh AudioContext can start in "suspended" state.
-      // When suspended, the AudioWorkletProcessor.process() is never called, so no
-      // audio chunks are ever produced -> "No audio data recorded". Resume explicitly.
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-      }
-      if (this.audioContext.state !== 'running') {
-        throw new Error(`AudioContext not running (state: ${this.audioContext.state}). Microphone may be unavailable.`);
-      }
-
-      this.workletReady = this.audioContext.audioWorklet.addModule(getWorkletBlobUrl());
-      await this.workletReady;
-
-      this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
-
-      const workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+      await this.init();
       this.recordedChunks = [];
-
-      workletNode.port.onmessage = (event) => {
-        if (event.data.type === 'audio' && this.recordingState) {
-          this.recordedChunks.push(new Float32Array(event.data.samples));
-        }
-      };
-
-      this.sourceNode.connect(workletNode);
-      // Do NOT connect workletNode to audioContext.destination: that would route the
-      // microphone back to the speakers (echo/feedback) and is unnecessary for capture.
-
-      workletNode.port.postMessage({ type: 'start' });
       this.recordingState = true;
+      this.workletNode?.port.postMessage({ type: 'start' });
     } catch (error) {
       console.error('Failed to start recording:', error);
-      this.cleanupStream();
+      this.destroy();
       throw new Error('Failed to access microphone. Please check permissions.');
     }
   }
@@ -105,11 +125,31 @@ export class AudioRecorder {
 
     this.recordingState = false;
 
+    // Ask the worklet to stop and wait briefly for any in-flight audio chunks
+    // to arrive. Without this drain, chunks captured in the last few
+    // render quanta can still be in flight when we check recordedChunks,
+    // and very short recordings fail with "No audio data recorded".
+    const node = this.workletNode;
+    if (node) {
+      try {
+        node.port.postMessage({ type: 'stop' });
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 120);
+          const onStopped = (ev: MessageEvent) => {
+            if (ev.data?.type === 'stopped') {
+              clearTimeout(timer);
+              node.port.removeEventListener('message', onStopped);
+              resolve();
+            }
+          };
+          node.port.addEventListener('message', onStopped);
+        });
+      } catch {}
+    }
+
     const chunks = this.recordedChunks;
     const sampleRate = this._sampleRate;
-
     this.recordedChunks = [];
-    this.cleanupStream();
 
     if (chunks.length === 0) {
       throw new Error('No audio data recorded');
@@ -133,12 +173,19 @@ export class AudioRecorder {
   cancelRecording(): void {
     this.recordingState = false;
     this.recordedChunks = [];
-    this.cleanupStream();
   }
 
-  private cleanupStream(): void {
+  /** Fully release the mic stream + AudioContext. Call on teardown. */
+  destroy(): void {
+    this.recordingState = false;
+    this.recordedChunks = [];
+    if (this.workletNode) {
+      try { this.workletNode.port.onmessage = null; } catch {}
+      try { this.workletNode.disconnect(); } catch {}
+      this.workletNode = null;
+    }
     if (this.sourceNode) {
-      this.sourceNode.disconnect();
+      try { this.sourceNode.disconnect(); } catch {}
       this.sourceNode = null;
     }
     if (this.audioContext) {
@@ -151,6 +198,7 @@ export class AudioRecorder {
       }
       this.stream = null;
     }
+    this.initialized = false;
   }
 }
 
