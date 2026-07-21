@@ -26,7 +26,7 @@ import { CHUNK_SIZE, TIME_BUCKET_SPACING } from './renderer/constants';
 const KG_API_BASE = '/api/kg';
 
 // ---------------------------------------------------------------------------
-// Kind classification (ported from GraphCanvas.svelte:132-144)
+// Kind classification
 // ---------------------------------------------------------------------------
 
 /** True if the node represents a Photo/Image entity. */
@@ -177,7 +177,7 @@ function monthKey(d: Date): string {
 }
 
 // ---------------------------------------------------------------------------
-// Cluster band assignment (ported hubMap pattern, GraphCanvas.svelte:174-236)
+// Cluster band assignment (ported hubMap pattern)
 // ---------------------------------------------------------------------------
 
 interface ClusterAssignment {
@@ -191,7 +191,7 @@ interface ClusterAssignment {
 
 /**
  * Compute the hubMap cluster assignment and map each hub to a stable Y band
- * index. Mirrors `GraphCanvas.svelte` buildDegreeMap: hubs are nodes with
+ * index. Mirrors the original buildDegreeMap: hubs are nodes with
  * degree ≥ median; non-hubs attach to their highest-degree neighbor hub.
  */
 function buildClusterAssignment(nodes: KGNode[], edges: KGEdge[]): ClusterAssignment {
