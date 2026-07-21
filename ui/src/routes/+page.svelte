@@ -2028,26 +2028,12 @@
           {/each}
         </div>
       {/if}
+    </div>
 
-      <!-- Input row (always visible when a conversation exists) -->
-      {#if activeConversationId}
-        <div class="chat-inline-input" class:chat-inline-input-expanded={chatExpanded && messages.length > 0}>
-          {#if messages.length > 0}
-            <div class="mb-1 flex justify-center">
-              <button
-                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
-                class="flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
-                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                data-testid="chat-toggle"
-              >
-                <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
-                  <Icon name="chevron-down" size={12} />
-                </span>
-                {chatExpanded ? 'Collapse' : 'Expand'}
-              </button>
-            </div>
-          {/if}
+    <!-- Input row (centered at the bottom of the graph) -->
+    {#if activeConversationId}
+      <div class="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
+        <div class="pointer-events-auto w-full max-w-md">
           {#if thinkingContent}
             <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
               <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
@@ -2059,53 +2045,71 @@
           {/if}
 
           <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-          <div class="flex items-center gap-1.5 rounded-full px-2 py-1 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
-            <textarea
-              bind:this={panelTextareaEl}
-              bind:value={panelChatInput}
-              oninput={autoResizePanel}
-              onkeydown={handlePanelKeydown}
-              placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
-              rows="1"
-              data-testid="chat-input"
-              class="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-full bg-transparent px-4 py-2 text-base text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
-              disabled={isActiveConversationStreaming}
-            ></textarea>
-            <AttachmentMenu
-              disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-              onPickImage={openImagePicker}
-              onPickDocument={openDocumentPicker}
-            />
-            {#if isActiveConversationStreaming}
+
+          {#if messages.length > 0}
+            <div class="mb-1 flex justify-center">
               <button
-                onclick={cancelStreaming}
-                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
-                title="Stop generating"
-                data-testid="stop-button"
+                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+                class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
+                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                data-testid="chat-toggle"
               >
-                <Icon name="square" size={14} />
+                <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
+                  <Icon name="chevron-down" size={16} />
+                </span>
+                {chatExpanded ? 'Collapse' : 'Expand'}
               </button>
-            {:else}
-              <button
-                onclick={handleMicClick}
-                disabled={isTranscribing || !recordingSupported}
-                data-testid="mic-button"
-                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
-                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
-              >
-                {#if isRecording}
-                  <Icon name="square" size={16} />
-                {:else if isTranscribing}
-                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                {:else}
-                  <Icon name="mic" size={22} />
-                {/if}
-              </button>
-            {/if}
+            </div>
+          {/if}
+
+          <div class="flex items-center gap-1.5 rounded-full border border-cyber-cyan/25 bg-cyber-surface-2/80 px-2 py-1 transition-colors focus-within:border-cyber-cyan/60 focus-within:bg-cyber-surface-2 focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+          <textarea
+            bind:this={panelTextareaEl}
+            bind:value={panelChatInput}
+            oninput={autoResizePanel}
+            onkeydown={handlePanelKeydown}
+            placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
+            rows="1"
+            data-testid="chat-input"
+            class="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-full bg-transparent px-4 py-2 text-base text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+            disabled={isActiveConversationStreaming}
+          ></textarea>
+          <AttachmentMenu
+            disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
+            onPickImage={openImagePicker}
+            onPickDocument={openDocumentPicker}
+          />
+          {#if isActiveConversationStreaming}
+            <button
+              onclick={cancelStreaming}
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
+              title="Stop generating"
+              data-testid="stop-button"
+            >
+              <Icon name="square" size={14} />
+            </button>
+          {:else}
+            <button
+              onclick={handleMicClick}
+              disabled={isTranscribing || !recordingSupported}
+              data-testid="mic-button"
+              title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+            >
+              {#if isRecording}
+                <Icon name="square" size={16} />
+              {:else if isTranscribing}
+                <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+              {:else}
+                <Icon name="mic" size={22} />
+              {/if}
+            </button>
+          {/if}
           </div>
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
 
     <!-- Node detail overlay -->
     {#if $selectedNodeId}
@@ -2250,26 +2254,7 @@
     text-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
   }
 
-  .chat-inline-input {
-    border-radius: 16px 0 0 0;
-    border: 1px solid rgba(0, 212, 255, 0.18);
-    border-right: 0;
-    border-bottom: 0;
-    background: rgb(8, 11, 19);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    padding: 10px 12px;
-    transition: border-color 0.3s;
-  }
 
-  .chat-inline-input-expanded {
-    border-top-left-radius: 0;
-    border-top-color: transparent;
-  }
-
-  .chat-inline-input:hover {
-    border-color: rgba(0, 212, 255, 0.3);
-  }
 
   @media (max-width: 768px) {
     .chat-inline-overlay {
