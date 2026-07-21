@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ChatMessage, MCPToolCall, OllamaMessage } from '$lib/constants';
   import { API } from '$lib/constants';
+  import { tick } from 'svelte';
   import { eventBus } from '$lib/stores/event-bus.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
@@ -17,7 +18,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { AudioRecorder, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
+  import { AudioRecorder, blobToBase64, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
   import { parseKGResult } from '$lib/utils/parse-kg-result';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
@@ -72,6 +73,132 @@
   let textareaEl: HTMLTextAreaElement | undefined = $state();
   let panelTextareaEl: HTMLTextAreaElement | undefined = $state();
   let messagesContainer: HTMLDivElement | undefined = $state();
+
+  // Continuous scroll buffer — lets the user scroll up from the active
+  // conversation into previous conversations without manually switching.
+  // `olderConversationIds` is ordered oldest-loaded-first, newest-loaded-last
+  // (i.e. the conversation immediately above the active one is the last
+  // element). `olderConversationMessages` caches loaded messages per id.
+  let olderConversationIds = $state<string[]>([]);
+  let olderConversationMessages = $state<Record<string, ChatMessage[]>>({});
+  let isLoadingOlder = $state(false);
+  let hasNoMoreOlder = $state(false);
+  // Suppresses the next scroll event so programmatic scroll-position
+  // restoration after loading an older conversation doesn't re-trigger
+  // the load handler in a loop.
+  let suppressScrollLoad = false;
+
+  function resetScrollBuffer() {
+    olderConversationIds = [];
+    olderConversationMessages = {};
+    hasNoMoreOlder = false;
+  }
+
+  /**
+   * Find the next older conversation (one position older than the oldest
+   * currently loaded in the buffer, or one position older than the active
+   * conversation if the buffer is empty) and load its messages, prepending
+   * to the buffer while preserving the user's scroll position so the view
+   * appears to extend upward seamlessly.
+   */
+  async function loadOlderConversation() {
+    if (isLoadingOlder || hasNoMoreOlder || !activeConversationId) return;
+
+    // `conversations` is newest-first. Find the active conversation's index,
+    // then walk toward older conversations. The "frontier" is the oldest
+    // conversation we've already loaded into the buffer (or the active one
+    // if the buffer is empty). The next older conversation is at index+1.
+    const activeIdx = conversations.findIndex((c) => c.id === activeConversationId);
+    if (activeIdx === -1) return;
+
+    let frontierId = activeConversationId;
+    if (olderConversationIds.length > 0) {
+      frontierId = olderConversationIds[olderConversationIds.length - 1];
+    }
+    const frontierIdx = conversations.findIndex((c) => c.id === frontierId);
+    if (frontierIdx === -1) {
+      hasNoMoreOlder = true;
+      return;
+    }
+    const nextIdx = frontierIdx + 1;
+    if (nextIdx >= conversations.length) {
+      hasNoMoreOlder = true;
+      return;
+    }
+    const nextConv = conversations[nextIdx];
+    if (!nextConv) {
+      hasNoMoreOlder = true;
+      return;
+    }
+
+    isLoadingOlder = true;
+    try {
+      let loaded = nextConv.messages;
+      if (loaded.length === 0) {
+        loaded = await syncClient.loadConversation(nextConv.id);
+        nextConv.messages = loaded;
+      }
+      // Capture scroll geometry BEFORE the state update so we can compute
+      // the delta after the new content is rendered.
+      const prevScrollHeight = messagesContainer?.scrollHeight ?? 0;
+      const prevScrollTop = messagesContainer?.scrollTop ?? 0;
+
+      // Flag set BEFORE the state mutation so the next scroll event
+      // (fired by the programmatic scrollTop restoration below) is
+      // ignored by handleMessagesScroll and doesn't re-trigger a load.
+      suppressScrollLoad = true;
+      olderConversationIds = [...olderConversationIds, nextConv.id];
+      olderConversationMessages = {
+        ...olderConversationMessages,
+        [nextConv.id]: loaded,
+      };
+
+      // `tick()` resolves after Svelte flushes DOM updates but BEFORE
+      // the browser paints — restoring scrollTop here means the user
+      // never sees a flash of the new content at the wrong position.
+      // The container has `overflow-anchor: none` (set in CSS) so the
+      // browser doesn't apply its own scroll anchoring, which would
+      // fight with this manual restoration.
+      await tick();
+      if (messagesContainer) {
+        const delta = messagesContainer.scrollHeight - prevScrollHeight;
+        messagesContainer.scrollTop = prevScrollTop + delta;
+      }
+      // Clear the suppress flag on the next frame, after the browser has
+      // had a chance to fire (and we ignore) the scroll event from above.
+      requestAnimationFrame(() => {
+        suppressScrollLoad = false;
+        isLoadingOlder = false;
+      });
+    } catch {
+      isLoadingOlder = false;
+      suppressScrollLoad = false;
+    }
+  }
+
+  function handleMessagesScroll() {
+    if (suppressScrollLoad) {
+      suppressScrollLoad = false;
+      return;
+    }
+    if (!messagesContainer || isLoadingOlder || hasNoMoreOlder) return;
+    // Trigger when the user gets within ~120px of the top.
+    if (messagesContainer.scrollTop < 120) {
+      loadOlderConversation();
+    }
+  }
+
+  // The active conversation object, for the divider label above the active
+  // messages. Kept as a derived so the divider re-renders when the active
+  // conversation changes or its title updates.
+  let activeConvForDivider = $derived(
+    conversations.find((c) => c.id === activeConversationId) ?? null
+  );
+  let showActiveDivider = $derived(
+    !!activeConvForDivider &&
+    (olderConversationIds.length > 0 || messages.length > 0)
+  );
+
   let thinkingContent = $state('');
   let isProcessing = $state(false);
   let processingLabel = $state('');
@@ -168,6 +295,11 @@
   let isRecording = $state(false);
   let isTranscribing = $state(false);
   let recordingSupported = $state(false);
+  // Guard against rapid space-bar presses racing start/stop against each other.
+  // Without this, a second press before startRecording()'s async getUserMedia
+  // resolves sees isRecording=false and starts ANOTHER recording, or a press
+  // during stopRecording()'s await re-enters and throws "No active recording".
+  let micBusy = $state(false);
   let promptEditing = $state(false);
   let promptDraft = $state('');
   let promptSaving = $state(false);
@@ -177,6 +309,7 @@
     recordingSupported = isAudioRecordingSupported();
     if (recordingSupported) {
       audioRecorder = new AudioRecorder();
+      return () => audioRecorder?.destroy();
     }
   });
 
@@ -185,7 +318,7 @@
       if (e.key !== ' ' && e.code !== 'Space') return;
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
-      if (isActiveConversationStreaming || isTranscribing) return;
+      if (isActiveConversationStreaming || isTranscribing || micBusy) return;
       e.preventDefault();
       handleMicClick();
     }
@@ -195,37 +328,48 @@
 
   async function handleMicClick() {
     if (!audioRecorder || !recordingSupported) return;
+    if (micBusy) return;
+    micBusy = true;
+    try {
+      if (isRecording) {
+        isRecording = false;
+        isTranscribing = true;
+        try {
+          const wavBlob = await audioRecorder.stopRecording();
+          console.log('[audio] WAV blob size:', wavBlob.size, 'type:', wavBlob.type);
+          const audioUrl = URL.createObjectURL(wavBlob);
+          // Persist the audio as durable base64 data so the waveform can be
+          // reconstructed on reload — blob: URLs are session-only and don't
+          // survive a page reload. sync-client regenerates audioUrl from
+          // audioData via fromSyncMsg; without this the AudioPlayer vanishes
+          // when the conversation is reloaded.
+          const audioData = await blobToBase64(wavBlob);
 
-    if (isRecording) {
-      isRecording = false;
-      isTranscribing = true;
-      try {
-        const wavBlob = await audioRecorder.stopRecording();
-        console.log('[audio] WAV blob size:', wavBlob.size, 'type:', wavBlob.type);
-        const audioUrl = URL.createObjectURL(wavBlob);
+          const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+          console.log('[audio] transcript:', transcript);
+          const text = transcript.trim();
+          if (!text) {
+            console.warn('[audio] empty transcript, ignoring');
+            return;
+          }
 
-        const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
-        console.log('[audio] transcript:', transcript);
-        const text = transcript.trim();
-        if (!text) {
-          console.warn('[audio] empty transcript, ignoring');
-          return;
+          await handleSend(audioUrl, audioData, 'wav', false, text);
+        } catch (e) {
+          console.error('Audio processing failed:', e);
+        } finally {
+          isTranscribing = false;
+          processingLabel = '';
         }
-
-        await handleSend(audioUrl, undefined, undefined, false, text);
-      } catch (e) {
-        console.error('Audio processing failed:', e);
-      } finally {
-        isTranscribing = false;
-        processingLabel = '';
+      } else {
+        try {
+          await audioRecorder.startRecording();
+          isRecording = true;
+        } catch (e) {
+          console.error('Failed to start recording:', e);
+        }
       }
-    } else {
-      try {
-        await audioRecorder.startRecording();
-        isRecording = true;
-      } catch (e) {
-        console.error('Failed to start recording:', e);
-      }
+    } finally {
+      micBusy = false;
     }
   }
 
@@ -337,6 +481,7 @@
     conversations.unshift(conv);
     activeConversationId = id;
     messages = [];
+    resetScrollBuffer();
     syncClient.saveConversation(conv);
     return id;
   }
@@ -402,6 +547,7 @@
     }
 
     activeConversationId = id;
+    resetScrollBuffer();
     const conv = conversations.find((c) => c.id === id);
     if (conv) {
       if (conv.messages.length === 0) {
@@ -1179,6 +1325,7 @@
       activeConversationId = '';
       messages = [];
       chatExpanded = false;
+      resetScrollBuffer();
     }
   }
 
@@ -1331,6 +1478,26 @@
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
+  /** Formats a conversation's updatedAt for divider labels — relative for
+   *  recent conversations, absolute date+time for older ones. */
+  function formatConversationDate(ts: number): string {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return `Today, ${time}`;
+    if (isYesterday) return `Yesterday, ${time}`;
+    const sameYear = d.getFullYear() === now.getFullYear();
+    return d.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      year: sameYear ? undefined : 'numeric',
+    }) + `, ${time}`;
+  }
+
   function formatModelName(id: string): string {
     const parts = id.split('/');
     return parts[parts.length - 1].replace(/\.gguf$/, '').slice(0, 25);
@@ -1395,6 +1562,7 @@
     fetchModels();
     syncClient.init().then(() => {
       conversations = [...syncClient.conversations];
+      resetScrollBuffer();
       if (conversations.length > 0 && !activeConversationId) {
         activeConversationId = conversations[0].id;
         const conv = conversations[0];
@@ -1509,7 +1677,7 @@
 
       <!-- Recent messages (faded top/bottom, no header) -->
       {#if chatExpanded && activeConversationId && messages.length > 0}
-        <div bind:this={messagesContainer} class="chat-inline-messages" data-testid="messages-container">
+        <div bind:this={messagesContainer} class="chat-inline-messages" data-testid="messages-container" onscroll={handleMessagesScroll}>
           <div class="chat-inline-toolbar">
             <button
               onclick={() => { historyPanelOpen.update((v) => !v); }}
@@ -1521,18 +1689,8 @@
               <Icon name="clock" size={15} />
             </button>
           </div>
-          {#if configStore.systemPrompt.trim()}
-            <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
-              <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
-                <Icon name="terminal" size={13} color="var(--color-cyber-cyan)" />
-                <span class="font-medium">System Prompt</span>
-                <span class="text-cyber-text-dim/50">{configStore.systemPrompt.length} chars</span>
-                <svg class="ml-auto h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-              </summary>
-              <div class="prose-cyber max-h-64 overflow-y-auto border-t border-cyber-border/40 px-3 py-2.5 text-[12px] leading-relaxed text-cyber-text/90">{@html renderMarkdown(configStore.systemPrompt)}</div>
-            </details>
-          {/if}
-          {#each messages as msg (msg.id)}
+
+          {#snippet messageRow(msg: ChatMessage)}
             <div class="group mb-4 animate-fade-in-up" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
                 <div class="flex justify-end">
@@ -1834,13 +1992,79 @@
                 </div>
               {/if}
             </div>
+          {/snippet}
+
+          {#if isLoadingOlder}
+            <div class="flex items-center justify-center py-3 text-[11px] text-cyber-text-dim/60" data-testid="loading-older-conversation">
+              <div class="h-3 w-3 border-2 border-cyber-cyan/40 border-t-transparent rounded-full animate-spin mr-2"></div>
+              Loading earlier conversation…
+            </div>
+          {/if}
+
+          {#each olderConversationIds as convId (convId)}
+            {@const conv = conversations.find((c) => c.id === convId)}
+            {@const convMsgs = olderConversationMessages[convId] ?? []}
+            {#if conv}
+              <div class="chat-conversation-divider" data-testid="conversation-divider" data-conversation-id={convId}>
+                <span class="chat-conversation-divider-line"></span>
+                <span class="chat-conversation-divider-label">
+                  {formatConversationDate(conv.updatedAt)}
+                </span>
+                <span class="chat-conversation-divider-line"></span>
+              </div>
+            {/if}
+            {#each convMsgs as msg (msg.id)}
+              {@render messageRow(msg)}
+            {/each}
+          {/each}
+
+          {#if configStore.systemPrompt.trim()}
+            <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
+              <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
+                <Icon name="terminal" size={13} color="var(--color-cyber-cyan)" />
+                <span class="font-medium">System Prompt</span>
+                <span class="text-cyber-text-dim/50">{configStore.systemPrompt.length} chars</span>
+                <svg class="ml-auto h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </summary>
+              <div class="prose-cyber max-h-64 overflow-y-auto border-t border-cyber-border/40 px-3 py-2.5 text-[12px] leading-relaxed text-cyber-text/90">{@html renderMarkdown(configStore.systemPrompt)}</div>
+            </details>
+          {/if}
+
+          {#if showActiveDivider}
+            <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-conversation-id={activeConversationId}>
+              <span class="chat-conversation-divider-line"></span>
+              <span class="chat-conversation-divider-label">
+                {formatConversationDate(activeConvForDivider?.updatedAt ?? Date.now())}
+              </span>
+              <span class="chat-conversation-divider-line"></span>
+            </div>
+          {/if}
+
+          {#each messages as msg (msg.id)}
+            {@render messageRow(msg)}
           {/each}
         </div>
       {/if}
 
       <!-- Input row (always visible when a conversation exists) -->
       {#if activeConversationId}
-        <div class="chat-inline-input">
+        <div class="chat-inline-input" class:chat-inline-input-expanded={chatExpanded && messages.length > 0}>
+          {#if messages.length > 0}
+            <div class="mb-1 flex justify-center">
+              <button
+                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+                class="flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
+                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                data-testid="chat-toggle"
+              >
+                <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
+                  <Icon name="chevron-down" size={12} />
+                </span>
+                {chatExpanded ? 'Collapse' : 'Expand'}
+              </button>
+            </div>
+          {/if}
           {#if thinkingContent}
             <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
               <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
@@ -1852,12 +2076,7 @@
           {/if}
 
           <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-          <div class="flex items-center gap-2">
-            <AttachmentMenu
-              disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-              onPickImage={openImagePicker}
-              onPickDocument={openDocumentPicker}
-            />
+          <div class="flex items-center gap-1.5 rounded-full px-2 py-1 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
             <textarea
               bind:this={panelTextareaEl}
               bind:value={panelChatInput}
@@ -1866,13 +2085,18 @@
               placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
               rows="1"
               data-testid="chat-input"
-              class="max-h-[96px] min-h-[24px] flex-1 resize-none rounded-lg bg-cyber-surface-2/50 px-3 py-2 text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40 border border-cyber-border/30 focus:border-cyber-cyan/40 transition-colors"
+              class="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-full bg-transparent px-4 py-2 text-base text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
               disabled={isActiveConversationStreaming}
             ></textarea>
+            <AttachmentMenu
+              disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
+              onPickImage={openImagePicker}
+              onPickDocument={openDocumentPicker}
+            />
             {#if isActiveConversationStreaming}
               <button
                 onclick={cancelStreaming}
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
                 title="Stop generating"
                 data-testid="stop-button"
               >
@@ -1880,33 +2104,19 @@
               </button>
             {:else}
               <button
-                onclick={() => panelChatInput.trim() || attachments.length > 0 ? handlePanelSend() : handleMicClick()}
-                disabled={isTranscribing || (!panelChatInput.trim() && attachments.length === 0 && !recordingSupported)}
-                data-testid="send-button"
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (panelChatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/30 text-cyber-text-dim/30 rounded-lg'}"
+                onclick={handleMicClick}
+                disabled={isTranscribing || !recordingSupported}
+                data-testid="mic-button"
+                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
               >
                 {#if isRecording}
-                  <Icon name="square" size={14} />
+                  <Icon name="square" size={16} />
                 {:else if isTranscribing}
-                  <div class="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                {:else if panelChatInput.trim()}
-                  <Icon name="send" size={16} />
-                {:else if recordingSupported}
-                  <Icon name="mic" size={18} />
+                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
                 {:else}
-                  <Icon name="send" size={16} />
+                  <Icon name="mic" size={22} />
                 {/if}
-              </button>
-            {/if}
-            {#if messages.length > 0}
-              <button
-                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
-                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                data-testid="chat-toggle"
-              >
-                <Icon name={chatExpanded ? 'chevron-down' : 'chevron-right'} size={18} />
               </button>
             {/if}
           </div>
@@ -1943,14 +2153,13 @@
 <style>
   .chat-inline-overlay {
     position: absolute;
-    right: 16px;
-    bottom: 16px;
+    right: 0;
+    bottom: 0;
     z-index: 30;
     display: flex;
     width: 100%;
     max-width: 30rem;
     flex-direction: column;
-    gap: 8px;
     pointer-events: none;
   }
 
@@ -1961,13 +2170,19 @@
   .chat-inline-messages {
     max-height: 60dvh;
     overflow-y: auto;
+    /* Prevent the browser's scroll anchoring from adjusting scrollTop
+     * when older conversations are prepended — we handle restoration
+     * manually in loadOlderConversation() via tick() + scrollTop delta. */
+    overflow-anchor: none;
     padding: 8px 12px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     background: rgb(8, 11, 19);
-    border-radius: 14px;
+    border-radius: 16px 0 0 0;
     border: 1px solid rgba(0, 212, 255, 0.12);
+    border-right: 0;
+    border-top: 0;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
   }
@@ -1989,20 +2204,88 @@
     margin-bottom: 6px;
   }
 
+  .chat-conversation-divider {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 22px 0 16px;
+    user-select: none;
+    position: relative;
+  }
+
+  .chat-conversation-divider::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    transform: translateY(-50%);
+    background: linear-gradient(
+      to right,
+      transparent 0%,
+      rgba(0, 212, 255, 0.35) 15%,
+      rgba(0, 212, 255, 0.55) 50%,
+      rgba(0, 212, 255, 0.35) 85%,
+      transparent 100%
+    );
+    border-radius: 2px;
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+  }
+
+  .chat-conversation-divider-line {
+    display: none;
+  }
+
+  .chat-conversation-divider-label {
+    position: relative;
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 999px;
+    background: rgb(8, 11, 19);
+    border: 1.5px solid rgba(0, 212, 255, 0.45);
+    color: var(--color-cyber-cyan);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+    margin: 0 auto;
+    z-index: 1;
+    box-shadow:
+      0 0 16px rgba(0, 212, 255, 0.2),
+      inset 0 0 8px rgba(0, 212, 255, 0.05);
+    text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+  }
+
+  .chat-conversation-divider-active .chat-conversation-divider-label {
+    border-color: rgba(0, 212, 255, 0.7);
+    border-width: 2px;
+    box-shadow:
+      0 0 24px rgba(0, 212, 255, 0.35),
+      inset 0 0 12px rgba(0, 212, 255, 0.1);
+    text-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+  }
+
   .chat-inline-input {
-    border-radius: 16px;
+    border-radius: 16px 0 0 0;
     border: 1px solid rgba(0, 212, 255, 0.18);
+    border-right: 0;
+    border-bottom: 0;
     background: rgb(8, 11, 19);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     padding: 10px 12px;
-    box-shadow: 0 0 30px rgba(0, 212, 255, 0.08);
-    transition: border-color 0.3s, box-shadow 0.3s;
+    transition: border-color 0.3s;
+  }
+
+  .chat-inline-input-expanded {
+    border-top-left-radius: 0;
+    border-top-color: transparent;
   }
 
   .chat-inline-input:hover {
     border-color: rgba(0, 212, 255, 0.3);
-    box-shadow: 0 0 40px rgba(0, 212, 255, 0.15);
   }
 
   @media (max-width: 768px) {

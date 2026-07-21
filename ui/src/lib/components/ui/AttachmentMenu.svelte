@@ -13,8 +13,8 @@
 
   let open = $state(false);
 
-  const sizeClass = $derived(size === 'sm' ? 'h-8 w-8' : 'h-9 w-9');
-  const iconSize = $derived(size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4');
+  const sizeClass = $derived(size === 'sm' ? 'h-10 w-10' : 'h-11 w-11');
+  const iconSize = $derived(size === 'sm' ? 'h-4 w-4' : 'h-5 w-5');
 
   function toggle() {
     if (!disabled) open = !open;
@@ -50,15 +50,15 @@
     onclick={toggle}
     {disabled}
     data-testid="attach-file-button"
-    class="flex {sizeClass} shrink-0 items-center justify-center rounded-lg border border-cyber-border text-cyber-text-dim transition-colors hover:border-cyber-purple/40 hover:text-cyber-purple disabled:cursor-not-allowed disabled:opacity-30"
+    class="flex {sizeClass} shrink-0 items-center justify-center rounded-full text-cyber-text-dim/70 transition-colors hover:bg-cyber-surface-2/60 hover:text-cyber-cyan disabled:cursor-not-allowed disabled:opacity-30"
     title="Attach file"
   >
     <svg class="{iconSize}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16M4 12h16" />
     </svg>
   </button>
   {#if open}
-    <div class="absolute bottom-full left-0 mb-2 min-w-[160px] rounded-lg border border-cyber-border bg-cyber-surface-2 shadow-lg">
+    <div class="absolute bottom-full right-0 mb-2 min-w-[160px] rounded-lg border border-cyber-border bg-cyber-surface-2 shadow-lg">
       <button
         onclick={pickImage}
         data-testid="pick-image-button"
