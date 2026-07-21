@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import asyncio
 import tempfile
@@ -38,6 +39,7 @@ from api.services.processor import (
     delete_photo_entities,
 )
 from api.services import db as db_module
+from api.services import config
 from api.services.job_manager import (
     create_job, get_job, list_jobs, delete_job,
     persist_uploaded_file, start_processing, subscribe_events,
@@ -55,7 +57,6 @@ async def _resolve_skip_faces(request_skip_faces: bool) -> bool:
         return True
     return request_skip_faces
 
-LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
 KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve().parent.parent.parent / "known_faces"))
 INPUT_DIR = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
 FACES_CACHE_DIR = Path(os.environ.get("FACES_CACHE_DIR", str(Path(__file__).resolve().parent.parent.parent / "face_crops")))
@@ -68,6 +69,52 @@ def _parse_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
     return value.lower() in ("true", "1", "yes")
+
+
+async def _validate_and_save_upload(file: UploadFile) -> tuple[str, str]:
+    """Sanitize filename, validate extension, stream upload to a size-limited
+    temp file. Returns (tmp_path, file_source). Raises HTTPException on bad
+    filename/ext/size; unlinks the temp file on size-limit failure."""
+    # Sanitize filename: strip path traversal, keep only safe characters.
+    raw_name = file.filename or "uploaded_image"
+    safe_name = os.path.basename(raw_name)
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    safe_name = re.sub(r"[^A-Za-z0-9._\-\() ]", "_", safe_name)
+    if not safe_name.strip("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Validate extension against the configured allow-list.
+    ext = os.path.splitext(safe_name)[1].lower()
+    if ext not in config.allowed_upload_extensions():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext or 'none'}. Allowed: {', '.join(sorted(config.allowed_upload_extensions()))}",
+        )
+
+    # Stream to a temp file in chunks, enforcing the size limit to avoid OOM.
+    max_bytes = config.max_upload_bytes()
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    total = 0
+    try:
+        while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds {max_bytes // (1024 * 1024)}MB limit",
+                )
+            tmp.write(chunk)
+        tmp.close()
+    except HTTPException:
+        raise
+    except Exception:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+        raise
+    return tmp.name, safe_name
 
 
 async def _emit_exif_entities(
@@ -100,7 +147,7 @@ async def _emit_exif_entities(
     if exif_dimensions:
         yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
         try:
-            exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
+            exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
             for entity in exif_result.get("entities_created", []):
                 if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
                     entity["entity_name"] = entity["data"].get("entity_name", "")
@@ -167,13 +214,19 @@ async def _process_and_stream(
             yield sse_event
 
     # Phase 3: Upload to LightRAG (VLM description + insert)
+    # Signal the UI that we're about to wait for the VLM semaphore/queue before
+    # the describing_image (active AI run) event fires.
+    yield ServerSentEvent(
+        event="message",
+        data=json.dumps({"event": "queued_for_ai", "data": {"file_source": file_source}, "timestamp": time.time()}),
+    )
     yield ServerSentEvent(
         event="message",
         data=json.dumps({"event": "describing_image", "data": {"file_source": file_source}, "timestamp": time.time()}),
     )
     try:
         upload_result = await upload_image_to_lightrag(
-            LIGHTRAG_URL, file_path, filename=file_source, metadata_text=metadata_text,
+            config.lightrag_url(), file_path, filename=file_source, metadata_text=metadata_text,
         )
         if upload_result.get("status") == "error":
             yield ServerSentEvent(
@@ -211,7 +264,7 @@ async def _process_and_stream(
         data=json.dumps({"event": "lightrag_processing_waiting", "data": {"file_source": file_source}, "timestamp": time.time()}),
     )
     try:
-        final_status = await wait_for_lightrag_processing(LIGHTRAG_URL, file_source)
+        final_status = await wait_for_lightrag_processing(config.lightrag_url(), file_source)
         yield ServerSentEvent(
             event="message",
             data=json.dumps({"event": "lightrag_processing_complete", "data": {"file_source": file_source, "status": final_status}, "timestamp": time.time()}),
@@ -236,7 +289,7 @@ async def _process_and_stream(
     photo_name = f"{file_source} (Photo)"
 
     try:
-        visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
+        visual_result = await link_exif_to_visual_entities(config.lightrag_url(), file_source, photo_name)
         for link in visual_result.get("visual_links_created", []):
             if "source" not in link:
                 link["source"] = link.get("source_entity") or link.get("src") or ""
@@ -274,26 +327,21 @@ async def process_image_sse(
     skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
     insert_bool = _parse_bool(insert, default=True)
 
-    suffix = os.path.splitext(file.filename or "image.jpg")[1]
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
-        tmp.write(await file.read())
-        tmp.close()
+    tmp_path, file_source = await _validate_and_save_upload(file)
 
-        file_source = file.filename or "uploaded_image"
+    # Wrap the generator so the temp file is unlinked on client disconnect /
+    # generator cancellation / completion — not only on the upload-read path.
+    async def _stream_with_cleanup():
+        try:
+            async for ev in _process_and_stream(
+                tmp_path, file_source, skip_exif_bool, skip_faces_bool, insert_bool
+            ):
+                yield ev
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-        event_generator = _process_and_stream(
-            tmp.name,
-            file_source,
-            skip_exif_bool,
-            skip_faces_bool,
-            insert_bool,
-        )
-        return EventSourceResponse(event_generator)
-    except Exception:
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
-        raise
+    return EventSourceResponse(_stream_with_cleanup())
 
 
 @router.post("/process-json")
@@ -357,7 +405,7 @@ async def process_image_json(
 
             if exif_dimensions:
                 try:
-                    exif_result = await create_exif_relations(LIGHTRAG_URL, file_source, photo_name, exif_dimensions)
+                    exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
                     for entity in exif_result.get("entities_created", []):
                         if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
                             entity["entity_name"] = entity["data"].get("entity_name", "")
@@ -377,7 +425,7 @@ async def process_image_json(
         upload_result = None
         try:
             upload_result = await upload_image_to_lightrag(
-                LIGHTRAG_URL, tmp.name, filename=file_source, metadata_text=metadata_text,
+                config.lightrag_url(), tmp.name, filename=file_source, metadata_text=metadata_text,
             )
             if upload_result.get("status") == "error":
                 events.append(ProcessingEvent(event="upload_failed", data=upload_result))
@@ -394,7 +442,7 @@ async def process_image_json(
         # Phase 4: Wait for LightRAG processing
         events.append(ProcessingEvent(event="lightrag_processing_waiting", data={"file_source": file_source}))
         try:
-            final_status = await wait_for_lightrag_processing(LIGHTRAG_URL, file_source)
+            final_status = await wait_for_lightrag_processing(config.lightrag_url(), file_source)
             events.append(ProcessingEvent(event="lightrag_processing_complete", data={"file_source": file_source, "status": final_status}))
         except TimeoutError as exc:
             events.append(ProcessingEvent(event="lightrag_processing_timeout", data={"error": str(exc)}))
@@ -403,7 +451,7 @@ async def process_image_json(
 
         # Phase 5: Link visual entities
         try:
-            visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
+            visual_result = await link_exif_to_visual_entities(config.lightrag_url(), file_source, photo_name)
             for link in visual_result.get("visual_links_created", []):
                 if "source" not in link:
                     link["source"] = link.get("source_entity") or link.get("src") or ""
@@ -425,7 +473,7 @@ async def process_image_json(
 
 @router.get("/health")
 async def images_health():
-    return {"status": "ok", "lightrag_url": LIGHTRAG_URL, "known_faces_path": KNOWN_FACES_PATH}
+    return {"status": "ok", "lightrag_url": config.lightrag_url(), "known_faces_path": KNOWN_FACES_PATH}
 
 
 @router.post("/link-exif-entities")
@@ -446,10 +494,10 @@ async def link_exif_entities(
         import json as _json
         dimensions = _json.loads(exif_dimensions)
         exif_result = await create_exif_relations(
-            LIGHTRAG_URL, file_source, photo_name, dimensions,
+            config.lightrag_url(), file_source, photo_name, dimensions,
         )
 
-    visual_result = await link_exif_to_visual_entities(LIGHTRAG_URL, file_source, photo_name)
+    visual_result = await link_exif_to_visual_entities(config.lightrag_url(), file_source, photo_name)
 
     return {
         "exif_relations": exif_result,
@@ -737,7 +785,7 @@ async def get_face_crop(name: str):
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                f"{LIGHTRAG_URL}/graphs",
+                f"{config.lightrag_url()}/graphs",
                 params={"label": name},
             )
             if resp.status_code != 200:
@@ -959,14 +1007,14 @@ async def label_face(request: dict[str, Any]):
     lightag_entity_name: str | None = None
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{LIGHTRAG_URL}/graph/label/list")
+            resp = await client.get(f"{config.lightrag_url()}/graph/label/list")
             labels = resp.json() if resp.status_code == 200 else []
         for label in labels:
             if label.endswith((" (Date)", " (Camera)", " (Location)", " (Photo)")):
                 continue
             async with httpx.AsyncClient(timeout=10) as client:
                 lr = await client.get(
-                    f"{LIGHTRAG_URL}/graphs",
+                    f"{config.lightrag_url()}/graphs",
                     params={"label": label},
                 )
             if lr.status_code != 200:
@@ -992,7 +1040,7 @@ async def label_face(request: dict[str, Any]):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{LIGHTRAG_URL}/graph/entity/edit",
+                    f"{config.lightrag_url()}/graph/entity/edit",
                     content=payload,
                     headers={"Content-Type": "application/json"},
                 )
@@ -1030,7 +1078,7 @@ async def delete_photo_entities_endpoint(file_source: str):
     Call this after deleting a document from LightRAG to clean up the
     manually created Photo and EXIF entities that persist after deletion.
     """
-    result = await delete_photo_entities(LIGHTRAG_URL, file_source)
+    result = await delete_photo_entities(config.lightrag_url(), file_source)
     return result
 
 
@@ -1073,17 +1121,9 @@ async def create_image_job(
     skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
     insert_bool = _parse_bool(insert, default=True)
 
-    file_source = file.filename or "uploaded_image"
-    suffix = os.path.splitext(file_source)[1] or ".jpg"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
-        tmp.write(await file.read())
-        tmp.close()
-        persisted_path = await persist_uploaded_file(tmp.name, file_source)
-    except Exception:
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
-        raise
+    tmp_path, file_source = await _validate_and_save_upload(file)
+    # persist_uploaded_file moves tmp_path into INPUT_DIR, consuming the temp file.
+    persisted_path = await persist_uploaded_file(tmp_path, file_source)
 
     job = await create_job(
         file_source=file_source,

@@ -23,6 +23,7 @@
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
+  import AttachmentPreview from '$lib/components/ui/AttachmentPreview.svelte';
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
@@ -258,8 +259,8 @@
       const photoNodeId = `${att.name} (Photo)`;
       graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
       if (att.dataUrl) {
-        graphStore.setPhotoImage(photoNodeId, att.dataUrl);
-        imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl);
+        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl);
+        imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl);
       }
     }
 
@@ -941,7 +942,7 @@
     const photoNodeId = `${att.name} (Photo)`;
     try {
       const job = await kgApiClient.createJob(att.file, { insert: true });
-      imageProcessingStore.startProcessing(photoNodeId, att.name, att.dataUrl ?? '', job.job_id);
+      imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
       await consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -1048,8 +1049,8 @@
             const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
             const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
             graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
-            if (eventName === 'photo_node_created' && att.dataUrl) {
-              graphStore.setPhotoImage(nodeId, att.dataUrl);
+            if (eventName === 'photo_node_created' && (att.thumbnailUrl ?? att.dataUrl)) {
+              graphStore.setPhotoImage(nodeId, att.thumbnailUrl ?? att.dataUrl);
             }
           } else if (eventName === 'visual_entity_linked') {
             const sourceId = String(eventData.source ?? eventData.photo_name ?? '');
@@ -1476,6 +1477,7 @@
           <div class="mx-4 mb-1 text-xs text-cyber-red">{attachError}</div>
         {/if}
 
+        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
         <div class="flex items-center gap-2 px-4 py-3">
           <button
             onclick={() => { historyPanelOpen.update((v) => !v); }}
@@ -1919,6 +1921,7 @@
             </div>
           {/if}
 
+          <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
           <div class="flex items-center gap-2">
             <button
               onclick={() => { historyPanelOpen.update((v) => !v); }}
@@ -1971,9 +1974,9 @@
                 {/if}
               </button>
             {/if}
+            </div>
           </div>
         </div>
-      </div>
     {/if}
 
     <!-- Node detail overlay -->

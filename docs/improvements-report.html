@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Knowledge-Graph — Improvements Tracker</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #121828;
+    --surface-2: #1a2236;
+    --border: #2a3550;
+    --text: #e6edf7;
+    --dim: #8a97b3;
+    --cyan: #00d4ff;
+    --purple: #a855f7;
+    --red: #ff4d6b;
+    --amber: #ffb84d;
+    --green: #4ade80;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(18,24,40,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  header h1 .accent { color: var(--cyan); }
+  header .stats { display: flex; gap: 16px; font-size: 12px; color: var(--dim); margin-left: auto; }
+  header .stats b { color: var(--text); }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; outline: none;
+  }
+  .toolbar input:focus, .toolbar select:focus { border-color: var(--cyan); }
+  .toolbar input { min-width: 220px; }
+  .toolbar button {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toolbar button:hover { border-color: var(--cyan); color: var(--cyan); }
+  .toolbar button.primary { background: var(--cyan); color: #001018; border-color: var(--cyan); font-weight: 600; }
+  .toolbar button.primary:hover { background: #00b8d9; }
+  main { padding: 20px 24px 80px; max-width: 1400px; margin: 0 auto; }
+  .group { margin-bottom: 28px; }
+  .group > h2 {
+    font-size: 15px; font-weight: 600; margin: 0 0 10px;
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .group > h2 .count {
+    font-size: 11px; color: var(--dim); font-weight: 400;
+    background: var(--surface-2); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface); position: sticky; top: 60px; }
+  tr:hover td { background: rgba(0,212,255,0.03); }
+  td.id { color: var(--dim); font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; }
+  td.loc { font-family: ui-monospace, monospace; font-size: 11px; color: var(--blue); white-space: nowrap; }
+  td.loc .file { color: var(--text); }
+  .sev { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+  .sev-high { background: rgba(255,77,107,0.15); color: var(--red); border: 1px solid rgba(255,77,107,0.3); }
+  .sev-med { background: rgba(255,184,77,0.15); color: var(--amber); border: 1px solid rgba(255,184,77,0.3); }
+  .sev-low { background: rgba(74,222,128,0.12); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+  .sev-positive { background: rgba(96,165,250,0.12); color: var(--blue); border: 1px solid rgba(96,165,250,0.25); }
+  .status-pill { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; cursor: pointer; }
+  .status-open { background: rgba(138,151,179,0.15); color: var(--dim); }
+  .status-in-progress { background: rgba(255,184,77,0.15); color: var(--amber); }
+  .status-done { background: rgba(74,222,128,0.15); color: var(--green); }
+  .status-wontfix { background: rgba(138,151,179,0.1); color: var(--dim); text-decoration: line-through; }
+  code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 11px; color: var(--cyan); }
+  tr.hidden { display: none; }
+  /* Modal form */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-backdrop.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; }
+  .modal h3 { margin: 0 0 16px; font-size: 16px; }
+  .modal label { display: block; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; margin: 12px 0 4px; }
+  .modal input, .modal select, .modal textarea {
+    width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font-size: 13px; outline: none; font-family: inherit;
+  }
+  .modal textarea { min-height: 72px; resize: vertical; }
+  .modal input:focus, .modal select:focus, .modal textarea:focus { border-color: var(--cyan); }
+  .modal .row { display: flex; gap: 12px; }
+  .modal .row > div { flex: 1; }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .modal .actions button { padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+  .modal .actions button.primary { background: var(--cyan); color: #001018; border-color: var(--cyan); font-weight: 600; }
+  .modal .actions button:hover { border-color: var(--cyan); }
+  .empty { color: var(--dim); font-style: italic; padding: 24px; text-align: center; }
+  .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .card.high .value { color: var(--red); }
+  .card.med .value { color: var(--amber); }
+  .card.low .value { color: var(--green); }
+  .card.done .value { color: var(--green); }
+  .card.open .value { color: var(--dim); }
+  footer { text-align: center; color: var(--dim); font-size: 11px; padding: 24px; border-top: 1px solid var(--border); margin-top: 40px; }
+  .insight { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--cyan); border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; }
+  .insight strong { color: var(--cyan); }
+  .insight ul { margin: 6px 0 0; padding-left: 18px; }
+  .insight li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Improvements <span class="accent">Tracker</span></h1>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Filter findings…" oninput="render()" />
+    <select id="f-sev" onchange="render()">
+      <option value="">All severities</option>
+      <option value="high">High</option>
+      <option value="med">Medium</option>
+      <option value="low">Low</option>
+      <option value="positive">Positive</option>
+    </select>
+    <select id="f-status" onchange="render()">
+      <option value="">All statuses</option>
+      <option value="open">Open</option>
+      <option value="in-progress">In progress</option>
+      <option value="done">Done</option>
+      <option value="wontfix">Won't fix</option>
+    </select>
+    <button onclick="exportJSON()">Export JSON</button>
+    <button class="primary" onclick="openModal()">+ Add finding</button>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<main>
+  <div class="insight">
+    <strong>Key insight from live image-upload test (5 images, 2026-07-20):</strong>
+    The bottleneck is <strong>not</strong> EXIF extraction (fast) — it's the VLM AI analysis step, serialized by <code>VLM_MAX_CONCURRENT=1</code> (<code>api/services/processor.py:105</code>). Images appear stuck at <code>extracting_exif</code> in the UI but are actually queued behind the single VLM slot. The UI stage label reflects the last yielded SSE event, not the real blocking step — a backend/UI stage mismatch.
+    <ul>
+      <li><strong>EXIF is cheap</strong> → run for all images immediately in parallel (already does, ~fast)</li>
+      <li><strong>AI analysis is expensive</strong> (~88s/call) → the real serialization point. Increase <code>VLM_MAX_CONCURRENT</code>, batch, or queue with clear "waiting for AI" stage</li>
+      <li><strong>Images on disk</strong> → render in graph immediately via <code>setPhotoImage(nodeId, dataUrl)</code> (line 261) — already works, but uses heavy base64 dataUrl; should use the lighter <code>thumbnailUrl</code> blob URL</li>
+      <li><strong>No attachment previews</strong> in the chat UI — <code>attachments</code> state has no render loop; <code>AttachmentPreview.svelte</code> exists but is never imported</li>
+    </ul>
+  </div>
+
+  <div class="summary-cards" id="cards"></div>
+  <div id="groups"></div>
+</main>
+
+<footer>
+  Living document — add findings via the form. Data persists to <code>localStorage</code>; export to JSON to share.
+</footer>
+
+<!-- Modal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h3 id="modal-title">Add finding</h3>
+    <input type="hidden" id="m-id" />
+    <label>Group</label>
+    <select id="m-group">
+      <option>Live-test observations</option>
+      <option>Backend / API</option>
+      <option>UI / UX</option>
+      <option>Infra / Config</option>
+      <option>Pipeline performance</option>
+      <option>Security</option>
+    </select>
+    <div class="row">
+      <div>
+        <label>File</label>
+        <input id="m-file" type="text" placeholder="api/services/processor.py" />
+      </div>
+      <div>
+        <label>Line(s)</label>
+        <input id="m-line" type="text" placeholder="105" />
+      </div>
+    </div>
+    <label>Issue / what's missing</label>
+    <textarea id="m-issue" placeholder="Describe the issue…"></textarea>
+    <label>Impact / user-facing</label>
+    <textarea id="m-impact" placeholder="What does the user experience?"></textarea>
+    <div class="row">
+      <div>
+        <label>Severity</label>
+        <select id="m-sev">
+          <option value="high">High</option>
+          <option value="med">Medium</option>
+          <option value="low">Low</option>
+          <option value="positive">Positive (good pattern)</option>
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="m-status">
+          <option value="open">Open</option>
+          <option value="in-progress">In progress</option>
+          <option value="done">Done</option>
+          <option value="wontfix">Won't fix</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveFinding()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- DATA ----------
+const SEED = [
+// --- Live-test observations (2026-07-20) ---
+{group:"Live-test observations",file:"ui/src/routes/+page.svelte",line:"78",issue:"`attachments` state array has NO `{#each attachments}` render loop — queued files are invisible.",impact:"Users attach 5 images, see no preview chips, can't remove a wrong pick, only discover what's attached on send. AttachmentPreview.svelte exists to fix this but is never imported.",sev:"high",status:"done"},
+{group:"Live-test observations",file:"ui/src/routes/+page.svelte",line:"261",issue:"Graph renders immediately via setPhotoImage(nodeId, att.dataUrl) — uses heavy base64 dataUrl (~6-10MB per photo).",impact:"5 images = ~40MB of base64 strings held in graphStore + imageProcessingStore + DOM. Should use the lighter `thumbnailUrl` (blob: URL) already created at file-utils.ts:51.",sev:"med",status:"done"},
+{group:"Live-test observations",file:"api/services/processor.py",line:"105-106",issue:"VLM semaphore defaults to 1 (`VLM_MAX_CONCURRENT=1`). The expensive AI step is serialized.",impact:"4 of 5 images appeared stuck at `extracting_exif` in the UI for ~90s each while waiting for the single VLM slot. EXIF is fast; the AI description (~88s/call) is the real bottleneck. Raising the limit or batching would parallelize the expensive step.",sev:"high",status:"done"},
+{group:"Live-test observations",file:"ui/src/lib/stores/image-processing.svelte.ts",line:"135-148",issue:"`mapEventToStage` maps SSE events to stages, but images waiting for the VLM slot stay at the last yielded stage (`extracting_exif`), not a 'queued for AI' stage.",impact:"UI shows 'Extracting EXIF…' for minutes when the image is actually waiting for the VLM. Misleads users about what's slow. Need a `queued_for_ai` / `waiting_for_vlm` stage.",sev:"med",status:"done"},
+{group:"Live-test observations",file:"ui/src/routes/+page.svelte",line:"262,944",issue:"`imageProcessingStore.startProcessing(...)` is called for chat-initiated uploads but +page.svelte renders NO processing indicator near the chat input.",impact:"User uploads 5 photos via the chat bar → multi-stage pipeline runs for minutes with zero on-screen feedback near the input. Stepper only renders inside NodeOverlay/PhotoOverlay (canvas).",sev:"high",status:"open"},
+
+// --- Backend / API ---
+{group:"Backend / API",file:"api/services/processor.py",line:"1562-1604",issue:"`wait_for_lighrag_processing` polls LightRAG with TWO HTTP calls per iteration and a fixed 3s interval, no backoff.",impact:"Doubles LightRAG load and produces log spam (`[LightRAG Wait] Document 'X' not yet in documents list` every 3s). Bounded at 300s, but no exponential/jitter backoff.",sev:"med",status:"open"},
+{group:"Backend / API",file:"api/services/job_manager.py",line:"259-285",issue:"`_STUCK_JOB_TIMEOUT_SECONDS=30min` only checked at startup (`resume_pending_jobs`); no runtime watchdog.",impact:"A job that hangs mid-flight (VLM hang, LightRAG silent stall) stays 'processing' forever, ties up a semaphore slot, and the SSE connection stays open indefinitely.",sev:"med",status:"open"},
+{group:"Backend / API",file:"api/services/processor.py",line:"84",issue:"`except Exception: body = \"\"` inside `_classify_create_error` swallows decode errors silently with no log.",impact:"Hides the very error being classified. Makes debugging LightRAG 409 responses hard.",sev:"med",status:"open"},
+{group:"Backend / API",file:"api/services/processor.py",line:"182-183,333-334",issue:"Verify-after-conflict `except Exception: exists = False` swallows verify-fetch errors silently.",impact:"Treats entity/relation as non-existent and retries; could loop 5× then fail. No log of the verify failure.",sev:"med",status:"open"},
+{group:"Backend / API",file:"api/services/processor.py",line:"1150-1152",issue:"`insert_metadata_into_lightrag` swallows original exception, returns generic `metadata_insertion_failed`.",impact:"Caller cannot distinguish 409/500/network. Re-raises nothing — caller only sees status=='error'.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/routes/images.py",line:"58",issue:"`LIGHTRAG_URL` defined here AND in processor.py:28 — two sources of truth for the same env var.",impact:"If one is overridden and the other isn't, routes and services disagree on the LightRAG endpoint. Should be a single config module.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/services/processor.py",line:"28-31",issue:"`LIGHTRAG_URL`, `VLM_URL`, `VLM_MODEL`, `VLM_API_KEY` read at module import time.",impact:"Cannot be reconfigured without process restart; the settings page cannot influence them.",sev:"med",status:"done"},
+{group:"Backend / API",file:"api/services/processor.py",line:"143 et al.",issue:"`urlopen(req, timeout=30)` and `timeout=15` repeated as raw literals across ~13 call sites.",impact:"No centralized timeout constant; inconsistent (some 30, some 15). Changing the global LightRAG timeout requires editing every call.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/services/job_manager.py",line:"172",issue:"`asyncio.Queue(maxsize=1000)` — if a slow SSE client can't drain events, `store_event` blocks on `q.put`.",impact:"A slow/disconnected SSE client stalls the entire job indefinitely. Should drop or bound-queue with metrics.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/services/job_manager.py",line:"20",issue:"`MAX_CONCURRENT_JOBS=3` hardcoded, not env-configurable.",impact:"Caps throughput silently. With VLM_MAX_CONCURRENT=1, only 1 image processes at a time regardless of this limit.",sev:"med",status:"open"},
+{group:"Backend / API",file:"api/routes/images.py",line:"1067-1070",issue:"`/jobs` accepts UploadFile with no file type/extension validation, no max-size check, unsanitized filename.",impact:"`await file.read()` loads entire upload into memory — a 10GB upload OOMs the container. Filename with slashes creates subdirs.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/routes/images.py",line:"267-292",issue:"`/process` SSE: no try/except around `await upload_image_to_lightrag` / `wait_for_lighrag_processing`.",impact:"Client disconnect mid-wait leaves LightRAG call in-flight; temp file never cleaned up.",sev:"high",status:"done"},
+{group:"Backend / API",file:"api/services/processor.py",line:"641",issue:"Face recognition subprocess: `asyncio.wait_for(proc.communicate(), timeout=180)` with kill on timeout.",impact:"Good pattern — properly bounded, explicit timeout, kills proc. (Positive example to follow.)",sev:"positive",status:"open"},
+
+// --- UI / UX ---
+{group:"UI / UX",file:"ui/src/lib/components/ui/AttachmentPreview.svelte",line:"1",issue:"Component defined, zero importers in entire codebase.",impact:"Queued attachments never show as previews — the fix exists but is unreachable.",sev:"high",status:"done"},
+{group:"UI / UX",file:"ui/src/lib/components/chat/ChatView.svelte",line:"1",issue:"Dead component (342 lines) — never imported by any route. Entire subtree orphaned.",impact:"ChatSidebar/ChatMessages/ChatInput/MCPToolCallCard (all only imported by ChatView) are dead. Fixes there never reach users.",sev:"high",status:"done"},
+{group:"UI / UX",file:"ui/src/lib/components/chat/ChatInput.svelte",line:"1",issue:"Dead component (283 lines) — only imported by dead ChatView. Already has working attachment-preview render (line 220) and model dropdown (line 206).",impact:"A working, reusable chat input with attachment previews exists but the page reimplements inline instead. ~624 lines of dead code.",sev:"high",status:"done"},
+{group:"UI / UX",file:"ui/src/lib/components/ingestion/ScanButton.svelte",line:"1",issue:"Dead component — never imported (IngestionPanel uses StatusBadge, not ScanButton).",impact:"Dead code.",sev:"low",status:"open"},
+{group:"UI / UX",file:"ui/src/lib/components/ui/Panel.svelte",line:"1",issue:"Dead component — never imported, no `<Panel` usage anywhere.",impact:"Dead code.",sev:"low",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"69-70",issue:"`availableModels` and `selectedModel` state populated but never rendered in any dropdown.",impact:"Discovered models fetched silently; users can't see/switch the active model. Dead ChatInput.svelte has the dropdown at line 206.",sev:"med",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"164-167",issue:"`promptEditing`, `promptDraft`, `promptSaving`, `promptSaveStatus` state — set but never rendered.",impact:"Inline system-prompt editing affordance never appears. SettingsDrawer's SystemPromptEditor handles this; page's copy is dead.",sev:"low",status:"open"},
+{group:"UI / UX",file:"ui/src/lib/stores/graph.svelte.ts",line:"—",issue:"`isLoading` state set but never rendered to user.",impact:"Graph loads with no spinner/progress indicator.",sev:"med",status:"open"},
+{group:"UI / UX",file:"ui/src/lib/stores/connection.svelte.ts",line:"—",issue:"`kgApiConnected` and `pipelineBusy` set but never rendered by any template.",impact:"User loses backend connectivity and gets no notification; discovers only when an action fails.",sev:"med",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"1509,1932",issue:"`AttachmentMenu disabled={...}` — no `title`/`aria-label` explaining why disabled.",impact:"User hits attachment limit or attaches mid-stream and button just stops working — no explanation.",sev:"med",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"1536,1958",issue:"Send/mic button disabled with no `title` explaining why.",impact:"When disabled (transcribing/recording-unsupported), user sees only a dimmed icon. No tooltip.",sev:"med",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"1522,1945",issue:"Textarea `disabled={isActiveConversationStreaming}` — no title, placeholder doesn't change.",impact:"User tries to type mid-stream, textarea silently unresponsive. Dead ChatInput.svelte:254 does swap placeholder — live inline version doesn't.",sev:"low",status:"open"},
+{group:"UI / UX",file:"ui/src/routes/+page.svelte",line:"1475-1476",issue:"`attachError` IS rendered (good) but only as a tiny red text line.",impact:"Minor — works but easy to miss. Should be a toast/banner.",sev:"low",status:"open"},
+
+// --- Infra / Config ---
+{group:"Infra / Config",file:"api/main.py",line:"30-33",issue:"Wildcard CORS: `allow_origins=[\"*\"]` + `allow_credentials=True`.",impact:"Insecure AND invalid per spec (browsers reject credentials with wildcard). Should enumerate allowed origins.",sev:"high",status:"done"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"173",issue:"`DATABASE_URL` hardcoded `postgresql://lightrag:lightrag@...` bypasses env vars.",impact:"Duplicate of POSTGRES_PASSWORD; drift risk. Weak default credential in version control.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"193-213",issue:"`nexus` service has NO healthcheck (other 4 services do).",impact:"Inconsistent, no readiness gate for the main UI service.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"145",issue:"`postgres_data` mounted at `/var/lib/postgresql` (correct path is `/var/lib/postgresql/data`).",impact:"Data may not persist across image upgrades.",sev:"high",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"34,121,179,203",issue:"All service ports published to host (0.0.0.0) — Postgres 5432, MCP 9653, lightrag 9621 exposed externally.",impact:"Should bind 127.0.0.1 or only expose nexus:3000 + api:8000.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"71",issue:"`MIN_RERANK_SCORE: \"${MIN_RERANK_SCORE:--1}\"` — malformed default (`:--1` parses as `:-` + `-1`).",impact:"Silently wrong default value.",sev:"high",status:"open"},
+{group:"Infra / Config",file:".env.example",line:"85",issue:"`POSTGRES_PASSWORD=lightrag` — weak default DB password in example.",impact:"Propagates weak credentials.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"(repo root)",line:"—",issue:"NO `.github/workflows/`, no CI — zero CI.",impact:"Vitest tests (2) and Playwright e2e exist but never run in CI. Backend has no tests at all.",sev:"high",status:"open"},
+{group:"Infra / Config",file:".gitignore",line:"—",issue:"Missing entries: `.ruff_cache`, `.playwright-mcp` still tracked, `graph-screenshot.png`.",impact:"Build artifacts and screenshots leak into git.",sev:"low",status:"open"},
+
+// --- Pipeline performance ---
+{group:"Pipeline performance",file:"api/services/processor.py",line:"105",issue:"VLM calls serialized by `asyncio.Semaphore(1)`. Each call ~88s.",impact:"5 images take ~7+ minutes (serial). Raising VLM_MAX_CONCURRENT or batching the VLM prompt would parallelize the expensive step. EXIF/face/caption stages are already cheap.",sev:"high",status:"done"},
+{group:"Pipeline performance",file:"api/services/processor.py",line:"857-915",issue:"`process_image` runs stages sequentially per image: EXIF → faces → captions → VLM → upload → wait → link.",impact:"EXIF (fast) blocks behind nothing, but VLM (slow) blocks all later stages. Could pipeline: start graph upload as soon as EXIF+thumbnail ready, run VLM in parallel with LightRAG ingestion.",sev:"med",status:"open"},
+{group:"Pipeline performance",file:"ui/src/routes/+page.svelte",line:"267-269",issue:"`processSingleImage(att)` called in a loop — each awaits its own SSE stream.",impact:"All 5 jobs are created concurrently in the backend (good), but the UI's `imageProcessingStore` shows them all at `extracting_exif` because the backend yields that first, then blocks on VLM. UI can't tell which are waiting for AI.",sev:"med",status:"open"},
+{group:"Pipeline performance",file:"ui/src/lib/utils/file-utils.ts",line:"50-51",issue:"`fileToImageAttachment` creates BOTH a base64 dataUrl AND a blob thumbnailUrl for every image.",impact:"Doubles memory per attachment. dataUrl is used for graph rendering + VLM; thumbnailUrl is created but only used by dead AttachmentPreview. Should prefer thumbnailUrl for UI, dataUrl only for upload.",sev:"low",status:"open"},
+
+// --- Code quality / large files ---
+{group:"Infra / Config",file:"ui/src/routes/+page.svelte",line:"—",issue:"2086 lines — duplicated chat-input blocks (main 84 lines + panel 88 lines) ~170 lines of near-duplicate.",impact:"A reusable `<ChatInputBar>` (the dead ChatInput.svelte already exists) would collapse to ~30 lines. Send/keydown/auto-resize handlers duplicated.",sev:"high",status:"open"},
+{group:"Infra / Config",file:"api/services/processor.py",line:"—",issue:"1690-line single file.",impact:"Should be split: vlm.py, lightrag_client.py, exif_relations.py, face_pipeline.py.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"api/routes/images.py",line:"—",issue:"1198-line single route file.",impact:"Should be split: jobs.py, sse.py, thumbnails.py, face_labels.py.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"ui/src/lib/components/graph/GraphCanvas.svelte",line:"—",issue:"1670 lines, 6 `as any` casts on Three.js material objects.",impact:"Type-unsafe; should add proper material interface types.",sev:"low",status:"open"},
+];
+
+// ---------- STATE ----------
+const STORAGE_KEY = "kg-improvements-v2";
+let findings;
+try {
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  // Merge: if stored has same length as SEED, use stored (preserves status edits); else use SEED
+  findings = (stored && stored.length >= SEED.length) ? stored : SEED.slice();
+} catch { findings = SEED.slice(); }
+
+function persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(findings)); }
+
+const SEV_ORDER = {high:0, med:1, low:2, positive:3};
+const GROUP_ORDER = ["Live-test observations","Pipeline performance","Backend / API","UI / UX","Infra / Config","Security"];
+
+// ---------- RENDER ----------
+function render() {
+  const q = document.getElementById("search").value.toLowerCase().trim();
+  const fsev = document.getElementById("f-sev").value;
+  const fstatus = document.getElementById("f-status").value;
+
+  const filtered = findings.filter(f => {
+    if (fsev && f.sev !== fsev) return false;
+    if (fstatus && f.status !== fstatus) return false;
+    if (q) {
+      const hay = `${f.group} ${f.file} ${f.line} ${f.issue} ${f.impact}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Stats
+  const all = findings;
+  const counts = {
+    total: all.length,
+    high: all.filter(f=>f.sev==="high").length,
+    med: all.filter(f=>f.sev==="med").length,
+    low: all.filter(f=>f.sev==="low").length,
+    open: all.filter(f=>f.status==="open").length,
+    done: all.filter(f=>f.status==="done").length,
+  };
+  document.getElementById("stats").innerHTML =
+    `<b>${counts.total}</b> findings · <b>${counts.high}</b> high · <b>${counts.open}</b> open · <b>${counts.done}</b> done`;
+
+  // Cards
+  document.getElementById("cards").innerHTML = `
+    <div class="card high"><div class="label">High severity</div><div class="value">${counts.high}</div></div>
+    <div class="card med"><div class="label">Medium</div><div class="value">${counts.med}</div></div>
+    <div class="card low"><div class="label">Low / Positive</div><div class="value">${counts.low + all.filter(f=>f.sev==="positive").length}</div></div>
+    <div class="card open"><div class="label">Open</div><div class="value">${counts.open}</div></div>
+    <div class="card done"><div class="label">Done</div><div class="value">${counts.done}</div></div>
+  `;
+
+  // Group
+  const groups = {};
+  filtered.forEach(f => { (groups[f.group] = groups[f.group] || []).push(f); });
+  const groupNames = Object.keys(groups).sort((a,b) => {
+    const ia = GROUP_ORDER.indexOf(a), ib = GROUP_ORDER.indexOf(b);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+
+  const html = groupNames.map(gname => {
+    const items = groups[gname].sort((a,b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev]);
+    const rows = items.map((f, i) => {
+      const idx = findings.indexOf(f);
+      return `<tr>
+        <td class="id">${String(i+1).padStart(2,"0")}</td>
+        <td><span class="sev sev-${f.sev}">${f.sev}</span></td>
+        <td><span class="status-pill status-${f.status}" onclick="cycleStatus(${idx})" title="Click to change status">${f.status}</span></td>
+        <td class="loc"><span class="file">${f.file}</span>${f.line && f.line!=="—" ? ":"+f.line : ""}</td>
+        <td>${escapeHTML(f.issue)}</td>
+        <td>${escapeHTML(f.impact)}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="group">
+      <h2>${gname} <span class="count">${items.length}</span></h2>
+      <table>
+        <thead><tr><th>#</th><th>Sev</th><th>Status</th><th>Location</th><th>Issue</th><th>Impact</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty">No findings match filters.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  }).join("");
+  document.getElementById("groups").innerHTML = html || '<div class="empty">No findings match the filters.</div>';
+}
+
+function escapeHTML(s) {
+  return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/`/g, m => '<code>');
+}
+
+// ---------- STATUS CYCLE ----------
+function cycleStatus(idx) {
+  const order = ["open","in-progress","done","wontfix"];
+  const f = findings[idx];
+  f.status = order[(order.indexOf(f.status) + 1) % order.length];
+  persist(); render();
+}
+
+// ---------- MODAL ----------
+let editIdx = -1;
+function openModal(idx) {
+  editIdx = (typeof idx === "number") ? idx : -1;
+  document.getElementById("modal-title").textContent = editIdx >= 0 ? "Edit finding" : "Add finding";
+  const f = editIdx >= 0 ? findings[editIdx] : {group:"Backend / API",file:"",line:"",issue:"",impact:"",sev:"med",status:"open"};
+  document.getElementById("m-id").value = editIdx;
+  document.getElementById("m-group").value = f.group;
+  document.getElementById("m-file").value = f.file;
+  document.getElementById("m-line").value = f.line;
+  document.getElementById("m-issue").value = f.issue;
+  document.getElementById("m-impact").value = f.impact;
+  document.getElementById("m-sev").value = f.sev;
+  document.getElementById("m-status").value = f.status;
+  document.getElementById("modal").classList.add("show");
+}
+function closeModal() { document.getElementById("modal").classList.remove("show"); }
+function saveFinding() {
+  const f = {
+    group: document.getElementById("m-group").value,
+    file: document.getElementById("m-file").value.trim(),
+    line: document.getElementById("m-line").value.trim(),
+    issue: document.getElementById("m-issue").value.trim(),
+    impact: document.getElementById("m-impact").value.trim(),
+    sev: document.getElementById("m-sev").value,
+    status: document.getElementById("m-status").value,
+  };
+  if (!f.issue) { alert("Issue is required."); return; }
+  if (editIdx >= 0) findings[editIdx] = f; else findings.push(f);
+  persist(); render(); closeModal();
+}
+
+// ---------- EXPORT ----------
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(findings, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `improvements-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Close modal on backdrop click
+document.getElementById("modal").addEventListener("click", e => {
+  if (e.target.id === "modal") closeModal();
+});
+
+render();
+</script>
+</body>
+</html>

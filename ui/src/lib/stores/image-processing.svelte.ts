@@ -3,6 +3,7 @@ export type ImageStage =
   | 'detecting_faces'
   | 'building_captions'
   | 'creating_entities'
+  | 'queued_for_ai'
   | 'describing_image'
   | 'uploading_to_graph'
   | 'graph_processing'
@@ -29,6 +30,7 @@ const PIPELINE_ORDER: ImageStage[] = [
   'detecting_faces',
   'building_captions',
   'creating_entities',
+  'queued_for_ai',
   'describing_image',
   'uploading_to_graph',
   'graph_processing',
@@ -41,6 +43,7 @@ const STAGE_LABELS: Record<ImageStage, string> = {
   detecting_faces: 'Running facial recognition...',
   building_captions: 'Building captions...',
   creating_entities: 'Creating graph entities...',
+  queued_for_ai: 'Queued for AI analysis...',
   describing_image: 'Running AI analysis...',
   uploading_to_graph: 'Uploading to knowledge graph...',
   graph_processing: 'Processing in knowledge graph...',
@@ -140,6 +143,7 @@ class ImageProcessingStore {
     if (eventName === 'detecting_faces' || eventName === 'faces_complete') return 'detecting_faces';
     if (eventName === 'captions_built') return 'building_captions';
     if (eventName === 'injecting_exif_relations' || eventName === 'creating_exif_entities' || eventName === 'photo_node_created' || eventName === 'exif_node_created' || eventName === 'exif_relation_created' || eventName === 'exif_cross_relation_created' || eventName === 'exif_entities_complete') return 'creating_entities';
+    if (eventName === 'queued_for_ai') return 'queued_for_ai';
     if (eventName === 'describing_image') return 'describing_image';
     if (eventName === 'upload_complete' || eventName === 'lightrag_upload_complete') return 'uploading_to_graph';
     if (eventName === 'lightrag_processing_waiting' || eventName === 'lightrag_processing_timeout') return 'graph_processing';

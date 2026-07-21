@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
@@ -20,15 +20,12 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from api.services import config
 from processors.exif_extractor import extract_exif_metadata
 from processors.face_recognizer import analyze_attributes, identify_person, detect_faces
 
 logger = logging.getLogger("api.processor")
 
-LIGHTRAG_URL = os.environ.get("LIGHTRAG_URL", "http://localhost:9621")
-VLM_URL = os.environ.get("VLM_LLM_BINDING_HOST", "http://host.docker.internal:8080")
-VLM_MODEL = os.environ.get("VLM_LLM_MODEL", "Gemma-4-12B-OBLITERATED-Q4_K_M")
-VLM_API_KEY = os.environ.get("VLM_LLM_BINDING_API_KEY", "llama-server")
 FACE_DETECTOR = os.environ.get("FACE_DETECTOR_BACKEND", "mtcnn")
 FACE_ATTRIBUTES = os.environ.get("FACE_ATTRIBUTES", "age,gender,emotion,race").split(",")
 
@@ -102,13 +99,15 @@ def _classify_create_error(exc: BaseException) -> str:
 # slot, blow past the httpx timeout, exhaust retries, and fall back to
 # EXIF-only content.  This semaphore guarantees at most one in-flight VLM call,
 # matching the server's capacity.
-_VLM_CONCURRENCY = int(os.environ.get("VLM_MAX_CONCURRENT", "1"))
-_vlm_semaphore = asyncio.Semaphore(_VLM_CONCURRENCY)
+_vlm_semaphore: asyncio.Semaphore | None = None
 
-# A single VLM call takes ~88s on this hardware.  The timeout must be long
-# enough to survive queue-wait time behind any preceding call (up to one full
-# generation) plus the generation itself.
-_VLM_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", "300"))
+
+def _get_vlm_semaphore() -> asyncio.Semaphore:
+    """Lazily create the VLM concurrency semaphore in the running event loop."""
+    global _vlm_semaphore
+    if _vlm_semaphore is None:
+        _vlm_semaphore = asyncio.Semaphore(config.vlm_max_concurrent())
+    return _vlm_semaphore
 
 
 async def _create_entity_verified(
@@ -140,7 +139,7 @@ async def _create_entity_verified(
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urlopen(req, timeout=30) as resp:
+                with urlopen(req, timeout=config.http_timeouts().long) as resp:
                     return json.loads(resp.read().decode("utf-8"))
 
             result = await asyncio.to_thread(_post)
@@ -175,7 +174,7 @@ async def _create_entity_verified(
             try:
                 def _check(name: str = entity_name) -> bool:
                     req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
-                    with urlopen(req, timeout=30) as resp:
+                    with urlopen(req, timeout=config.http_timeouts().long) as resp:
                         labels = json.loads(resp.read().decode("utf-8"))
                         return name in labels
                 entity_exists = await asyncio.to_thread(_check)
@@ -249,7 +248,7 @@ async def _create_relation_verified(
                 f"{base_url}/graphs?label={url_quote(se, safe='')}",
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(req, timeout=15) as resp:
+            with urlopen(req, timeout=config.http_timeouts().short) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             for edge in data.get("edges", []):
                 src = edge.get("source", "")
@@ -281,7 +280,7 @@ async def _create_relation_verified(
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urlopen(req, timeout=30) as resp:
+                with urlopen(req, timeout=config.http_timeouts().long) as resp:
                     return json.loads(resp.read().decode("utf-8"))
 
             result = await asyncio.to_thread(_post)
@@ -318,7 +317,7 @@ async def _create_relation_verified(
                         f"{base_url}/graphs?label={url_quote(se, safe='')}",
                         headers={"Content-Type": "application/json"},
                     )
-                    with urlopen(req, timeout=15) as resp:
+                    with urlopen(req, timeout=config.http_timeouts().short) as resp:
                         data = json.loads(resp.read().decode("utf-8"))
                     for edge in data.get("edges", []):
                         src = edge.get("source", "")
@@ -925,6 +924,7 @@ async def describe_image_with_vlm(
     vlm_url: str | None = None,
     vlm_model: str | None = None,
     context: str | None = None,
+    on_queued: Callable[[], Any] | None = None,
 ) -> str:
     """Send an image to the VLM and return a text description.
 
@@ -933,8 +933,8 @@ async def describe_image_with_vlm(
     """
     import httpx
 
-    url = (vlm_url or VLM_URL).rstrip("/")
-    model = vlm_model or VLM_MODEL
+    url = (vlm_url or config.vlm_url()).rstrip("/")
+    model = vlm_model or config.vlm_model()
 
     with open(image_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("ascii")
@@ -972,14 +972,17 @@ async def describe_image_with_vlm(
     }
 
     headers = {"Content-Type": "application/json"}
-    if VLM_API_KEY:
-        headers["Authorization"] = f"Bearer {VLM_API_KEY}"
+    _api_key = config.vlm_api_key()
+    if _api_key:
+        headers["Authorization"] = f"Bearer {_api_key}"
 
     last_exc: Exception | None = None
     for attempt in range(1, _VLM_MAX_RETRIES + 1):
         try:
-            async with _vlm_semaphore:
-                async with httpx.AsyncClient(timeout=_VLM_TIMEOUT) as client:
+            if attempt == 1 and on_queued is not None:
+                on_queued()
+            async with _get_vlm_semaphore():
+                async with httpx.AsyncClient(timeout=config.http_timeouts().vlm) as client:
                     resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
 
             if resp.status_code != 200:
@@ -1020,8 +1023,8 @@ async def describe_face_crop(
     """
     import httpx
 
-    url = (vlm_url or VLM_URL).rstrip("/")
-    model = vlm_model or VLM_MODEL
+    url = (vlm_url or config.vlm_url()).rstrip("/")
+    model = vlm_model or config.vlm_model()
 
     with open(crop_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("ascii")
@@ -1048,11 +1051,12 @@ async def describe_face_crop(
     }
 
     headers = {"Content-Type": "application/json"}
-    if VLM_API_KEY:
-        headers["Authorization"] = f"Bearer {VLM_API_KEY}"
+    _api_key = config.vlm_api_key()
+    if _api_key:
+        headers["Authorization"] = f"Bearer {_api_key}"
 
-    async with _vlm_semaphore:
-        async with httpx.AsyncClient(timeout=_VLM_TIMEOUT) as client:
+    async with _get_vlm_semaphore():
+        async with httpx.AsyncClient(timeout=config.http_timeouts().vlm) as client:
             resp = await client.post(f"{url}/v1/chat/completions", json=payload, headers=headers)
 
     if resp.status_code != 200:
@@ -1070,6 +1074,7 @@ async def upload_image_to_lightrag(
     image_path: str,
     filename: str | None = None,
     metadata_text: str | None = None,
+    on_queued: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Process an image through VLM and insert the description into LightRAG.
 
@@ -1088,7 +1093,9 @@ async def upload_image_to_lightrag(
         vlm_context = None
         if metadata_text:
             vlm_context = metadata_text.split("\n")[0]
-        description = await describe_image_with_vlm(image_path, context=vlm_context)
+        description = await describe_image_with_vlm(
+            image_path, context=vlm_context, on_queued=on_queued
+        )
     except Exception as exc:
         logger.exception("VLM description failed for %s", image_path)
         if metadata_text:
@@ -1133,7 +1140,7 @@ async def insert_metadata_into_lightrag(
     def _post() -> dict[str, Any]:
         req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=config.http_timeouts().long) as resp:
                 body = resp.read().decode("utf-8")
                 logger.info("LightRAG metadata insertion (%d): %s", resp.status, body[:500])
                 return json.loads(body)
@@ -1145,11 +1152,7 @@ async def insert_metadata_into_lightrag(
             logger.error("LightRAG metadata insertion failed (%d): %s", he.code, body[:500])
             raise
 
-    try:
-        return await asyncio.to_thread(_post)
-    except Exception:
-        logger.exception("LightRAG metadata insertion failed for %s", file_source)
-        return {"status": "error", "reason": "metadata_insertion_failed"}
+    return await asyncio.to_thread(_post)
 
 
 async def inject_exif_relations(
@@ -1293,7 +1296,7 @@ async def create_exif_relations(
     try:
         def _get_labels() -> list[str]:
             req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=config.http_timeouts().long) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         existing_labels = set(await asyncio.to_thread(_get_labels))
     except Exception as exc:
@@ -1382,7 +1385,7 @@ async def link_exif_to_visual_entities(
     try:
         def _get_labels() -> list[str]:
             req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=config.http_timeouts().long) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
         all_labels = await asyncio.to_thread(_get_labels)
@@ -1404,7 +1407,7 @@ async def link_exif_to_visual_entities(
                     f"{base_url}/graphs?label={quote(l, safe='')}",
                     headers={"Content-Type": "application/json"},
                 )
-                with urlopen(req, timeout=15) as resp:
+                with urlopen(req, timeout=config.http_timeouts().short) as resp:
                     return json.loads(resp.read().decode("utf-8"))
 
             graph_data = await asyncio.to_thread(_get_neighbors)
@@ -1548,7 +1551,7 @@ async def wait_for_lightrag_processing(
             f"{base_url}/documents/pipeline_status",
             headers={"Content-Type": "application/json"},
         )
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=config.http_timeouts().short) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def _fetch_documents() -> list[dict]:
@@ -1556,7 +1559,7 @@ async def wait_for_lightrag_processing(
             f"{base_url}/documents",
             headers={"Content-Type": "application/json"},
         )
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=config.http_timeouts().short) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     while True:
@@ -1628,7 +1631,7 @@ async def delete_photo_entities(
                 f"{base_url}/graphs?label={url_quote(photo_name)}",
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=config.http_timeouts().long) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
         graph = await asyncio.to_thread(_get_graph)
@@ -1668,7 +1671,7 @@ async def delete_photo_entities(
                     headers={"Content-Type": "application/json"},
                     method="DELETE",
                 )
-                with urlopen(req, timeout=30) as resp:
+                with urlopen(req, timeout=config.http_timeouts().long) as resp:
                     return json.loads(resp.read().decode("utf-8"))
 
             result = await asyncio.to_thread(_delete)

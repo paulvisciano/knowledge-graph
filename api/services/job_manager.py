@@ -140,8 +140,16 @@ async def store_event(job_id: str, event_type: str, event_data: dict) -> None:
             job_id, event_type, json.dumps(event_data), time.time(),
         )
     q = _event_queues.get(job_id)
-    if q:
-        await q.put({"event_type": event_type, "event_data": event_data})
+    if q is not None:
+        try:
+            q.put_nowait({"event_type": event_type, "event_data": event_data})
+        except asyncio.QueueFull:
+            dropped = q.get_nowait()
+            logger.warning(
+                "SSE event queue full for job %s (slow client?) — dropping oldest event %r to make room",
+                job_id, dropped.get("event_type"),
+            )
+            q.put_nowait({"event_type": event_type, "event_data": event_data})
 
 
 async def get_events(job_id: str, after_event_id: int = 0) -> list[dict]:
