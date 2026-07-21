@@ -2028,42 +2028,39 @@
           {/each}
         </div>
       {/if}
-    </div>
 
-    <!-- Input row (centered at the bottom of the graph) -->
-    {#if activeConversationId}
-      <div class="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
-        <div class="pointer-events-auto w-full max-w-md">
-          {#if thinkingContent}
-            <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
-              <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
-                <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyber-purple"></span>
-                Thinking...
-              </div>
-              <div class="mt-1 max-h-16 overflow-y-auto text-[11px] text-cyber-text-dim/70 whitespace-pre-wrap">{thinkingContent.slice(-200)}</div>
+      <!-- Input row (always visible when a conversation exists) -->
+      {#if activeConversationId}
+        {#if thinkingContent}
+          <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
+            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
+              <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyber-purple"></span>
+              Thinking...
             </div>
-          {/if}
+            <div class="mt-1 max-h-16 overflow-y-auto text-[11px] text-cyber-text-dim/70 whitespace-pre-wrap">{thinkingContent.slice(-200)}</div>
+          </div>
+        {/if}
 
-          <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
+        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
 
-          {#if messages.length > 0}
-            <div class="mb-1 flex justify-center">
-              <button
-                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
-                class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
-                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-                data-testid="chat-toggle"
-              >
-                <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
-                  <Icon name="chevron-down" size={16} />
-                </span>
-                {chatExpanded ? 'Collapse' : 'Expand'}
-              </button>
-            </div>
-          {/if}
+        {#if messages.length > 0}
+          <div class="mb-1 flex justify-center">
+            <button
+              onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+              class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
+              title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+              aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+              data-testid="chat-toggle"
+            >
+              <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
+                <Icon name="chevron-down" size={16} />
+              </span>
+              {chatExpanded ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
+        {/if}
 
-          <div class="flex items-center gap-1.5 rounded-full border border-cyber-cyan/25 bg-cyber-surface-2/80 px-2 py-1 transition-colors focus-within:border-cyber-cyan/60 focus-within:bg-cyber-surface-2 focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+        <div class="flex w-full items-center gap-1.5 rounded-full border border-cyber-cyan/25 bg-cyber-surface-2/80 px-2 py-1 transition-colors focus-within:border-cyber-cyan/60 focus-within:bg-cyber-surface-2 focus-within:ring-1 focus-within:ring-cyber-cyan/40">
           <textarea
             bind:this={panelTextareaEl}
             bind:value={panelChatInput}
@@ -2107,9 +2104,8 @@
             </button>
           {/if}
           </div>
-        </div>
-      </div>
-    {/if}
+      {/if}
+    </div>
 
     <!-- Node detail overlay -->
     {#if $selectedNodeId}
@@ -2140,13 +2136,18 @@
 <style>
   .chat-inline-overlay {
     position: absolute;
-    right: 0;
+    left: 50%;
     bottom: 0;
+    transform: translateX(-50%);
     z-index: 30;
     display: flex;
     width: 100%;
-    max-width: 30rem;
+    max-width: 28rem;
     flex-direction: column;
+    align-items: center;
+    padding-bottom: 1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
     pointer-events: none;
   }
 
@@ -2258,9 +2259,10 @@
 
   @media (max-width: 768px) {
     .chat-inline-overlay {
-      right: 8px;
       left: 8px;
+      right: 8px;
       bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+      transform: none;
       max-width: 100%;
     }
 
