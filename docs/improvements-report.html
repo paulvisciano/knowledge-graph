@@ -85,6 +85,39 @@
   .status-wontfix { background: rgba(138,151,179,0.1); color: var(--dim); text-decoration: line-through; }
   code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 11px; color: var(--cyan); }
   tr.hidden { display: none; }
+
+  /* Recommendations panel */
+  .recs { margin: 0 0 24px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+  .recs > summary {
+    cursor: pointer; padding: 14px 18px; list-style: none;
+    display: flex; align-items: center; gap: 10px; user-select: none;
+    font-size: 14px; font-weight: 600;
+  }
+  .recs > summary::-webkit-details-marker { display: none; }
+  .recs > summary .chevron { color: var(--dim); transition: transform 0.15s; font-size: 11px; }
+  .recs[open] > summary .chevron { transform: rotate(90deg); }
+  .recs > summary .badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: rgba(0,212,255,0.15); color: var(--cyan); border: 1px solid rgba(0,212,255,0.3); }
+  .recs-body { padding: 0 18px 18px; }
+  .rec-context { font-size: 12.5px; color: var(--dim); margin: 0 0 14px; line-height: 1.55; }
+  .rec-context b { color: var(--text); }
+  .mem-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 0 0 18px; }
+  .mem-table th, .mem-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .mem-table th { color: var(--dim); font-weight: 500; text-align: left; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+  .mem-table td.num { font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }
+  .mem-table tfoot td { font-weight: 600; color: var(--text); border-top: 2px solid var(--border); }
+  .tier { margin: 0 0 16px; }
+  .tier > h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+  .tier > h3 .pill { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 8px; }
+  .tier.t1 .pill { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+  .tier.t2 .pill { background: rgba(96,165,250,0.15); color: var(--blue); border: 1px solid rgba(96,165,250,0.25); }
+  .tier.t3 .pill { background: rgba(255,184,77,0.15); color: var(--amber); border: 1px solid rgba(255,184,77,0.25); }
+  .tier.t4 .pill { background: rgba(255,77,107,0.15); color: var(--red); border: 1px solid rgba(255,77,107,0.25); }
+  .rec-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 14px; margin: 0 0 8px; font-size: 12.5px; line-height: 1.5; }
+  .rec-card .num { color: var(--cyan); font-family: ui-monospace, monospace; font-weight: 600; margin-right: 6px; }
+  .rec-card b { color: var(--text); }
+  .rec-card .refs { display: block; margin-top: 4px; font-size: 10.5px; color: var(--dim); }
+  .rec-card .refs code { font-size: 10px; }
+  .rec-no { opacity: 0.6; border-left: 3px solid var(--red); padding-left: 11px; }
   /* Modal form */
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; z-index: 100; }
   .modal-backdrop.show { display: flex; }
@@ -158,6 +191,93 @@
   </div>
 
   <div class="summary-cards" id="cards"></div>
+
+  <details class="recs" open>
+    <summary>
+      <span class="chevron">▶</span>
+      Performance recommendations (16GB RAM constraint)
+      <span class="badge">10 items · 4 tiers</span>
+    </summary>
+    <div class="recs-body">
+      <p class="rec-context">
+        <b>Constraint:</b> 16 GB total system RAM. Observed baseline: host VLM (Gemma-4-12B Q4_K_M via <code>llama-server</code> at <code>:8080</code>) holds <b>~7–8 GB</b>; all 5 containers together ~1 GB; macOS + browser ~2 GB. Total ~11.5–12 GB resident, ~3–4 GB headroom. The VLM is <b>both</b> the bottleneck (~88s/call, serialized by <code>asyncio.Semaphore(1)</code>) <b>and</b> the memory hog — most generic "raise concurrency" advice would OOM. Recommendations below are ordered by ROI under this ceiling.
+      </p>
+
+      <table class="mem-table">
+        <thead><tr><th>Consumer</th><th>RSS</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Host VLM (Gemma-4-12B Q4_K_M)</td><td class="num">~7–8 GB</td><td>12B Q4 weights ≈ 7 GB resident — the elephant</td></tr>
+          <tr><td><code>api</code> container</td><td class="num">396 MB / 1 GB</td><td>base64 image buffers + httpx clients</td></tr>
+          <tr><td><code>lightrag</code></td><td class="num">319 MB / 2 GB</td><td>embeddings + graph</td></tr>
+          <tr><td><code>postgres</code> (pgvector)</td><td class="num">91 MB / 1 GB</td><td></td></tr>
+          <tr><td><code>nexus</code> + <code>mcp</code></td><td class="num">~80 MB</td><td></td></tr>
+          <tr><td>macOS + browser (Nexus UI, 5×~8MB base64)</td><td class="num">~2 GB</td><td>base64 in <code>graphStore</code> + DOM is the avoidable part</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total resident</td><td class="num">~11.5–12 GB</td><td>~3–4 GB headroom, ~3 GB actually free after OS cache</td></tr></tfoot>
+      </table>
+
+      <div class="tier t1">
+        <h3>Tier 1 — Pure wins <span class="pill">faster + less RAM, no tradeoff</span></h3>
+        <div class="rec-card">
+          <span class="num">1</span><b>Drop base64 dataUrls in the graph; use the <code>thumbnailUrl</code> blob: URL already created at <code>file-utils.ts:51</code>.</b> 5 photos = ~40 MB of duplicated base64 strings across <code>graphStore</code> + <code>imageProcessingStore</code> + DOM. Blob URLs are ~0 KB (file-backed). Frees RAM <i>and</i> speeds first paint.
+          <span class="refs">Refs: finding #2 · <code>ui/src/routes/+page.svelte:261</code> <code>setPhotoImage(nodeId, att.dataUrl)</code></span>
+        </div>
+        <div class="rec-card">
+          <span class="num">2</span><b>Backoff + single-call poll in <code>wait_for_lighrag_processing</code>.</b> Halves LightRAG load, stops log spam. Exponential 3→15s with jitter. Bounded at 300s.
+          <span class="refs">Refs: finding #6 · <code>api/services/processor.py:1562–1604</code></span>
+        </div>
+        <div class="rec-card">
+          <span class="num">3</span><b>Runtime stuck-job watchdog.</b> A hung VLM call currently ties a semaphore slot forever. A 10-min watchdog that marks stuck jobs <code>failed</code> and releases the slot recovers throughput without spending more memory.
+          <span class="refs">Refs: finding #7 · <code>api/services/job_manager.py:259–285</code> (<code>_STUCK_JOB_TIMEOUT_SECONDS=30min</code>, startup-only)</span>
+        </div>
+      </div>
+
+      <div class="tier t2">
+        <h3>Tier 2 — Same RAM, better perceived perf <span class="pill">UX wins, memory-neutral</span></h3>
+        <div class="rec-card">
+          <span class="num">4</span><b>Split EXIF from AI; emit a <code>queued_for_ai</code> stage.</b> EXIF is fast and cheap — run it for all images upfront in parallel (<code>asyncio.gather</code>, no semaphore needed; just Pillow + tag reads), then queue for the VLM. The UI immediately shows all 5 photos in the graph with real EXIF labels; the AI step fills descriptions as the single VLM slot frees. <b>Biggest perceived-perf win in the report, ~0 extra RAM.</b>
+          <span class="refs">Refs: findings #3, #4 · <code>api/services/processor.py:871+</code> (sequential EXIF→faces→VLM) · <code>image-processing.svelte.ts:135–148</code> <code>mapEventToStage</code></span>
+        </div>
+        <div class="rec-card">
+          <span class="num">5</span><b>Stream the VLM response (SSE <code>text</code> deltas) instead of buffering 1024 tokens.</b> <code>llama-server</code> supports <code>stream: true</code>. Show partial description in the UI as it generates — first token in ~1–2s instead of 88s. Same wall-clock total, dramatically better UX. Costs nothing in RAM (connection is already held open).
+          <span class="refs">Refs: <code>api/services/processor.py:923–1010</code> <code>describe_image_with_vlm</code> payload — add <code>"stream": true</code></span>
+        </div>
+      </div>
+
+      <div class="tier t3">
+        <h3>Tier 3 — Real throughput gains <span class="pill">requires a model/server choice</span></h3>
+        <div class="rec-card">
+          <span class="num">6</span><b>Smaller model → more slots.</b> Drop Gemma-4-12B to a 4B/3B Q4 (~2.5 GB resident). ~5 GB headroom → <code>llama-server --parallel 2</code> (two slots in one process, ~3 GB total). Two VLM calls in flight: ~88s each but 2× throughput → 5 images in ~3.5 min instead of ~7 min. Quality drops on descriptions; EXIF+labels carry most of the graph value.
+          <span class="refs">Refs: finding #41 · <code>api/services/processor.py:105–106</code> <code>_vlm_semaphore = asyncio.Semaphore(1)</code></span>
+        </div>
+        <div class="rec-card">
+          <span class="num">7</span><b>Continuous batching via a dedicated server (vLLM / llama.cpp <code>--cont-batching</code>).</b> One 12B model, 2–3 concurrent requests share ~8 GB + small per-request KV cache. Same RAM as today, true parallelism instead of serialized semaphore. The durable long-term answer — non-trivial infra swap.
+          <span class="refs">Refs: finding #41</span>
+        </div>
+        <div class="rec-card">
+          <span class="num">8</span><b>Batch multiple images into one VLM call.</b> Gemma-4 supports multi-image input. Send 3–5 images in one chat completion ("describe each image N"). One forward pass, one ~88s round-trip covers all 5 instead of 5×88s. RAM-neutral. <b>Caveat:</b> per-image quality drops and you lose per-image retry isolation. Best as the initial pass; fall back to single-image calls for failures. <i>Lowest-risk experiment — one prompt change, measurable in an hour.</i>
+          <span class="refs">Refs: <code>api/services/processor.py:943–976</code> payload construction</span>
+        </div>
+      </div>
+
+      <div class="tier t4">
+        <h3>Tier 4 — Don't bother under 16 GB <span class="pill">avoid — OOM risk or zero gain</span></h3>
+        <div class="rec-card rec-no">
+          <span class="num">9</span><b>Raising <code>VLM_MAX_CONCURRENT</code> alone.</b> With one <code>llama-server</code> slot, a second caller just blocks inside the HTTP slot. Zero throughput gain, slight memory overhead from the queued connection. <i>Don't.</i>
+          <span class="refs">Refs: findings #3, #41</span>
+        </div>
+        <div class="rec-card rec-no">
+          <span class="num">10</span><b>Second VLM container.</b> Two 12B instances = ~14 GB just for models — OOM. <i>Don't.</i>
+          <span class="refs">Refs: <code>docker-compose.yml</code> host VLM at <code>:8080</code></span>
+        </div>
+      </div>
+
+      <p class="rec-context" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <b>Recommended sequence:</b> Tier 1 + #4 + #5 first (blob URLs, backoff poll, watchdog, parallel EXIF + immediate graph render, streaming VLM) — none touch the 16 GB ceiling and together they change the felt experience from "5 photos stuck on 'Extracting EXIF…' for 7 min" to "all 5 photos appear in 3s with labels, descriptions stream in over ~7 min, UI never lies about what's happening." Then, to cut wall-clock, pick one of Tier 3 — lean <b>#8 (batched-prompt)</b> as the lowest-risk experiment; if quality holds, done; if not, escalate to <b>#7 (vLLM cont-batching)</b> as the durable fix.
+      </p>
+    </div>
+  </details>
+
   <div id="groups"></div>
 </main>
 

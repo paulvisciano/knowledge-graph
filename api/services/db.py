@@ -46,8 +46,11 @@ async def init_db() -> None:
                 skip_faces BOOLEAN NOT NULL DEFAULT FALSE,
                 insert BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
-                updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
+                updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                note TEXT NOT NULL DEFAULT ''
             );
+
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
 
             CREATE TABLE IF NOT EXISTS job_events (
                 id BIGSERIAL PRIMARY KEY,

@@ -36,7 +36,7 @@ from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
     describe_image_with_vlm, describe_face_crop, create_exif_relations,
     link_exif_to_visual_entities, wait_for_lightrag_processing,
-    delete_photo_entities,
+    delete_photo_entities, insert_metadata_into_lightrag,
 )
 from api.services import db as db_module
 from api.services import config
@@ -169,6 +169,7 @@ async def _process_and_stream(
     skip_exif: bool,
     skip_faces: bool,
     insert: bool,
+    note: str = "",
 ):
     content_list: list[dict] | None = None
     metadata_text: str | None = None
@@ -225,6 +226,8 @@ async def _process_and_stream(
         data=json.dumps({"event": "describing_image", "data": {"file_source": file_source}, "timestamp": time.time()}),
     )
     try:
+        if note:
+            metadata_text = (f"User note: {note}\n\n" + metadata_text) if metadata_text else f"User note: {note}"
         upload_result = await upload_image_to_lightrag(
             config.lightrag_url(), file_path, filename=file_source, metadata_text=metadata_text,
         )
@@ -1116,6 +1119,7 @@ async def create_image_job(
     skip_exif: Optional[str] = Form(None),
     skip_faces: Optional[str] = Form(None),
     insert: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
 ):
     skip_exif_bool = _parse_bool(skip_exif)
     skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
@@ -1131,9 +1135,17 @@ async def create_image_job(
         skip_exif=skip_exif_bool,
         skip_faces=skip_faces_bool,
         insert=insert_bool,
+        note=note or "",
     )
     await start_processing(job)
     return {"job_id": job.id, "status": job.status, "file_source": job.file_source}
+
+
+@router.post("/notes")
+async def create_note(text: str = Form(...)):
+    file_source = f"note_{int(time.time())}"
+    await insert_metadata_into_lightrag(config.lightrag_url(), text, file_source)
+    return {"status": "ok", "file_source": file_source}
 
 
 @router.get("/jobs")

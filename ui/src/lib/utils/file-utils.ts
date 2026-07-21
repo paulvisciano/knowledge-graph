@@ -105,15 +105,14 @@ function guessMimeType(filename: string): string {
 export function buildMessageContent(
   text: string,
   attachments: Attachment[]
-): string | Array<{ type: string; text?: string; image_url?: { url: string } }> {
-  const images = attachments.filter((a) => isImageType(a.mimeType));
+): string | Array<{ type: string; text?: string }> {
   const texts = attachments.filter((a) => isTextType(a.mimeType));
 
-  if (images.length === 0 && texts.length === 0) {
+  if (texts.length === 0) {
     return text;
   }
 
-  const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+  const parts: Array<{ type: string; text?: string }> = [];
 
   let fullText = text;
   for (const textAtt of texts) {
@@ -123,10 +122,6 @@ export function buildMessageContent(
 
   if (fullText.trim()) {
     parts.push({ type: 'text', text: fullText });
-  }
-
-  for (const img of images) {
-    parts.push({ type: 'image_url', image_url: { url: img.dataUrl } });
   }
 
   return parts;

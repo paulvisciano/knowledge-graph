@@ -83,6 +83,12 @@
   let isDraggingOver = $state(false);
   let dragCounter = 0;
 
+  // Click-vs-pan discrimination: record pointer-down position; treat the
+  // pointerup as a click only if it stayed within a small radius. Prevents
+  // graph panning from collapsing the inline chat overlay.
+  let pointerDownXY: { x: number; y: number } | null = null;
+  const CLICK_MAX_DRIFT = 6;
+
   // Stream cancellation support — allows navigation during streaming
   let streamAbortController: AbortController | null = null;
 
@@ -254,19 +260,14 @@
       attachments = [...attachments, ...newAttachments];
     }
 
-    // Add all image nodes to the graph immediately and start processing in parallel
+    // Add all image nodes to the graph immediately (no processing yet — that
+    // happens on send, so the user's text note can be threaded through as context).
     for (const att of imageAttachments) {
       const photoNodeId = `${att.name} (Photo)`;
       graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
       if (att.dataUrl) {
         graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl);
-        imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl);
       }
-    }
-
-    // Process all images concurrently — each gets its own job and SSE stream
-    for (const att of imageAttachments) {
-      processSingleImage(att);
     }
   }
 
@@ -476,11 +477,10 @@
         ...messages
           .filter((m) => !m.isStreaming)
           .map((m) => {
-            if (m.role === 'user' && (m.imageUrls && m.imageUrls.length > 0 || m.audioData)) {
+            if (m.role === 'user' && m.audioData) {
               const parts: ContentPart[] = [];
               if (m.content.trim()) parts.push({ type: 'text', text: m.content });
-              if (m.audioData) parts.push({ type: 'input_audio', input_audio: { data: m.audioData, format: m.audioFormat ?? 'wav' } });
-              if (m.imageUrls) for (const url of m.imageUrls) parts.push({ type: 'image_url', image_url: { url } });
+              parts.push({ type: 'input_audio', input_audio: { data: m.audioData, format: m.audioFormat ?? 'wav' } });
               return { role: m.role, content: parts } as ApiMessage;
             }
             return { role: m.role, content: m.content } as ApiMessage;
@@ -934,14 +934,28 @@
       scrollToBottom();
     });
 
+    // Kick off image processing for all image attachments, with the user's note as context.
+    const messageNote = trimmed || transcript || '';
+    const imageAttachments = sentAttachments.filter((a) => isImageType(a.mimeType));
+    if (imageAttachments.length > 0) {
+      for (const att of imageAttachments) {
+        processSingleImage(att, messageNote);
+      }
+    } else if (messageNote) {
+      // Text-only message with no images — insert the note as a standalone LightRAG document.
+      kgApiClient.createNote(messageNote).catch((err) => {
+        console.warn('Failed to insert text note into graph:', err);
+      });
+    }
+
     await streamAssistantResponse(sentAttachments);
   }
 
   /** Process a single image through the KG pipeline with real-time SSE progress. */
-  async function processSingleImage(att: Attachment) {
+  async function processSingleImage(att: Attachment, note: string = '') {
     const photoNodeId = `${att.name} (Photo)`;
     try {
-      const job = await kgApiClient.createJob(att.file, { insert: true });
+      const job = await kgApiClient.createJob(att.file, { insert: true, note });
       imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
       await consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
@@ -1107,10 +1121,10 @@
   }
 
   /** Send image attachments through the KG pipeline with real-time SSE progress. */
-  async function processImageAttachments(atts: Attachment[]) {
+  async function processImageAttachments(atts: Attachment[], note: string = '') {
     const imageFiles = atts.filter((a) => isImageType(a.mimeType) && a.file);
     for (const att of imageFiles) {
-      processSingleImage(att);
+      processSingleImage(att, note);
     }
   }
 
@@ -1433,12 +1447,25 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
   class="relative h-full w-full overflow-hidden"
   ondragover={handleDragOver}
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
+  onpointerdown={(e) => { pointerDownXY = { x: e.clientX, y: e.clientY }; }}
+  onclick={(e) => {
+    if (!chatExpanded) return;
+    if (pointerDownXY) {
+      const dx = e.clientX - pointerDownXY.x;
+      const dy = e.clientY - pointerDownXY.y;
+      if (dx * dx + dy * dy > CLICK_MAX_DRIFT * CLICK_MAX_DRIFT) return;
+    }
+    if (!(e.target as Node).closest('[data-testid="chat-inline-overlay"]')) {
+      closeChat();
+    }
+  }}
 >
   {#if isDraggingOver}
     <div class="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-cyber-surface/80 backdrop-blur-sm">
@@ -1458,141 +1485,42 @@
       {/if}
     </div>
 
-    <!-- Floating chat input -->
-    <div class="chat-input-bar">
-      <div class="relative rounded-2xl border border-cyber-border/60 bg-cyber-surface/90 shadow-[0_0_30px_rgba(0,212,255,0.08)] backdrop-blur-xl transition-all duration-300 hover:border-cyber-cyan/30 hover:shadow-[0_0_40px_rgba(0,212,255,0.15)]">
+    <!-- Inline chat overlay (game-style, bottom-right) -->
+    <div class="chat-inline-overlay" data-testid="chat-inline-overlay">
+      <!-- Hidden file inputs (used by both input rows) -->
+      <input
+        bind:this={imageFileInput}
+        type="file"
+        accept="image/*"
+        multiple
+        class="hidden"
+        data-testid="image-file-input"
+        onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
+      />
+      <input
+        bind:this={docFileInput}
+        type="file"
+        accept=".txt,.md,.csv,.json,.html,.htm,.xml,.yaml,.yml,.log"
+        multiple
+        class="hidden"
+        data-testid="doc-file-input"
+        onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
+      />
 
-
-        {#if thinkingContent}
-          <div class="mx-4 mb-1 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
-            <div class="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
-              <Icon name="zap" size={10} color="var(--color-cyber-purple)" />
-              Thinking
-            </div>
-            <div class="max-h-20 overflow-y-auto text-[11px] leading-relaxed text-cyber-text-dim/70 whitespace-pre-wrap">{thinkingContent.slice(-300)}</div>
-          </div>
-        {/if}
-
-        {#if attachError}
-          <div class="mx-4 mb-1 text-xs text-cyber-red">{attachError}</div>
-        {/if}
-
-        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-        <div class="flex items-center gap-2 px-4 py-3">
-          <button
-            onclick={() => { historyPanelOpen.update((v) => !v); }}
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
-            title="Chat history"
-            aria-label="Open chat history"
-            data-testid="chat-history-button"
-          >
-            <Icon name="clock" size={18} />
-          </button>
-          <input
-            bind:this={imageFileInput}
-            type="file"
-            accept="image/*"
-            multiple
-            class="hidden"
-            data-testid="image-file-input"
-            onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
-          />
-          <input
-            bind:this={docFileInput}
-            type="file"
-            accept=".txt,.md,.csv,.json,.html,.htm,.xml,.yaml,.yml,.log"
-            multiple
-            class="hidden"
-            data-testid="doc-file-input"
-            onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
-          />
-          <AttachmentMenu
-            size="sm"
-            disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-            onPickImage={openImagePicker}
-            onPickDocument={openDocumentPicker}
-          />
-          <textarea
-            bind:this={textareaEl}
-            bind:value={chatInput}
-            oninput={autoResize}
-            onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, undefined, undefined, false); } }}
-            placeholder='Ask me anything...'
-            rows="1"
-            data-testid="chat-input"
-            class="max-h-[144px] min-h-[24px] flex-1 resize-none bg-transparent text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40"
-            disabled={isActiveConversationStreaming}
-          ></textarea>
-          {#if isActiveConversationStreaming}
+      <!-- Recent messages (faded top/bottom, no header) -->
+      {#if chatExpanded && activeConversationId && messages.length > 0}
+        <div bind:this={messagesContainer} class="chat-inline-messages" data-testid="messages-container">
+          <div class="chat-inline-toolbar">
             <button
-              onclick={cancelStreaming}
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
-              title="Stop generating"
-              data-testid="stop-button"
+              onclick={() => { historyPanelOpen.update((v) => !v); }}
+              class="flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+              title="Chat history"
+              aria-label="Open chat history"
+              data-testid="chat-history-button"
             >
-              <Icon name="square" size={14} />
-            </button>
-          {:else}
-            <button
-              onclick={() => chatInput.trim() || attachments.length > 0 ? handleSend(undefined, undefined, undefined, false) : handleMicClick()}
-              disabled={isTranscribing || (!chatInput.trim() && attachments.length === 0 && !recordingSupported)}
-              data-testid="send-button"
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (chatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 hover:glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/50 text-cyber-text-dim/30 rounded-lg'}"
-            >
-              {#if isRecording}
-                <Icon name="square" size={14} />
-              {:else if isTranscribing}
-                <div class="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-              {:else if chatInput.trim()}
-                <Icon name="send" size={16} />
-              {:else if recordingSupported}
-                <Icon name="mic" size={18} />
-              {:else}
-                <Icon name="send" size={16} />
-              {/if}
-            </button>
-          {/if}
-        </div>
-      </div>
-    </div>
-
-    <!-- Chat overlay panel -->
-    {#if chatExpanded && activeConversationId}
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="chat-overlay-backdrop" onclick={closeChat} role="presentation"></div>
-      <div class="chat-overlay-panel">
-        <div class="flex items-center justify-between border-b border-cyber-border/50 px-4 py-3">
-          <div class="flex items-center gap-2 min-w-0">
-            <div class="h-2 w-2 shrink-0 rounded-full {isStreaming ? 'bg-cyber-cyan animate-pulse-glow' : 'bg-cyber-green'}"></div>
-            <span class="truncate text-sm font-medium text-cyber-text">{conversations.find(c => c.id === activeConversationId)?.title || 'New conversation'}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              onclick={() => exportConversationToJsonl(activeConversationId)}
-              class="flex h-6 w-6 items-center justify-center rounded text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
-              title="Export conversation"
-            >
-              <Icon name="download" size={14} />
-            </button>
-            <button
-              onclick={() => deleteConversation(activeConversationId)}
-              class="flex h-6 w-6 items-center justify-center rounded text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red"
-              title="Delete conversation"
-            >
-              <Icon name="trash-2" size={14} />
-            </button>
-            <button
-              onclick={closeChat}
-              class="flex h-7 w-7 items-center justify-center rounded-md text-cyber-text-dim transition-colors hover:bg-cyber-surface-2 hover:text-cyber-text"
-            >
-              <Icon name="x" size={16} />
+              <Icon name="clock" size={15} />
             </button>
           </div>
-        </div>
-
-        <!-- Messages -->
-        <div bind:this={messagesContainer} class="flex-1 overflow-y-auto px-4 py-3" data-testid="messages-container">
           {#if configStore.systemPrompt.trim()}
             <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
               <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
@@ -1908,9 +1836,11 @@
             </div>
           {/each}
         </div>
+      {/if}
 
-        <!-- Input inside overlay -->
-        <div class="border-t border-cyber-border/50 px-4 py-3">
+      <!-- Input row (always visible when a conversation exists) -->
+      {#if activeConversationId}
+        <div class="chat-inline-input">
           {#if thinkingContent}
             <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
               <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
@@ -1923,14 +1853,6 @@
 
           <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
           <div class="flex items-center gap-2">
-            <button
-              onclick={() => { historyPanelOpen.update((v) => !v); }}
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
-              title="Chat history"
-              aria-label="Open chat history"
-            >
-              <Icon name="clock" size={18} />
-            </button>
             <AttachmentMenu
               disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
               onPickImage={openImagePicker}
@@ -1941,25 +1863,27 @@
               bind:value={panelChatInput}
               oninput={autoResizePanel}
               onkeydown={handlePanelKeydown}
-              placeholder="Continue..."
+              placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
               rows="1"
-              data-testid="panel-chat-input"
+              data-testid="chat-input"
               class="max-h-[96px] min-h-[24px] flex-1 resize-none rounded-lg bg-cyber-surface-2/50 px-3 py-2 text-sm text-cyber-text outline-none placeholder:text-cyber-text-dim/40 border border-cyber-border/30 focus:border-cyber-cyan/40 transition-colors"
               disabled={isActiveConversationStreaming}
             ></textarea>
             {#if isActiveConversationStreaming}
               <button
                 onclick={cancelStreaming}
-                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
                 title="Stop generating"
+                data-testid="stop-button"
               >
                 <Icon name="square" size={14} />
               </button>
             {:else}
               <button
-              onclick={() => panelChatInput.trim() || attachments.length > 0 ? handlePanelSend() : handleMicClick()}
+                onclick={() => panelChatInput.trim() || attachments.length > 0 ? handlePanelSend() : handleMicClick()}
                 disabled={isTranscribing || (!panelChatInput.trim() && attachments.length === 0 && !recordingSupported)}
-                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (panelChatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/30 text-cyber-text-dim/30 rounded-lg'}"
+                data-testid="send-button"
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : (panelChatInput.trim() || attachments.length > 0) ? 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30 glow-cyan rounded-lg' : recordingSupported ? 'bg-cyber-surface-2/80 text-cyber-text-dim/80 hover:bg-cyber-cyan/15 hover:text-cyber-cyan ring-1 ring-cyber-border/60' : 'bg-cyber-surface-2/30 text-cyber-text-dim/30 rounded-lg'}"
               >
                 {#if isRecording}
                   <Icon name="square" size={14} />
@@ -1974,10 +1898,21 @@
                 {/if}
               </button>
             {/if}
-            </div>
+            {#if messages.length > 0}
+              <button
+                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyber-surface-2/50 text-cyber-text-dim/60 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                data-testid="chat-toggle"
+              >
+                <Icon name={chatExpanded ? 'chevron-down' : 'chevron-right'} size={18} />
+              </button>
+            {/if}
           </div>
         </div>
-    {/if}
+      {/if}
+    </div>
 
     <!-- Node detail overlay -->
     {#if $selectedNodeId}
@@ -2006,65 +1941,80 @@
 </div>
 
 <style>
-  .chat-input-bar {
+  .chat-inline-overlay {
     position: absolute;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+    right: 16px;
+    bottom: 16px;
     z-index: 30;
-    width: 100%;
-    max-width: 42rem;
-    padding: 0 16px;
-  }
-
-  @media (max-width: 768px) {
-    .chat-input-bar {
-      position: fixed;
-      bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
-      left: 0;
-      right: 0;
-      transform: none;
-      max-width: 100%;
-      padding: 0 8px;
-    }
-  }
-
-  .chat-overlay-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 30;
-  }
-
-  .chat-overlay-panel {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 0;
-    z-index: 40;
     display: flex;
     width: 100%;
-    max-width: 32rem;
+    max-width: 30rem;
     flex-direction: column;
-    border-left: 1px solid rgba(0, 212, 255, 0.25);
-    background: rgba(10, 14, 23, 0.95);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .chat-inline-overlay > * {
+    pointer-events: auto;
+  }
+
+  .chat-inline-messages {
+    max-height: 60dvh;
+    overflow-y: auto;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgb(8, 11, 19);
+    border-radius: 14px;
+    border: 1px solid rgba(0, 212, 255, 0.12);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
+  }
+
+  .chat-inline-messages::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .chat-inline-messages::-webkit-scrollbar-thumb {
+    background: rgba(0, 212, 255, 0.25);
+    border-radius: 3px;
+  }
+
+  .chat-inline-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 2px 4px 6px;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+    margin-bottom: 6px;
+  }
+
+  .chat-inline-input {
+    border-radius: 16px;
+    border: 1px solid rgba(0, 212, 255, 0.18);
+    background: rgb(8, 11, 19);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 10px 12px;
+    box-shadow: 0 0 30px rgba(0, 212, 255, 0.08);
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .chat-inline-input:hover {
+    border-color: rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 40px rgba(0, 212, 255, 0.15);
   }
 
   @media (max-width: 768px) {
-    .chat-overlay-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 60;
+    .chat-inline-overlay {
+      right: 8px;
+      left: 8px;
+      bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+      max-width: 100%;
     }
 
-    .chat-overlay-panel {
-      position: fixed;
-      inset: 0;
-      max-width: 100%;
-      z-index: 61;
-      border-left: none;
+    .chat-inline-messages {
+      max-height: 56dvh;
     }
   }
 

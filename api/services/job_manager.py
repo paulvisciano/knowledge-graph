@@ -37,6 +37,7 @@ class Job:
     insert: bool = True
     created_at: float = 0.0
     updated_at: float = 0.0
+    note: str = ""
 
 
 async def create_job(
@@ -45,6 +46,7 @@ async def create_job(
     skip_exif: bool = False,
     skip_faces: bool = False,
     insert: bool = True,
+    note: str = "",
 ) -> Job:
     """Create a processing job for a file, deduplicating on file_source.
 
@@ -80,16 +82,17 @@ async def create_job(
         insert=insert,
         created_at=now,
         updated_at=now,
+        note=note,
     )
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO jobs (id, file_source, file_path, status, stage, error, skip_exif, skip_faces, insert, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
+            """INSERT INTO jobs (id, file_source, file_path, status, stage, error, skip_exif, skip_faces, insert, created_at, updated_at, note)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
             job.id, job.file_source, job.file_path, job.status, job.stage,
             job.error, job.skip_exif, job.skip_faces, job.insert,
-            job.created_at, job.updated_at,
+            job.created_at, job.updated_at, job.note,
         )
     return job
 
@@ -218,6 +221,7 @@ async def _run_job(job: Job) -> None:
                 job.skip_exif,
                 job.skip_faces,
                 job.insert,
+                note=job.note,
             )
             async for sse_event in event_generator:
                 if not sse_event.data:

@@ -55,7 +55,7 @@ export class KgApiClient {
 
   async createJob(
     file: File,
-    options: { skipExif?: boolean; skipFaces?: boolean; insert?: boolean } = {}
+    options: { skipExif?: boolean; skipFaces?: boolean; insert?: boolean; note?: string } = {}
   ): Promise<JobInfo> {
     const formData = new FormData();
     formData.append('file', file);
@@ -68,9 +68,20 @@ export class KgApiClient {
     if (options.insert !== undefined) {
       formData.append('insert', String(options.insert));
     }
+    if (options.note !== undefined) {
+      formData.append('note', options.note);
+    }
     return this.request(API.kg.createJob, {
       method: 'POST',
       body: formData,
+    });
+  }
+
+  async createNote(text: string): Promise<{ status: string; file_source: string }> {
+    return this.request(API.kg.createNote, {
+      method: 'POST',
+      body: new URLSearchParams({ text }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
   }
 
