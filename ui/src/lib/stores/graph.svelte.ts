@@ -69,7 +69,6 @@ class GraphStore {
         meta: { nodeCount: graph.nodes.length, edgeCount: graph.edges.length },
       });
       this.fetchPhotoImages(graph.nodes);
-      this.fetchPersonImages(graph.nodes);
     } catch (err) {
       eventBus.pushEvent({
         id: crypto.randomUUID(),
