@@ -900,7 +900,7 @@
           const toolLabels: Record<string, string> = {
             query_knowledge_graph: 'Searching knowledge graph...',
             query_knowledge_graph_stream: 'Searching knowledge graph...',
-            insert_text: 'Inserting text...',
+            save_to_knowledge_graph: 'Saving to knowledge graph...',
             list_documents: 'Listing documents...',
           };
           if (streamingConversationId === activeConversationId) {
@@ -1829,8 +1829,8 @@
                         {@const relCount = parsed ? parsed.relationships.length : 0}
                         {@const isRunning = !toolCall.result && !toolCall.isError}
                         {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
-                        {@const isInsertText = toolCall.toolName === 'insert_text'}
-                        {@const insertedText = isInsertText ? String(toolCall.arguments?.text ?? '') : ''}
+                        {@const isSave = toolCall.toolName === 'save_to_knowledge_graph'}
+                        {@const savedText = isSave ? String(toolCall.arguments?.text ?? '') : ''}
                         <details class="group" open={true} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
                           <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
                             {#if toolCall.isError}
@@ -1842,9 +1842,9 @@
                             {/if}
                             <span class="font-mono {toolCall.isError ? 'text-cyber-red' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{toolCall.toolName}</span>
                             {#if isRunning}
-                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isInsertText ? 'inserting text...' : 'searching knowledge graph...'}</span>
-                            {:else if isInsertText && insertedText}
-                              <span class="truncate text-[10px] text-cyber-text-dim/70">{insertedText}</span>
+                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isSave ? 'saving to knowledge graph...' : 'searching knowledge graph...'}</span>
+                            {:else if isSave && savedText}
+                              <span class="truncate text-[10px] text-cyber-text-dim/70">{savedText}</span>
                             {:else if parsed}
                               <span class="flex items-center gap-1 text-[10px] text-cyber-text-dim/70">
                                 <span class="inline-flex items-center gap-0.5 rounded-full bg-cyber-cyan/10 px-1.5 py-0.5 text-cyber-cyan">{entityCount} entities</span>
@@ -1864,13 +1864,13 @@
                             {#if isRunning}
                               <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange" data-testid="tool-call-running">
                                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                <span>{isInsertText ? 'Inserting text into knowledge graph...' : 'Querying knowledge graph...'}</span>
+                                <span>{isSave ? 'Saving to knowledge graph...' : 'Querying knowledge graph...'}</span>
                               </div>
-                            {:else if isInsertText}
-                              {#if insertedText}
+                            {:else if isSave}
+                              {#if savedText}
                                 <div data-testid="tool-call-inserted-text">
-                                  <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Inserted text</div>
-                                  <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed text-cyber-text">{insertedText}</pre>
+                                  <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Saved text</div>
+                                  <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed text-cyber-text">{savedText}</pre>
                                 </div>
                               {/if}
                               {#if toolCall.result}
@@ -2014,10 +2014,11 @@
               <div class="chat-conversation-divider" data-testid="conversation-divider" data-conversation-id={convId}>
                 <span class="chat-conversation-divider-line"></span>
                 <span class="chat-conversation-divider-label">
-                  {formatConversationDate(conv.createdAt)}
+                  <span class="chat-conversation-divider-date">{formatConversationDate(conv.createdAt)}</span>
+                  <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
                   <button
                     type="button"
-                    class="chat-conversation-divider-export"
+                    class="chat-conversation-divider-btn"
                     title="Export conversation"
                     aria-label="Export conversation"
                     onclick={(e) => {
@@ -2025,7 +2026,21 @@
                       exportConversationToJsonl(convId);
                     }}
                   >
-                    <Icon name="download" size={12} color="var(--color-cyber-cyan)" />
+                    <Icon name="download" size={13} color="var(--color-cyber-cyan)" />
+                  </button>
+                  <button
+                    type="button"
+                    class="chat-conversation-divider-btn chat-conversation-divider-delete"
+                    title="Delete conversation"
+                    aria-label="Delete conversation"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      if (confirm('Delete this conversation? This cannot be undone.')) {
+                        deleteConversation(convId);
+                      }
+                    }}
+                  >
+                    <Icon name="trash-2" size={13} color="var(--color-cyber-cyan)" />
                   </button>
                 </span>
                 <span class="chat-conversation-divider-line"></span>
@@ -2052,10 +2067,11 @@
             <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-conversation-id={activeConversationId}>
               <span class="chat-conversation-divider-line"></span>
               <span class="chat-conversation-divider-label">
-                {formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}
+                <span class="chat-conversation-divider-date">{formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}</span>
+                <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
                 <button
                   type="button"
-                  class="chat-conversation-divider-export"
+                  class="chat-conversation-divider-btn"
                   title="Export conversation"
                   aria-label="Export conversation"
                   onclick={(e) => {
@@ -2063,7 +2079,21 @@
                     exportConversationToJsonl(activeConversationId);
                   }}
                 >
-                  <Icon name="download" size={12} color="var(--color-cyber-cyan)" />
+                  <Icon name="download" size={13} color="var(--color-cyber-cyan)" />
+                </button>
+                <button
+                  type="button"
+                  class="chat-conversation-divider-btn chat-conversation-divider-delete"
+                  title="Delete conversation"
+                  aria-label="Delete conversation"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('Delete this conversation? This cannot be undone.')) {
+                      deleteConversation(activeConversationId);
+                    }
+                  }}
+                >
+                  <Icon name="trash-2" size={13} color="var(--color-cyber-cyan)" />
                 </button>
               </span>
               <span class="chat-conversation-divider-line"></span>
@@ -2332,8 +2362,8 @@
   .chat-conversation-divider {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin: 22px 0 16px;
+    gap: 12px;
+    margin: 26px 0 18px;
     user-select: none;
     position: relative;
   }
@@ -2344,18 +2374,17 @@
     left: 0;
     right: 0;
     top: 50%;
-    height: 2px;
+    height: 1px;
     transform: translateY(-50%);
     background: linear-gradient(
       to right,
       transparent 0%,
-      rgba(0, 212, 255, 0.35) 15%,
-      rgba(0, 212, 255, 0.55) 50%,
-      rgba(0, 212, 255, 0.35) 85%,
+      rgba(0, 212, 255, 0.18) 12%,
+      rgba(0, 212, 255, 0.42) 50%,
+      rgba(0, 212, 255, 0.18) 88%,
       transparent 100%
     );
-    border-radius: 2px;
-    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+    box-shadow: 0 0 6px rgba(0, 212, 255, 0.14);
   }
 
   .chat-conversation-divider-line {
@@ -2364,60 +2393,87 @@
 
   .chat-conversation-divider-label {
     position: relative;
-    display: inline-block;
-    padding: 6px 18px;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    padding: 5px 10px 5px 16px;
     border-radius: 999px;
     background: rgb(8, 11, 19);
-    border: 1.5px solid rgba(0, 212, 255, 0.45);
+    border: 1px solid rgba(0, 212, 255, 0.35);
     color: var(--color-cyber-cyan);
-    font-size: 13px;
-    font-weight: 700;
-    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
     white-space: nowrap;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     margin: 0 auto;
     z-index: 1;
     box-shadow:
-      0 0 16px rgba(0, 212, 255, 0.2),
-      inset 0 0 8px rgba(0, 212, 255, 0.05);
-    text-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+      0 0 12px rgba(0, 212, 255, 0.14),
+      inset 0 0 6px rgba(0, 212, 255, 0.04);
+    text-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+  }
+
+  .chat-conversation-divider-date {
+    line-height: 1;
+  }
+
+  .chat-conversation-divider-divider-dots {
+    width: 1px;
+    height: 14px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      rgba(0, 212, 255, 0.4) 50%,
+      transparent
+    );
+    flex: 0 0 auto;
   }
 
   .chat-conversation-divider-active .chat-conversation-divider-label {
-    border-color: rgba(0, 212, 255, 0.7);
-    border-width: 2px;
+    border-color: rgba(0, 212, 255, 0.6);
     box-shadow:
-      0 0 24px rgba(0, 212, 255, 0.35),
-      inset 0 0 12px rgba(0, 212, 255, 0.1);
-    text-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+      0 0 18px rgba(0, 212, 255, 0.28),
+      inset 0 0 8px rgba(0, 212, 255, 0.08);
+    text-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
   }
 
-  .chat-conversation-divider-export {
+  .chat-conversation-divider-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-left: 10px;
-    padding: 3px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
     border: none;
     border-radius: 6px;
     background: transparent;
     color: var(--color-cyber-cyan);
     cursor: pointer;
     opacity: 0.55;
-    transition: opacity 0.15s ease, background 0.15s ease;
+    transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
   }
 
-  .chat-conversation-divider-export:hover {
+  .chat-conversation-divider-btn:hover {
     opacity: 1;
-    background: rgba(0, 212, 255, 0.12);
+    background: rgba(0, 212, 255, 0.14);
+    transform: translateY(-1px);
   }
 
-  .chat-conversation-divider-export:focus-visible {
+  .chat-conversation-divider-btn:focus-visible {
     outline: 1.5px solid rgba(0, 212, 255, 0.7);
     outline-offset: 1px;
     opacity: 1;
   }
 
+  .chat-conversation-divider-delete:hover {
+    background: rgba(255, 87, 87, 0.16);
+    color: rgb(255, 120, 120);
+  }
+
+  .chat-conversation-divider-delete:focus-visible {
+    outline-color: rgba(255, 120, 120, 0.7);
+  }
 
 
   @media (max-width: 1024px) {
