@@ -75,10 +75,30 @@
   // the load handler in a loop.
   let suppressScrollLoad = false;
 
+  // --- Scroll-to-load-previous state ---
+  // When the user scrolls to the top, a sticky indicator appears telling
+  // them to keep scrolling up. A wheel/scroll-up gesture at scrollTop===0
+  // triggers loading the previous conversation.
+  let nearTop = $state(false);
+  let atTop = $state(false);
+  // Whether there are older conversations available to load.
+  let hasOlderAvailable = $derived(!hasNoMoreOlder && (() => {
+    const activeIdx = conversations.findIndex((c) => c.id === activeConversationId);
+    if (activeIdx === -1) return false;
+    let frontierIdx = activeIdx;
+    if (olderConversationIds.length > 0) {
+      const frontierId = olderConversationIds[olderConversationIds.length - 1];
+      frontierIdx = conversations.findIndex((c) => c.id === frontierId);
+    }
+    return frontierIdx >= 0 && frontierIdx + 1 < conversations.length;
+  })());
+
   function resetScrollBuffer() {
     olderConversationIds = [];
     olderConversationMessages = {};
     hasNoMoreOlder = false;
+    nearTop = false;
+    atTop = false;
   }
 
   /**
@@ -168,11 +188,16 @@
       suppressScrollLoad = false;
       return;
     }
-    if (!messagesContainer || isLoadingOlder || hasNoMoreOlder) return;
-    // Trigger when the user gets within ~120px of the top.
-    if (messagesContainer.scrollTop < 120) {
-      loadOlderConversation();
-    }
+    if (!messagesContainer) return;
+    atTop = messagesContainer.scrollTop === 0;
+    nearTop = messagesContainer.scrollTop < 80;
+  }
+
+  function handleMessagesWheel(e: WheelEvent) {
+    if (!messagesContainer || isLoadingOlder || hasNoMoreOlder || !hasOlderAvailable) return;
+    if (messagesContainer.scrollTop > 0) return;
+    if (e.deltaY >= 0) return;
+    loadOlderConversation();
   }
 
   // The active conversation object, for the divider label above the active
@@ -1566,6 +1591,13 @@
   });
 
   $effect(() => {
+    if (messagesContainer && messages.length > 0) {
+      nearTop = messagesContainer.scrollTop < 80;
+      atTop = messagesContainer.scrollTop === 0;
+    }
+  });
+
+  $effect(() => {
     conversationStore.conversations = conversations;
     conversationStore.activeConversationId = activeConversationId;
     conversationStore.unreadConversations = unreadConversations;
@@ -1655,7 +1687,33 @@
 
       <!-- Recent messages (faded top/bottom, no header) -->
       {#if chatExpanded && activeConversationId && messages.length > 0}
-        <div bind:this={messagesContainer} class="chat-inline-messages" data-testid="messages-container" onscroll={handleMessagesScroll}>
+        <div
+          bind:this={messagesContainer}
+          class="chat-inline-messages"
+          data-testid="messages-container"
+          onscroll={handleMessagesScroll}
+          onwheel={handleMessagesWheel}
+        >
+          {#if nearTop && !isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable}
+            <div class="chat-scroll-hint" data-testid="scroll-load-hint">
+              <Icon name="chevron-down" size={14} color="var(--color-cyber-cyan)" />
+              <span>Keep scrolling up for previous conversation</span>
+            </div>
+          {/if}
+          {#if isLoadingOlder}
+            <div class="chat-scroll-hint chat-scroll-hint-loading" data-testid="scroll-load-hint">
+              <div class="chat-pull-spinner" data-testid="pull-loading">
+                <Icon name="refresh-cw" size={14} color="var(--color-cyber-cyan)" />
+              </div>
+              <span>Loading previous conversation…</span>
+            </div>
+          {/if}
+          {#if hasNoMoreOlder && nearTop}
+            <div class="chat-scroll-hint chat-scroll-hint-done" data-testid="scroll-load-hint">
+              <span>No older conversations</span>
+            </div>
+          {/if}
+
           <div class="chat-inline-toolbar">
             <button
               onclick={() => { historyPanelOpen.update((v) => !v); }}
@@ -1972,13 +2030,6 @@
             </div>
           {/snippet}
 
-          {#if isLoadingOlder}
-            <div class="flex items-center justify-center py-3 text-[11px] text-cyber-text-dim/60" data-testid="loading-older-conversation">
-              <div class="h-3 w-3 border-2 border-cyber-cyan/40 border-t-transparent rounded-full animate-spin mr-2"></div>
-              Loading earlier conversation…
-            </div>
-          {/if}
-
           {#each olderConversationIds as convId (convId)}
             {@const conv = conversations.find((c) => c.id === convId)}
             {@const convMsgs = olderConversationMessages[convId] ?? []}
@@ -1986,7 +2037,7 @@
               <div class="chat-conversation-divider" data-testid="conversation-divider" data-conversation-id={convId}>
                 <span class="chat-conversation-divider-line"></span>
                 <span class="chat-conversation-divider-label">
-                  {formatConversationDate(conv.updatedAt)}
+                  {formatConversationDate(conv.createdAt)}
                 </span>
                 <span class="chat-conversation-divider-line"></span>
               </div>
@@ -2012,7 +2063,7 @@
             <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-conversation-id={activeConversationId}>
               <span class="chat-conversation-divider-line"></span>
               <span class="chat-conversation-divider-label">
-                {formatConversationDate(activeConvForDivider?.updatedAt ?? Date.now())}
+                {formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}
               </span>
               <span class="chat-conversation-divider-line"></span>
             </div>
@@ -2160,6 +2211,9 @@
      * when older conversations are prepended — we handle restoration
      * manually in loadOlderConversation() via tick() + scrollTop delta. */
     overflow-anchor: none;
+    /* Prevent scroll chaining so pull-to-refresh gesture isn't hijacked
+     * by the parent when the container is at scrollTop=0. */
+    overscroll-behavior-y: contain;
     padding: 8px 12px;
     display: flex;
     flex-direction: column;
@@ -2180,6 +2234,72 @@
   .chat-inline-messages::-webkit-scrollbar-thumb {
     background: rgba(0, 212, 255, 0.25);
     border-radius: 3px;
+  }
+
+  .chat-scroll-hint {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 12px;
+    flex-shrink: 0;
+    background: linear-gradient(
+      to bottom,
+      rgba(0, 212, 255, 0.08) 0%,
+      transparent 100%
+    );
+    color: var(--color-cyber-cyan);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+    white-space: nowrap;
+    animation: chat-hint-fade-in 0.2s ease-out;
+  }
+
+  .chat-scroll-hint svg {
+    transform: rotate(180deg);
+    opacity: 0.6;
+    animation: chat-hint-bounce 1.5s ease-in-out infinite;
+  }
+
+  .chat-scroll-hint-loading svg {
+    transform: none;
+    opacity: 1;
+    animation: none;
+  }
+
+  .chat-scroll-hint-loading {
+    opacity: 0.9;
+  }
+
+  .chat-scroll-hint-done {
+    opacity: 0.35;
+  }
+
+  @keyframes chat-hint-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 0.7; transform: translateY(0); }
+  }
+
+  @keyframes chat-hint-bounce {
+    0%, 100% { transform: rotate(180deg) translateY(0); }
+    50% { transform: rotate(180deg) translateY(-3px); }
+  }
+
+  .chat-pull-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: chat-pull-spin 0.8s linear infinite;
+  }
+
+  @keyframes chat-pull-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   .chat-inline-toolbar {
