@@ -135,6 +135,11 @@ class SyncClient {
   }
 
   async deleteConversation(id: string): Promise<void> {
+    // Optimistically remove from local state BEFORE the network request so
+    // that a periodic sync doesn't re-inject the deleted conversation into
+    // the page's `conversations` array (which is overwritten by onSync).
+    this.conversations = this.conversations.filter((c) => c.id !== id);
+    this.loadedConversations.delete(id);
     this.error = null;
     try {
       const url = buildUrl(API.sync.conversation(id));
@@ -142,8 +147,6 @@ class SyncClient {
       if (!res.ok && res.status !== 404) {
         throw new Error(`Delete failed: ${res.status}`);
       }
-      this.conversations = this.conversations.filter((c) => c.id !== id);
-      this.loadedConversations.delete(id);
     } catch (e: any) {
       this.error = e.message ?? 'Failed to delete conversation';
     }

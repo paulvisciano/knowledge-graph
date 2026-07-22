@@ -1285,15 +1285,32 @@
     streamAssistantResponse();
   }
 
-  function deleteConversation(id: string) {
+  async function deleteConversation(id: string) {
     cancelStreaming();
     conversations = conversations.filter((c) => c.id !== id);
     syncClient.deleteConversation(id);
     if (activeConversationId === id) {
-      activeConversationId = '';
-      messages = [];
-      chatExpanded = false;
-      resetScrollBuffer();
+      const next = conversations[0];
+      if (next) {
+        activeConversationId = next.id;
+        resetScrollBuffer();
+        if (next.messages.length === 0) {
+          const loaded = await syncClient.loadConversation(next.id);
+          if (loaded.length > 0) {
+            next.messages = loaded;
+            messages = [...loaded];
+          } else {
+            messages = [...next.messages];
+          }
+        } else {
+          messages = [...next.messages];
+        }
+      } else {
+        activeConversationId = '';
+        messages = [];
+        chatExpanded = false;
+        resetScrollBuffer();
+      }
     }
   }
 
