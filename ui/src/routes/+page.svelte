@@ -1862,6 +1862,8 @@
                         {@const relCount = parsed ? parsed.relationships.length : 0}
                         {@const isRunning = !toolCall.result && !toolCall.isError}
                         {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
+                        {@const isInsertText = toolCall.toolName === 'insert_text'}
+                        {@const insertedText = isInsertText ? String(toolCall.arguments?.text ?? '') : ''}
                         <details class="group" open={true} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
                           <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
                             {#if toolCall.isError}
@@ -1873,7 +1875,9 @@
                             {/if}
                             <span class="font-mono {toolCall.isError ? 'text-cyber-red' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{toolCall.toolName}</span>
                             {#if isRunning}
-                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">searching knowledge graph...</span>
+                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isInsertText ? 'inserting text...' : 'searching knowledge graph...'}</span>
+                            {:else if isInsertText && insertedText}
+                              <span class="truncate text-[10px] text-cyber-text-dim/70">{insertedText}</span>
                             {:else if parsed}
                               <span class="flex items-center gap-1 text-[10px] text-cyber-text-dim/70">
                                 <span class="inline-flex items-center gap-0.5 rounded-full bg-cyber-cyan/10 px-1.5 py-0.5 text-cyber-cyan">{entityCount} entities</span>
@@ -1893,8 +1897,21 @@
                             {#if isRunning}
                               <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange" data-testid="tool-call-running">
                                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                <span>Querying knowledge graph...</span>
+                                <span>{isInsertText ? 'Inserting text into knowledge graph...' : 'Querying knowledge graph...'}</span>
                               </div>
+                            {:else if isInsertText}
+                              {#if insertedText}
+                                <div data-testid="tool-call-inserted-text">
+                                  <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Inserted text</div>
+                                  <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed text-cyber-text">{insertedText}</pre>
+                                </div>
+                              {/if}
+                              {#if toolCall.result}
+                                <div>
+                                  <div class="mb-1 text-[10px] font-medium uppercase tracking-wider text-cyber-text-dim/60">Result</div>
+                                  <pre class="max-h-48 overflow-auto rounded bg-cyber-surface-2/50 p-2 font-mono text-[11px] leading-relaxed {toolCall.isError ? 'text-cyber-red' : 'text-cyber-green'}">{formatJsonSafe(toolCall.result ?? '')}</pre>
+                                </div>
+                              {/if}
                             {:else if parsed}
                               {#if hasPhotos}
                                 <div data-testid="tool-call-photos">
