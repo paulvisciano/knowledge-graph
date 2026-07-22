@@ -154,34 +154,79 @@ async def get_photo_exif(file_source: str) -> dict | None:
     return None
 
 
-async def get_bulk_photo_dates() -> dict[str, dict[str, str]]:
-    """Return {file_source: {date_taken, date_taken_friendly}} for every photo
-    that has EXIF date data. Used by the UI to position Photo nodes on the
-    canvas by the date the photo was taken (from EXIF) rather than the
-    LightRAG node-creation/upload timestamp (created_at).
+async def get_bulk_photo_dates() -> dict[str, dict[str, object]]:
+    """Return {file_source: {date_taken?, date_taken_friendly?, width?, height?}}
+    for every photo with EXIF data.
+
+    `width`/`height` are included so the infinite-canvas layout can preserve
+    each photo's native aspect ratio (portrait vs landscape). Rows whose
+    persisted EXIF is missing `image_height` (produced by an older extractor
+    that looked for `ExifImageHeight` instead of the spec name
+    `ExifImageLength`) are back-filled on the fly from the actual image file
+    via PIL, so existing photos get correct proportions without a full
+    re-process.
     """
     import json
+    import os
+    from pathlib import Path
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT file_source, exif_data FROM photo_metadata")
-    out: dict[str, dict[str, str]] = {}
+
+    input_dir = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
+
+    out: dict[str, dict[str, object]] = {}
     for row in rows:
         try:
             data = json.loads(row["exif_data"]) if row["exif_data"] else {}
         except (json.JSONDecodeError, TypeError):
-            continue
+            data = {}
+
         date_taken = data.get("date_taken")
         friendly = data.get("date_taken_friendly")
-        if not (date_taken or friendly):
+        width = data.get("image_width")
+        height = data.get("image_height")
+
+        if not (date_taken or friendly or width or height):
             continue
-        entry: dict[str, str] = {}
+
+        entry: dict[str, object] = {}
         if date_taken:
             entry["date_taken"] = str(date_taken)
         if friendly:
             entry["date_taken_friendly"] = str(friendly)
+        if width is not None:
+            entry["width"] = int(width)
+        if height is not None:
+            entry["height"] = int(height)
+
+        if ("width" not in entry or "height" not in entry):
+            file_path = input_dir / row["file_source"]
+            if file_path.is_file():
+                try:
+                    from PIL import Image, ImageOps
+
+                    def _dims() -> tuple[int, int] | None:
+                        with Image.open(str(file_path)) as img:
+                            img = ImageOps.exif_transpose(img)
+                            return img.size  # (width, height) post-orientation
+
+                    dims = await _run_in_threadpool(_dims)
+                    if dims:
+                        entry["width"] = dims[0]
+                        entry["height"] = dims[1]
+                except Exception:
+                    pass
+
         out[row["file_source"]] = entry
     return out
+
+
+async def _run_in_threadpool(func):
+    import asyncio
+
+    return await asyncio.get_event_loop().run_in_executor(None, func)
 
 
 async def get_app_settings() -> dict:

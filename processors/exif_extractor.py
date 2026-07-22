@@ -373,8 +373,24 @@ def extract_exif_metadata(image_path: str | Path) -> dict[str, Any]:
         result["flash"] = flash
 
     # --- Image dimensions ---
-    width = _extract_tag_value(tags.get("EXIF ExifImageWidth") or tags.get("Image ImageWidth"))
-    height = _extract_tag_value(tags.get("EXIF ExifImageHeight") or tags.get("Image ImageLength"))
+    # ExifRead exposes the EXIF spec field names: the "height" tag is
+    # `ExifImageLength` (IFD0: `ImageLength`), NOT `ExifImageHeight`.
+    # Pixel RAW JPEGs (and many other cameras) only set `ExifImageLength`, so
+    # the previous lookup for `ExifImageHeight`/`ImageHeight` silently dropped
+    # the height for every photo — leaving the UI to render portrait photos as
+    # landscape planes. Check both the common alias and the spec name.
+    width = _extract_tag_value(
+        tags.get("EXIF ExifImageWidth")
+        or tags.get("Image ImageWidth")
+        or tags.get("Image ExifImageWidth")
+    )
+    height = _extract_tag_value(
+        tags.get("EXIF ExifImageHeight")
+        or tags.get("EXIF ExifImageLength")
+        or tags.get("Image ImageHeight")
+        or tags.get("Image ImageLength")
+        or tags.get("Image ExifImageLength")
+    )
     if width:
         try:
             result["image_width"] = int(float(width))
