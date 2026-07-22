@@ -1074,11 +1074,6 @@
       for (const att of imageAttachments) {
         processSingleImage(att, messageNote);
       }
-    } else if (messageNote) {
-      // Text-only message with no images — insert the note as a standalone LightRAG document.
-      kgApiClient.createNote(messageNote).catch((err) => {
-        console.warn('Failed to insert text note into graph:', err);
-      });
     }
 
     await streamAssistantResponse(sentAttachments);
@@ -1677,7 +1672,7 @@
             <div class="group mb-4 animate-fade-in-up" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
                 <div class="flex justify-end">
-                  <div class="max-w-[80%] space-y-1">
+                  <div class="max-w-[95%] space-y-1">
                     {#if msg.imageUrls && msg.imageUrls.length > 0}
                       <ImageGallery images={msg.imageUrls} alt="Uploaded image" />
                     {/if}
@@ -1707,7 +1702,7 @@
                 </div>
               {:else}
                 <div class="flex justify-start">
-                  <div class="max-w-[90%] space-y-1.5">
+                  <div class="max-w-[95%] space-y-1.5">
                     {#if msg.thinkingContent}
                       <details class="group" open={msg.isStreaming}>
                         <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-cyber-purple/25 bg-cyber-purple/5 px-2.5 py-1.5 text-[11px] text-cyber-purple hover:bg-cyber-purple/10 transition-colors">
@@ -2060,7 +2055,7 @@
           </div>
         {/if}
 
-        <div class="flex w-full items-center gap-1.5 rounded-full border border-cyber-cyan/25 bg-cyber-surface-2/80 px-2 py-1 transition-colors focus-within:border-cyber-cyan/60 focus-within:bg-cyber-surface-2 focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+        <div class="chat-inline-input-row mx-auto flex h-12 w-[28rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
           <textarea
             bind:this={panelTextareaEl}
             bind:value={panelChatInput}
@@ -2069,10 +2064,11 @@
             placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
             rows="1"
             data-testid="chat-input"
-            class="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-full bg-transparent px-4 py-2 text-base text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+            class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
             disabled={isActiveConversationStreaming}
           ></textarea>
           <AttachmentMenu
+            fluid
             disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
             onPickImage={openImagePicker}
             onPickDocument={openDocumentPicker}
@@ -2080,7 +2076,7 @@
           {#if isActiveConversationStreaming}
             <button
               onclick={cancelStreaming}
-              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
+              class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
               title="Stop generating"
               data-testid="stop-button"
             >
@@ -2092,7 +2088,7 @@
               disabled={isTranscribing || !recordingSupported}
               data-testid="mic-button"
               title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
-              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+              class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
             >
               {#if isRecording}
                 <Icon name="square" size={16} />
@@ -2142,7 +2138,7 @@
     z-index: 30;
     display: flex;
     width: 100%;
-    max-width: 28rem;
+    max-width: 30rem;
     flex-direction: column;
     align-items: center;
     padding-bottom: 1rem;
@@ -2156,6 +2152,8 @@
   }
 
   .chat-inline-messages {
+    width: 100%;
+    max-width: 34rem;
     max-height: 60dvh;
     overflow-y: auto;
     /* Prevent the browser's scroll anchoring from adjusting scrollTop
@@ -2167,7 +2165,7 @@
     flex-direction: column;
     gap: 8px;
     background: rgb(8, 11, 19);
-    border-radius: 16px 0 0 0;
+    border-radius: 24px;
     border: 1px solid rgba(0, 212, 255, 0.12);
     border-right: 0;
     border-top: 0;
@@ -2190,6 +2188,11 @@
     padding: 2px 4px 6px;
     border-bottom: 1px solid rgba(0, 212, 255, 0.08);
     margin-bottom: 6px;
+  }
+
+  .chat-inline-input-row {
+    width: 28rem;
+    max-width: 100%;
   }
 
   .chat-conversation-divider {
@@ -2257,7 +2260,7 @@
 
 
 
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
     .chat-inline-overlay {
       left: 8px;
       right: 8px;
