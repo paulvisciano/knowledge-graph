@@ -144,6 +144,7 @@
         } catch {
           // Best-effort cleanup — entity deletion may fail if already gone
         }
+        graphStore.removePhoto(filePath);
       }
       await loadDocs();
       graphStore.refresh();

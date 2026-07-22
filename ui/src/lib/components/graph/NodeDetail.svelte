@@ -193,6 +193,7 @@
       } catch {
         // Best-effort cleanup — entity deletion may fail if already gone
       }
+      graphStore.removePhoto(fileSource);
       graphStore.refresh();
       onclose();
     } catch (err) {

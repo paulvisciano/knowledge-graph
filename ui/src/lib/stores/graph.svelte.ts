@@ -159,6 +159,26 @@ class GraphStore {
     this.edges = [...this.edges.filter((e) => e.id !== id), edge];
   }
 
+  /** Optimistically remove a photo node (and its edges + cached images) for
+   *  the given file source. Called by delete handlers so the graph updates
+   *  immediately, since `refresh()` preserves nodes missing from the backend
+   *  response (intended for locally-created, not-yet-synced entities). */
+  removePhoto(fileSource: string): void {
+    const nodeId = this.nodes.find(
+      (n) =>
+        (n.properties?.source_id as string) === fileSource ||
+        (n.properties?.file_path as string) === fileSource ||
+        n.id === fileSource,
+    )?.id;
+    if (!nodeId) return;
+    this.nodes = this.nodes.filter((n) => n.id !== nodeId);
+    this.edges = this.edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
+    delete this.photoImages[nodeId];
+    this.photoImages = { ...this.photoImages };
+    delete this.personImages[nodeId];
+    this.personImages = { ...this.personImages };
+  }
+
   setPhotoImage(nodeId: string, url: string) {
     this.photoImages = { ...this.photoImages, [nodeId]: url };
   }
