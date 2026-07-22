@@ -54,7 +54,7 @@ export const API = {
       paginated: '/documents/paginated',
       status: '/documents/status',
       upload: '/documents/upload',
-      delete: (id: string) => `/documents/${id}`,
+      delete: (id: string) => `/documents/delete_document`,
       reprocess: (id: string) => `/documents/${id}/reprocess`,
       content: (id: string) => `/documents/${id}/content`,
       fullContent: (id: string) => `/documents/${id}/full_content`,

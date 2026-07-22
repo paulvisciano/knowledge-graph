@@ -378,6 +378,8 @@ export class LightragClient {
   async deleteDocument(id: string): Promise<{ status: string; message: string }> {
     return this.request<{ status: string; message: string }>(API.lightrag.documents.delete(id), {
       method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_ids: [id] }),
     });
   }
 
@@ -416,15 +418,15 @@ export class LightragClient {
     return this.proxyUrl(API.lightrag.documents.content(docId));
   }
 
-  /** Resolve a graph node file_path to a document content URL.
-   *  Uses a cached paginated document search to map file_path → doc_id → content URL.
+  /** Resolve a graph node file_path to a LightRAG document ID.
+   *  Uses a cached paginated document search to map file_path → doc_id.
    *  Returns null if the file cannot be found in the document index.
    */
-  async resolveImageContentUrl(filePath: string): Promise<string | null> {
+  async resolveDocumentId(filePath: string): Promise<string | null> {
     await this.refreshDocCache();
 
     if (this.docIdCache.size === 0) {
-      console.warn('[resolveImageContentUrl] Document cache is empty — cannot resolve filePath:', filePath);
+      console.warn('[resolveDocumentId] Document cache is empty — cannot resolve filePath:', filePath);
       return null;
     }
 
@@ -432,13 +434,13 @@ export class LightragClient {
     const basename = filePath.split('/').pop() || filePath;
     const exactId = this.docIdCache.get(basename) || this.docIdCache.get(filePath);
     if (exactId) {
-      return this.documentContentUrl(exactId);
+      return exactId;
     }
 
     // 2. Normalized matching (relaxed — does not require file_type)
     const normalizedTarget = this.normalizeFilePath(filePath);
     if (!normalizedTarget) {
-      console.warn('[resolveImageContentUrl] Could not normalize filePath:', filePath);
+      console.warn('[resolveDocumentId] Could not normalize filePath:', filePath);
       return null;
     }
 
@@ -449,7 +451,7 @@ export class LightragClient {
       if (!normalizedKey || normalizedKey.length <= 5 || normalizedTarget.length <= 5) continue;
       if (normalizedTarget.includes(normalizedKey) || normalizedKey.includes(normalizedTarget)) {
         if (this.docFileTypeCache.get(id)?.toLowerCase() === 'image') {
-          return this.documentContentUrl(id);
+          return id;
         }
         if (!fallbackMatch) {
           fallbackMatch = id;
@@ -458,11 +460,21 @@ export class LightragClient {
     }
 
     if (fallbackMatch) {
-      return this.documentContentUrl(fallbackMatch);
+      return fallbackMatch;
     }
 
-    console.warn('[resolveImageContentUrl] No matching document found for filePath:', filePath, '(normalized:', normalizedTarget, ', cache size:', this.docIdCache.size, ')');
+    console.warn('[resolveDocumentId] No matching document found for filePath:', filePath, '(normalized:', normalizedTarget, ', cache size:', this.docIdCache.size, ')');
     return null;
+  }
+
+  /** Resolve a graph node file_path to a document content URL.
+   *  Uses a cached paginated document search to map file_path → doc_id → content URL.
+   *  Returns null if the file cannot be found in the document index.
+   */
+  async resolveImageContentUrl(filePath: string): Promise<string | null> {
+    const docId = await this.resolveDocumentId(filePath);
+    if (!docId) return null;
+    return this.documentContentUrl(docId);
   }
 
   private normalizeFilePath(fp: string): string {
