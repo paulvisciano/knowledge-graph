@@ -184,13 +184,14 @@
     if (!messagesContainer) return;
     atTop = messagesContainer.scrollTop === 0;
     nearTop = messagesContainer.scrollTop < 80;
-  }
-
-  function handleMessagesWheel(e: WheelEvent) {
-    if (!messagesContainer || isLoadingOlder || hasNoMoreOlder || !hasOlderAvailable) return;
-    if (messagesContainer.scrollTop > 0) return;
-    if (e.deltaY >= 0) return;
-    loadOlderConversation();
+    if (
+      messagesContainer.scrollTop < 120 &&
+      !isLoadingOlder &&
+      !hasNoMoreOlder &&
+      hasOlderAvailable
+    ) {
+      loadOlderConversation();
+    }
   }
 
   // The active conversation object, for the divider label above the active
@@ -1685,7 +1686,6 @@
           class="chat-inline-messages"
           data-testid="messages-container"
           onscroll={handleMessagesScroll}
-          onwheel={handleMessagesWheel}
         >
           {#if nearTop && !isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable}
             <div class="chat-scroll-hint" data-testid="scroll-load-hint">
