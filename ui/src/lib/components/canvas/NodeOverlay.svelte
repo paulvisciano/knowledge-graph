@@ -2,6 +2,8 @@
   import { graphStore } from '$lib/stores/graph.svelte';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
   import { API, type KGNode } from '$lib/constants';
+  import { lightragClient } from '$lib/services/lightrag-client';
+  import { kgApiClient } from '$lib/services/kg-api-client';
   import type { CanvasNode } from './renderer/types';
   import { classifyKind } from './Layout';
 
@@ -146,6 +148,35 @@
     fullscreenUrl = null;
     onClose();
   }
+
+  let deleting = $state(false);
+
+  async function handleDelete() {
+    const fileSource =
+      (kgNode?.properties?.source_id as string) ??
+      (kgNode?.properties?.file_path as string) ??
+      node?.id;
+    if (!fileSource || deleting) return;
+    deleting = true;
+    try {
+      const docId = await lightragClient.resolveDocumentId(fileSource);
+      if (docId) {
+        await lightragClient.deleteDocument(docId);
+      }
+      try {
+        await kgApiClient.deletePhotoEntities(fileSource);
+      } catch {
+        // Best-effort cleanup — entity deletion may fail if already gone
+      }
+      graphStore.refresh();
+      fullscreenUrl = null;
+      onClose();
+    } catch (err) {
+      console.error('[NodeOverlay] Delete failed:', err);
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 {#if node}
@@ -179,6 +210,14 @@
     {#if fullUrl}
       <button class="full-btn" onclick={() => openFullscreen(fullUrl)}>View full image</button>
     {/if}
+    <button class="delete-btn" onclick={handleDelete} disabled={deleting}>
+      {#if deleting}
+        <span class="spinner"></span>
+        Deleting...
+      {:else}
+        Delete
+      {/if}
+    </button>
 
     <div class="overlay-body">
       <div class="overlay-filename">{fileName}</div>
@@ -376,6 +415,33 @@
   .full-btn:hover {
     background: rgba(0, 212, 255, 0.22);
     border-color: rgba(0, 212, 255, 0.7);
+  }
+
+  .delete-btn {
+    margin: 0 8px 8px;
+    padding: 6px 10px;
+    background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.4);
+    border-radius: 6px;
+    color: #f87171;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .delete-btn:hover:not(:disabled) {
+    background: rgba(248, 113, 113, 0.22);
+    border-color: rgba(248, 113, 113, 0.7);
+  }
+
+  .delete-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .overlay-body {

@@ -167,12 +167,39 @@
   }
 
   let reprocessing = $state(false);
+  let deleting = $state(false);
 
   function getFileSourceFromPhoto(n: KGNode): string | null {
     const src = n.properties?.source_id as string | undefined;
     if (src) return src;
+    const filePath = n.properties?.file_path as string | undefined;
+    if (filePath) return filePath;
     const match = n.id.match(/^(.+)\s*\(Photo\)$/i);
     return match ? match[1].trim() : null;
+  }
+
+  async function handleDelete() {
+    if (!node || deleting) return;
+    const fileSource = getFileSourceFromPhoto(node);
+    if (!fileSource) return;
+    deleting = true;
+    try {
+      const docId = await lightragClient.resolveDocumentId(fileSource);
+      if (docId) {
+        await lightragClient.deleteDocument(docId);
+      }
+      try {
+        await kgApiClient.deletePhotoEntities(fileSource);
+      } catch {
+        // Best-effort cleanup — entity deletion may fail if already gone
+      }
+      graphStore.refresh();
+      onclose();
+    } catch (err) {
+      console.error('[NodeDetail] Delete failed:', err);
+    } finally {
+      deleting = false;
+    }
   }
 
   async function handleReprocess() {
@@ -619,7 +646,7 @@
       {#if isPhotoNode(node!) && getFileSourceFromPhoto(node!)}
         <button
           onclick={handleReprocess}
-          disabled={reprocessing}
+          disabled={reprocessing || deleting}
           class="flex-1 py-2 rounded-lg text-xs font-medium bg-cyber-green/10 text-cyber-green border border-cyber-green/30 hover:bg-cyber-green/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {#if reprocessing}
@@ -628,6 +655,21 @@
           {:else}
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline mr-1"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
             Reprocess
+          {/if}
+        </button>
+      {/if}
+      {#if (isImageNode(node!) || isPhotoNode(node!)) && getFileSourceFromPhoto(node!)}
+        <button
+          onclick={handleDelete}
+          disabled={deleting || reprocessing}
+          class="flex-1 py-2 rounded-lg text-xs font-medium bg-cyber-red/10 text-cyber-red border border-cyber-red/30 hover:bg-cyber-red/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {#if deleting}
+            <svg class="inline h-3 w-3 animate-spin mr-1" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+            Deleting...
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline mr-1"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14"/></svg>
+            Delete
           {/if}
         </button>
       {/if}
