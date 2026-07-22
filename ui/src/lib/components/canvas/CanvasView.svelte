@@ -142,11 +142,19 @@
     }
   }
 
+  /** Expose the SceneManager on window for E2E / browser-harness testing. */
+  function exposeSceneManager(sm: SceneManager): void {
+    if (typeof window !== 'undefined') {
+      (window as any).__sceneManager = sm;
+    }
+  }
+
   onMount(() => {
     mounted = true;
     if (containerEl && graphStore.nodes.length > 0) {
         sceneManager = new SceneManager(containerEl);
         wireSceneManager(sceneManager);
+        exposeSceneManager(sceneManager);
         rebuildLayout();
         sceneManager.start();
         firstLayoutApplied = true;
@@ -167,6 +175,9 @@
     sceneManager?.stop();
     sceneManager?.dispose();
     sceneManager = undefined;
+    if (typeof window !== 'undefined') {
+      delete (window as any).__sceneManager;
+    }
     // Cancel any in-flight texture image fetches so their browser connection
     // slots are released immediately — otherwise pending face-crop / photo
     // fetches can block other tabs' API requests for tens of seconds.
@@ -187,6 +198,7 @@
       if (containerEl && !sceneManager && graphStore.nodes.length > 0) {
         sceneManager = new SceneManager(containerEl);
         wireSceneManager(sceneManager);
+        exposeSceneManager(sceneManager);
         rebuildLayout();
         sceneManager.start();
         firstLayoutApplied = true;
@@ -199,7 +211,7 @@
   let isEmpty = $derived(graphStore.nodes.length === 0);
  </script>
  
- <div bind:this={containerEl} class="canvas-container"></div>
+ <div bind:this={containerEl} class="canvas-container" data-testid="graph-canvas"></div>
  
 {#if isEmpty}
   <div class="empty-state">
