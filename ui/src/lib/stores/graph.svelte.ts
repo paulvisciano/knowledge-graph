@@ -101,7 +101,12 @@ class GraphStore {
     try {
       const res = await fetch(`${KG_API_BASE}${API.kg.photoExifBulkDates}`);
       if (!res.ok) return;
-      const dates = (await res.json()) as Record<string, { date_taken?: string; date_taken_friendly?: string }>;
+      const dates = (await res.json()) as Record<string, {
+        date_taken?: string;
+        date_taken_friendly?: string;
+        width?: number;
+        height?: number;
+      }>;
       for (const node of photoNodes) {
         const sourceId = String(node.properties?.source_id ?? node.properties?.file_path ?? '');
         const exif = dates[sourceId];

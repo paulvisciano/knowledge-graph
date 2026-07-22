@@ -629,8 +629,8 @@ export function buildCanvasLayout(
     const localY = r1 * CHUNK_SIZE;
     const localZ = r2 * CHUNK_SIZE;
 
-    const pw = node.properties?.width;
-    const ph = node.properties?.height;
+    const pw = node.properties?.image_width ?? node.properties?.width;
+    const ph = node.properties?.image_height ?? node.properties?.height;
     // Random base size in [60, 120) world units, then preserve the native
     // image aspect ratio (height = base, width = base * aspect) — same
     // approach as the reference's displayScale.
