@@ -1681,6 +1681,18 @@
 
       <!-- Recent messages (faded top/bottom, no header) -->
       {#if chatExpanded && activeConversationId && messages.length > 0}
+        <div class="chat-inline-header" data-testid="chat-inline-header">
+          <span class="chat-inline-header-title">Conversation</span>
+          <button
+            onclick={() => { historyPanelOpen.update((v) => !v); }}
+            class="flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+            title="Chat history"
+            aria-label="Open chat history"
+            data-testid="chat-history-button"
+          >
+            <Icon name="clock" size={15} />
+          </button>
+        </div>
         <div
           bind:this={messagesContainer}
           class="chat-inline-messages"
@@ -1706,18 +1718,6 @@
               <span>No older conversations</span>
             </div>
           {/if}
-
-          <div class="chat-inline-toolbar">
-            <button
-              onclick={() => { historyPanelOpen.update((v) => !v); }}
-              class="flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
-              title="Chat history"
-              aria-label="Open chat history"
-              data-testid="chat-history-button"
-            >
-              <Icon name="clock" size={15} />
-            </button>
-          </div>
 
           {#snippet messageRow(msg: ChatMessage)}
             <div class="group mb-4 animate-fade-in-up" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
@@ -2182,7 +2182,7 @@
     z-index: 30;
     display: flex;
     width: 100%;
-    max-width: 30rem;
+    max-width: 44rem;
     flex-direction: column;
     align-items: center;
     padding-bottom: 1rem;
@@ -2212,10 +2212,8 @@
     flex-direction: column;
     gap: 8px;
     background: rgb(8, 11, 19);
-    border-radius: 24px;
     border: 1px solid rgba(0, 212, 255, 0.12);
     border-right: 0;
-    border-top: 0;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
   }
@@ -2295,12 +2293,31 @@
     to { transform: rotate(360deg); }
   }
 
-  .chat-inline-toolbar {
+  .chat-inline-header {
+    width: 100%;
+    max-width: 42rem;
     display: flex;
-    justify-content: flex-end;
-    padding: 2px 4px 6px;
-    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
-    margin-bottom: 6px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px 6px 20px;
+    background: rgba(8, 11, 19, 0.9);
+    border-radius: 18px 18px 0 0;
+    border: 1px solid rgba(0, 212, 255, 0.12);
+    border-bottom: 0;
+    pointer-events: auto;
+  }
+
+  .chat-inline-header-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-cyber-text-dim);
+  }
+
+  .chat-inline-messages {
+    border-radius: 0 0 24px 24px;
+    border-top: 0;
   }
 
   .chat-inline-input-row {
