@@ -2099,7 +2099,7 @@
           </div>
         {/if}
 
-        <div class="chat-inline-input-row mx-auto flex h-12 w-[28rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+        <div class="chat-inline-input-row mx-auto flex h-12 w-[36rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
           <textarea
             bind:this={panelTextareaEl}
             bind:value={panelChatInput}
@@ -2197,7 +2197,7 @@
 
   .chat-inline-messages {
     width: 100%;
-    max-width: 34rem;
+    max-width: 42rem;
     max-height: 60dvh;
     overflow-y: auto;
     /* Prevent the browser's scroll anchoring from adjusting scrollTop
@@ -2304,7 +2304,7 @@
   }
 
   .chat-inline-input-row {
-    width: 28rem;
+    width: 36rem;
     max-width: 100%;
   }
 
