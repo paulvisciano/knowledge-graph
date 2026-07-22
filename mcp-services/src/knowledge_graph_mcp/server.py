@@ -141,12 +141,15 @@ async def query_knowledge_graph(
 
 @mcp.tool()
 async def insert_text(text: str, file_source: str = "") -> str:
-    """Insert text content into the knowledge graph for indexing. The text will be chunked, entities/relations extracted, and added to the graph. Returns a track ID that can be used to check processing status. file_source is a label identifying the source (e.g. 'chat-note', 'preference-update'). If omitted, a unique ID is generated."""
+    """Insert text content into the knowledge graph for indexing. The text will be chunked, entities/relations extracted, and added to the graph. Returns a track ID that can be used to check processing status. file_source is a label identifying the source (e.g. 'chat-note', 'preference-update'). A unique timestamp suffix is appended to avoid 409 conflicts on repeated inserts. If omitted, a unique ID is generated."""
     try:
-        if not file_source:
-            from datetime import datetime
+        from datetime import datetime
 
-            file_source = f"mcp-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+        ts = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        if not file_source:
+            file_source = f"mcp-{ts}"
+        else:
+            file_source = f"{file_source}-{ts}"
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
                 f"{_LIGHTRAG_API_URL}/documents/text",
