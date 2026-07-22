@@ -42,6 +42,61 @@
   if (typeof window !== 'undefined') {
     (window as any).__graphStore = graphStore;
     (window as any).__imageProcessingStore = imageProcessingStore;
+
+    /** Return all photo/image nodes from the graph store that are currently
+     *  mounted (visible) on the 3D canvas. Falls back to all photo nodes if
+     *  the SceneManager isn't available yet. */
+    (window as any).__getPhotoNodes = () => {
+      const nodes = graphStore.nodes.filter((n: any) => {
+        const et = n.properties?.entity_type;
+        return (
+          (typeof et === 'string' && (et === 'Photo' || et === 'Image')) ||
+          (n.id ?? '').includes('(Photo)') ||
+          (n.id ?? '').includes('(Image)')
+        );
+      });
+      const sm = (window as any).__sceneManager;
+      if (!sm) return nodes;
+      // Prefer mounted nodes (visible on canvas) so selection opens the overlay
+      const mounted = nodes.filter((n: any) => sm.getCanvasNode(n.id));
+      return mounted.length > 0 ? mounted : nodes;
+    };
+
+    /** Return all nodes of a given kind (person, location, event, etc.). */
+    (window as any).__getNodesByLabel = (label: string) => {
+      const l = label.toLowerCase();
+      return graphStore.nodes.filter((n: any) =>
+        n.labels?.some((lb: string) => lb.toLowerCase() === l)
+      );
+    };
+
+    /**
+     * Select a canvas node by its graph node ID — triggers the same
+     * onSelectNode callback path as a real mouse click on the 3D canvas,
+     * opening the NodeOverlay without needing to raycast at pixel coords.
+     * Returns true if the node exists in the graph store (the overlay will
+     * open even if the node's 3D chunk isn't currently mounted).
+     */
+    (window as any).__selectNode = (nodeId: string) => {
+      const sm = (window as any).__sceneManager;
+      if (!sm || typeof sm.onSelectNode !== 'function') return false;
+      sm.onSelectNode(nodeId);
+      return true;
+    };
+
+    /** Select the first photo node — convenience for tests. */
+    (window as any).__selectFirstPhoto = () => {
+      const photos = (window as any).__getPhotoNodes();
+      if (!photos.length) return false;
+      return (window as any).__selectNode(photos[0].id);
+    };
+
+    /** Select a photo node by index — convenience for tests. */
+    (window as any).__selectPhotoByIndex = (index: number) => {
+      const photos = (window as any).__getPhotoNodes();
+      if (index < 0 || index >= photos.length) return false;
+      return (window as any).__selectNode(photos[index].id);
+    };
   }
 
   $effect(() => {
