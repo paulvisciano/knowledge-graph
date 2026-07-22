@@ -145,14 +145,9 @@
         loaded = await syncClient.loadConversation(nextConv.id);
         nextConv.messages = loaded;
       }
-      // Capture scroll geometry BEFORE the state update so we can compute
-      // the delta after the new content is rendered.
       const prevScrollHeight = messagesContainer?.scrollHeight ?? 0;
       const prevScrollTop = messagesContainer?.scrollTop ?? 0;
 
-      // Flag set BEFORE the state mutation so the next scroll event
-      // (fired by the programmatic scrollTop restoration below) is
-      // ignored by handleMessagesScroll and doesn't re-trigger a load.
       suppressScrollLoad = true;
       olderConversationIds = [...olderConversationIds, nextConv.id];
       olderConversationMessages = {
@@ -160,22 +155,20 @@
         [nextConv.id]: loaded,
       };
 
-      // `tick()` resolves after Svelte flushes DOM updates but BEFORE
-      // the browser paints — restoring scrollTop here means the user
-      // never sees a flash of the new content at the wrong position.
-      // The container has `overflow-anchor: none` (set in CSS) so the
-      // browser doesn't apply its own scroll anchoring, which would
-      // fight with this manual restoration.
       await tick();
       if (messagesContainer) {
         const delta = messagesContainer.scrollHeight - prevScrollHeight;
         messagesContainer.scrollTop = prevScrollTop + delta;
       }
-      // Clear the suppress flag on the next frame, after the browser has
-      // had a chance to fire (and we ignore) the scroll event from above.
       requestAnimationFrame(() => {
-        suppressScrollLoad = false;
-        isLoadingOlder = false;
+        if (messagesContainer) {
+          const delta = messagesContainer.scrollHeight - prevScrollHeight;
+          messagesContainer.scrollTop = prevScrollTop + delta;
+        }
+        requestAnimationFrame(() => {
+          suppressScrollLoad = false;
+          isLoadingOlder = false;
+        });
       });
     } catch {
       isLoadingOlder = false;
