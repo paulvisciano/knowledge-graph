@@ -77,13 +77,6 @@ export class KgApiClient {
     });
   }
 
-  async createNote(text: string): Promise<{ status: string; file_source: string }> {
-    return this.request(API.kg.createNote, {
-      method: 'POST',
-      body: new URLSearchParams({ text }),
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-  }
 
   async listJobs(status?: string): Promise<JobInfo[]> {
     const path = status ? `${API.kg.listJobs}?status=${encodeURIComponent(status)}` : API.kg.listJobs;

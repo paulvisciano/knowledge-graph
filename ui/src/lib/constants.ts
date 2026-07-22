@@ -22,7 +22,7 @@ export const API = {
     labelFace: '/images/faces/label',
     createJob: '/images/jobs',
     listJobs: '/images/jobs',
-    createNote: '/images/notes',
+
     jobStatus: (jobId: string) => `/images/jobs/${jobId}`,
     jobEvents: (jobId: string, after?: number) => `/images/jobs/${jobId}/events${after ? `?after=${after}` : ''}`,
   },
