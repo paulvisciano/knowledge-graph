@@ -75,7 +75,9 @@ class SyncClient {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Failed to load conversations: ${res.status}`);
       const summaries: ConversationSummary[] = await res.json();
-      this.conversations = summaries.map((s) => this.fromSyncConv(s));
+      this.conversations = summaries
+        .map((s) => this.fromSyncConv(s))
+        .sort((a, b) => b.createdAt - a.createdAt);
       this.lastSyncTimestamp = Date.now();
     } catch (e: any) {
       this.error = e.message ?? 'Failed to init sync';
@@ -185,6 +187,7 @@ class SyncClient {
         this.loadedConversations.set(nexusConv.id, nexusMessages);
       }
 
+      this.conversations.sort((a, b) => b.createdAt - a.createdAt);
       this.lastSyncTimestamp = Date.now();
       this.onSync?.(this.conversations);
     } catch {
