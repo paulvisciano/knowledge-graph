@@ -170,6 +170,45 @@
       null,
   );
 
+  // Full document text from LightRAG (the rich AI-generated description).
+  const docContentCache = new Map<string, string>();
+  let fetchedDocNodeId = $state<string | null>(null);
+  let fetchedDocContent = $state<string | null>(null);
+  let docLoading = $state(false);
+  let docError = $state<string | null>(null);
+
+  async function fetchDocContentForNode(nodeId: string, fileSource: string) {
+    if (docContentCache.has(nodeId)) {
+      fetchedDocContent = docContentCache.get(nodeId) ?? null;
+      fetchedDocNodeId = nodeId;
+      return;
+    }
+    docLoading = true;
+    docError = null;
+    try {
+      const docId = await lightragClient.resolveDocumentId(fileSource);
+      if (!docId) {
+        docContentCache.set(nodeId, '');
+        fetchedDocContent = null;
+        fetchedDocNodeId = nodeId;
+        return;
+      }
+      const data = await lightragClient.getDocumentFullContent(docId);
+      const content = data?.content ?? '';
+      docContentCache.set(nodeId, content);
+      fetchedDocContent = content || null;
+      fetchedDocNodeId = nodeId;
+    } catch (err) {
+      console.error('[NodeOverlay] Failed to fetch document content:', err);
+      docError = 'Failed to load description.';
+      docContentCache.set(nodeId, '');
+      fetchedDocContent = null;
+      fetchedDocNodeId = nodeId;
+    } finally {
+      docLoading = false;
+    }
+  }
+
   let locationText = $derived(
     locations.length > 0
       ? getNodeName(locations[0])
@@ -197,6 +236,18 @@
       (kgNode?.properties?.file_path as string);
     if (fileSource) {
       fetchExifForNode(id, fileSource);
+    }
+  });
+
+  $effect(() => {
+    const id = node?.id;
+    if (!id) return;
+    // Prefer the rich LightRAG document content; fall back to node properties.
+    const fileSource =
+      (kgNode?.properties?.source_id as string) ??
+      (kgNode?.properties?.file_path as string);
+    if (fileSource) {
+      fetchDocContentForNode(id, fileSource);
     }
   });
 
@@ -259,14 +310,18 @@
     <div class="hud-scan" aria-hidden="true"></div>
 
     <div class="hud-photo-panel">
-      <span class="hud-corner hud-corner-tl" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-tr" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-bl" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-br" aria-hidden="true"></span>
-
       <div class="hud-photo-stage">
         {#if fullUrl ?? imageUrl}
-          <img src={fullUrl ?? imageUrl} alt={fileName} class="hud-photo-img" />
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
+          <img
+            src={fullUrl ?? imageUrl}
+            alt={fileName}
+            class="hud-photo-img"
+            role="button"
+            tabindex="0"
+            onclick={() => openFullscreen(fullUrl ?? imageUrl!)}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFullscreen(fullUrl ?? imageUrl!); } }}
+          />
         {:else}
           <div class="hud-photo-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -277,6 +332,13 @@
           </div>
         {/if}
         <div class="hud-photo-overlay" aria-hidden="true"></div>
+
+        {#if fullUrl ?? imageUrl}
+          <div class="hud-photo-expand" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            <span>Click to expand</span>
+          </div>
+        {/if}
 
         <div class="hud-photo-tags">
           {#if locationText}
@@ -292,12 +354,6 @@
             </span>
           {/if}
         </div>
-
-        {#if fullUrl}
-          <button class="hud-photo-fullscreen" onclick={() => openFullscreen(fullUrl)} aria-label="View full screen">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </button>
-        {/if}
 
         {#if isProcessing || isComplete || isError}
           <div class="hud-photo-status">
@@ -331,11 +387,6 @@
     </div>
 
     <div class="hud-info-panel">
-      <span class="hud-corner hud-corner-tl" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-tr" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-bl" aria-hidden="true"></span>
-      <span class="hud-corner hud-corner-br" aria-hidden="true"></span>
-
       <header class="hud-header">
         <div class="hud-title">
           <span class="hud-pip" aria-hidden="true"></span>
@@ -348,8 +399,17 @@
 
       <div class="hud-info-body">
         <section class="hud-section">
-          <h3 class="hud-h3">[ DESCRIPTION ]</h3>
-          {#if descriptionContent}
+          <h3 class="hud-h3 hud-h3-hero">[ DESCRIPTION ]</h3>
+          {#if docLoading}
+            <div class="hud-summary-loading">
+              <span class="hud-spinner" aria-hidden="true"></span>
+              <span>Loading description…</span>
+            </div>
+          {:else if docError}
+            <div class="hud-summary-error">{docError}</div>
+          {:else if fetchedDocNodeId === node?.id && fetchedDocContent}
+            <div class="hud-summary prose-cyber">{@html renderMarkdown(fetchedDocContent)}</div>
+          {:else if descriptionContent}
             <div class="hud-summary prose-cyber">{@html renderMarkdown(descriptionContent)}</div>
           {:else}
             <div class="hud-summary-empty">No description available.</div>
@@ -442,12 +502,6 @@
       </div>
 
       <footer class="hud-actions">
-        {#if fullUrl}
-          <button class="hud-btn hud-btn-cyan" onclick={() => openFullscreen(fullUrl)}>
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-            View Full
-          </button>
-        {/if}
         <button class="hud-btn hud-btn-red" onclick={handleDelete} disabled={deleting}>
           {#if deleting}
             <span class="hud-spinner hud-spinner-sm" aria-hidden="true"></span>
@@ -541,14 +595,8 @@
   .hud-photo-panel {
     position: relative;
     width: 60%;
-    background: #0a0e17;
     overflow: hidden;
     flex-shrink: 0;
-    box-shadow: inset 0 0 60px rgba(0, 212, 255, 0.06);
-  }
-  .hud-photo-panel .hud-corner {
-    width: 10px;
-    height: 10px;
   }
 
   .hud-photo-stage {
@@ -566,6 +614,13 @@
     max-height: 100%;
     object-fit: contain;
     display: block;
+    cursor: zoom-in;
+    border-radius: 2px;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .hud-photo-img:focus-visible {
+    outline: 2px solid rgba(0, 212, 255, 0.6);
+    outline-offset: 4px;
   }
   .hud-photo-placeholder {
     display: flex;
@@ -581,6 +636,33 @@
     pointer-events: none;
     background: linear-gradient(to top, rgba(10, 14, 23, 0.8) 0%, transparent 30%);
   }
+
+  .hud-photo-expand {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: rgba(10, 14, 23, 0.7);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10px;
+    color: rgba(0, 212, 255, 0.8);
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+  .hud-photo-stage:hover .hud-photo-expand {
+    opacity: 1;
+  }
+  .hud-photo-expand svg { flex-shrink: 0; }
 
   .hud-photo-tags {
     position: absolute;
@@ -616,30 +698,6 @@
     border-color: rgba(0, 212, 255, 0.4);
   }
 
-  .hud-photo-fullscreen {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    width: 32px;
-    height: 32px;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 212, 255, 0.1);
-    border: 1px solid rgba(0, 212, 255, 0.4);
-    border-radius: 50%;
-    color: #00d4ff;
-    cursor: pointer;
-    backdrop-filter: blur(4px);
-    transition: all 0.2s ease;
-  }
-  .hud-photo-fullscreen:hover {
-    background: rgba(0, 212, 255, 0.25);
-    border-color: #00d4ff;
-    box-shadow: 0 0 12px rgba(0, 212, 255, 0.5);
-  }
-
   .hud-photo-status {
     position: absolute;
     top: 12px;
@@ -666,12 +724,7 @@
     width: 40%;
     display: flex;
     flex-direction: column;
-    border-left: 1px solid rgba(0, 212, 255, 0.3);
-    background: rgba(13, 20, 35, 0.4);
-  }
-  .hud-info-panel .hud-corner {
-    width: 10px;
-    height: 10px;
+    border-left: 1px solid rgba(0, 212, 255, 0.12);
   }
 
   .hud-header {
@@ -741,7 +794,8 @@
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
+    scroll-behavior: smooth;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
   }
@@ -754,18 +808,26 @@
   .hud-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
   .hud-h3 {
     margin: 0;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     color: rgba(0, 212, 255, 0.8);
     text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
-    padding-bottom: 4px;
+    padding-bottom: 6px;
     border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+  }
+  .hud-h3-hero {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    color: #00d4ff;
+    text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.4);
   }
   .hud-count {
     color: #00d4ff;
@@ -774,19 +836,20 @@
 
   /* Faces */
   .hud-faces {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
     gap: 8px;
   }
   .hud-face {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 8px 4px 4px;
+    padding: 6px 10px 6px 6px;
     background: rgba(168, 85, 247, 0.06);
     border: 1px solid rgba(168, 85, 247, 0.25);
     border-radius: 2px;
     transition: all 0.15s;
+    min-width: 0;
   }
   .hud-face:hover {
     border-color: rgba(168, 85, 247, 0.6);
@@ -794,8 +857,8 @@
     box-shadow: 0 0 8px rgba(168, 85, 247, 0.2);
   }
   .hud-face-img {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
     object-fit: cover;
     border: 1px solid rgba(0, 212, 255, 0.5);
@@ -803,13 +866,13 @@
     flex-shrink: 0;
   }
   .hud-face-fallback {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     border: 1px solid rgba(0, 212, 255, 0.3);
     flex-shrink: 0;
@@ -820,6 +883,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
   /* Chips */
@@ -832,7 +896,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 8px;
+    padding: 4px 9px;
     border-radius: 2px;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     font-size: 10px;
@@ -858,54 +922,143 @@
     border-radius: 2px;
   }
 
-  /* Summary / Description */
+  /* Summary / Description — HERO */
   .hud-summary {
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: 13.5px;
+    line-height: 1.65;
     color: #c8d6e5;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(0, 212, 255, 0.1);
+    padding: 12px 14px 12px 16px;
+    background: linear-gradient(180deg, rgba(0, 212, 255, 0.05) 0%, rgba(0, 212, 255, 0.02) 100%);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-left: 2px solid #00d4ff;
     border-radius: 2px;
-    max-height: 300px;
+    max-height: 540px;
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
+    scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
+    box-shadow:
+      0 0 12px rgba(0, 212, 255, 0.08),
+      inset 0 0 0 1px rgba(0, 212, 255, 0.03);
   }
   .hud-summary::-webkit-scrollbar { width: 4px; }
   .hud-summary::-webkit-scrollbar-thumb {
-    background: rgba(0, 212, 255, 0.2);
+    background: rgba(0, 212, 255, 0.25);
     border-radius: 2px;
   }
   .hud-summary-empty {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    font-size: 11px;
+    padding: 14px;
+    font-size: 12px;
     color: #64748b;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(0, 212, 255, 0.1);
+    border-left: 2px solid rgba(100, 116, 139, 0.4);
+    border-radius: 2px;
+  }
+  .hud-summary-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px;
+    font-size: 12px;
+    color: #00d4ff;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    background: linear-gradient(180deg, rgba(0, 212, 255, 0.05) 0%, rgba(0, 212, 255, 0.02) 100%);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-left: 2px solid #00d4ff;
+    border-radius: 2px;
+  }
+  .hud-summary-error {
+    padding: 14px;
+    font-size: 12px;
+    color: #f87171;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    background: rgba(248, 113, 113, 0.06);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-left: 2px solid #f87171;
+    border-radius: 2px;
   }
 
   /* Markdown overrides */
-  .hud-summary :global(.hud-p) { margin: 0.5em 0; }
+  .hud-summary :global(.hud-p) { margin: 0.6em 0; }
+  .hud-summary :global(.hud-p:first-child) { margin-top: 0; }
+  .hud-summary :global(.hud-p:last-child) { margin-bottom: 0; }
+  .hud-summary :global(h1),
+  .hud-summary :global(h2),
+  .hud-summary :global(h3),
+  .hud-summary :global(h4) {
+    margin: 1em 0 0.5em;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    color: #00d4ff;
+    text-shadow: 0 0 6px rgba(0, 212, 255, 0.25);
+    line-height: 1.3;
+  }
+  .hud-summary :global(h1) { font-size: 16px; }
+  .hud-summary :global(h2) { font-size: 14px; }
+  .hud-summary :global(h3) { font-size: 13px; }
+  .hud-summary :global(h4) { font-size: 12px; }
   .hud-summary :global(.hud-code) {
-    margin: 0.5em 0;
+    margin: 0.6em 0;
     overflow-x: auto;
-    padding: 6px;
-    background: rgba(0, 0, 0, 0.5);
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.55);
     border: 1px solid rgba(0, 212, 255, 0.2);
     border-radius: 2px;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 1.5;
     color: #c8d6e5;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
+  }
+  .hud-summary :global(.hud-code)::-webkit-scrollbar { height: 4px; }
+  .hud-summary :global(.hud-code)::-webkit-scrollbar-thumb {
+    background: rgba(0, 212, 255, 0.2);
+    border-radius: 2px;
   }
   .hud-summary :global(strong) { color: #e2e8f0; font-weight: 600; }
-  .hud-summary :global(em) { color: #94a3b8; }
+  .hud-summary :global(em) { color: #94a3b8; font-style: italic; }
   .hud-summary :global(ul),
-  .hud-summary :global(ol) { padding-left: 1.4em; margin: 0.4em 0; }
-  .hud-summary :global(li) { margin: 0.2em 0; }
+  .hud-summary :global(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+  .hud-summary :global(ul) { list-style: square; }
+  .hud-summary :global(ol) { list-style: decimal; }
+  .hud-summary :global(li) { margin: 0.25em 0; }
+  .hud-summary :global(li::marker) { color: rgba(0, 212, 255, 0.6); }
+  .hud-summary :global(blockquote) {
+    margin: 0.6em 0;
+    padding: 4px 12px;
+    border-left: 2px solid rgba(0, 212, 255, 0.4);
+    background: rgba(0, 212, 255, 0.04);
+    color: #94a3b8;
+    border-radius: 2px;
+  }
   .hud-summary :global(a) { color: #00d4ff; text-decoration: underline; }
+  .hud-summary :global(hr) {
+    border: none;
+    border-top: 1px solid rgba(0, 212, 255, 0.15);
+    margin: 1em 0;
+  }
+  .hud-summary :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    font-size: 12px;
+  }
+  .hud-summary :global(th),
+  .hud-summary :global(td) {
+    padding: 4px 8px;
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    text-align: left;
+  }
+  .hud-summary :global(th) {
+    background: rgba(0, 212, 255, 0.08);
+    color: #00d4ff;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+  }
 
   /* Processing status */
   .hud-status {
@@ -980,25 +1133,28 @@
   .hud-exif {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 4px 12px;
+    gap: 1px;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    border-radius: 2px;
+    overflow: hidden;
   }
   .hud-exif-row {
     display: flex;
     justify-content: space-between;
-    gap: 6px;
+    gap: 8px;
     align-items: baseline;
-    padding: 4px 6px;
-    background: rgba(0, 212, 255, 0.03);
-    border: 1px solid rgba(0, 212, 255, 0.1);
-    border-radius: 2px;
+    padding: 6px 10px;
+    background: rgba(13, 20, 35, 0.6);
+    min-width: 0;
   }
   .hud-exif-label {
-    color: #94a3b8;
+    color: #64748b;
     font-size: 10px;
     flex-shrink: 0;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
   }
   .hud-exif-value {
     color: #c8d6e5;
@@ -1008,6 +1164,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    min-width: 0;
   }
 
   /* Action bar */
@@ -1118,7 +1275,7 @@
     .hud-info-panel {
       width: 100%;
       border-left: none;
-      border-top: 1px solid rgba(0, 212, 255, 0.3);
+      border-top: 1px solid rgba(0, 212, 255, 0.12);
     }
     .hud-exif {
       grid-template-columns: 1fr;
