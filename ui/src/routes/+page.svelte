@@ -2,7 +2,6 @@
   import type { ChatMessage, MCPToolCall, OllamaMessage } from '$lib/constants';
   import { API } from '$lib/constants';
   import { tick } from 'svelte';
-  import { eventBus } from '$lib/stores/event-bus.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
   import { mcpClient } from '$lib/services/mcp-client.svelte';
@@ -11,7 +10,6 @@
   import { conversationStore } from '$lib/stores/conversation.svelte';
   import CanvasView from '$lib/components/canvas/CanvasView.svelte';
   import IngestionPanel from '$lib/components/ingestion/IngestionPanel.svelte';
-  import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
   import NodeDetail from '$lib/components/graph/NodeDetail.svelte';
 
   import Icon from '$lib/components/ui/Icon.svelte';
@@ -625,7 +623,7 @@
       type ContentPart = { type: string; text?: string; image_url?: { url: string }; input_audio?: { data: string; format: string } };
       type ApiMessage = { role: string; content: string | ContentPart[] | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } | { role: 'tool'; tool_call_id: string; content: string };
       let apiMessages: ApiMessage[] = [
-        { role: 'system', content: configStore.systemPrompt },
+        { role: 'system', content: configStore.systemPrompt.replaceAll('{{CURRENT_DATE}}', new Date().toISOString().slice(0, 10)) },
         ...messages
           .filter((m) => !m.isStreaming)
           .map((m) => {
@@ -950,15 +948,6 @@
                 : mtc
             ),
           }));
-
-          eventBus.pushEvent({
-            id: generateId(),
-            type: 'mcp_call',
-            title: tc.name,
-            description: isToolError ? `Error: ${toolResult.slice(0, 100)}` : toolResult.slice(0, 100),
-            timestamp: Date.now(),
-            status: isToolError ? 'error' : 'completed',
-          });
         }
 
         // Finalize this assistant message — the tool turn is done, the next
@@ -1109,14 +1098,6 @@
       if (err instanceof Error && err.name === 'AbortError') return;
       console.warn(`KG image processing failed for ${att.name}:`, err);
       imageProcessingStore.updateStage(photoNodeId, 'error', err instanceof Error ? err.message : 'Unknown error');
-      eventBus.pushEvent({
-        id: crypto.randomUUID(),
-        type: 'graph_update',
-        title: 'Image processing failed',
-        description: `${att.name}: ${err instanceof Error ? err.message : 'Unknown error'}`,
-        timestamp: Date.now(),
-        status: 'error',
-      });
     }
   }
 
@@ -1191,20 +1172,6 @@
           if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
             imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
           }
-
-          eventBus.pushEvent({
-            id: crypto.randomUUID(),
-            type: 'graph_update',
-            title: eventName.replace(/_/g, ' '),
-            description: String(eventData.name ?? eventData.entity_name ?? eventData.message ?? att.name),
-            timestamp: Date.now(),
-            status: eventName.endsWith('_complete') || eventName.endsWith('_created') || eventName === 'pipeline_complete'
-              ? 'completed'
-              : eventName.endsWith('_failed') || eventName.endsWith('_timeout')
-                ? 'error'
-                : 'running',
-            meta: eventData as Record<string, unknown>,
-          });
 
           if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
             const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
@@ -1720,7 +1687,7 @@
           {/if}
 
           {#snippet messageRow(msg: ChatMessage)}
-            <div class="group mb-4 animate-fade-in-up" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
+            <div class="group mb-4" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
                 <div class="flex justify-end">
                   <div class="max-w-[95%] space-y-1">
@@ -2048,6 +2015,18 @@
                 <span class="chat-conversation-divider-line"></span>
                 <span class="chat-conversation-divider-label">
                   {formatConversationDate(conv.createdAt)}
+                  <button
+                    type="button"
+                    class="chat-conversation-divider-export"
+                    title="Export conversation"
+                    aria-label="Export conversation"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      exportConversationToJsonl(convId);
+                    }}
+                  >
+                    <Icon name="download" size={12} color="var(--color-cyber-cyan)" />
+                  </button>
                 </span>
                 <span class="chat-conversation-divider-line"></span>
               </div>
@@ -2074,6 +2053,18 @@
               <span class="chat-conversation-divider-line"></span>
               <span class="chat-conversation-divider-label">
                 {formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}
+                <button
+                  type="button"
+                  class="chat-conversation-divider-export"
+                  title="Export conversation"
+                  aria-label="Export conversation"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    exportConversationToJsonl(activeConversationId);
+                  }}
+                >
+                  <Icon name="download" size={12} color="var(--color-cyber-cyan)" />
+                </button>
               </span>
               <span class="chat-conversation-divider-line"></span>
             </div>
@@ -2182,10 +2173,6 @@
   {:else if $activeTab === 'ingestion'}
     <div class="h-full w-full overflow-hidden p-2 md:pt-14 md:pl-14 md:pr-4 md:pb-4">
       <IngestionPanel />
-    </div>
-  {:else if $activeTab === 'activity'}
-    <div class="h-full w-full overflow-hidden p-2 md:p-4">
-      <ActivityFeed events={eventBus.events} connected={true} />
     </div>
   {/if}
 </div>
@@ -2403,6 +2390,32 @@
       0 0 24px rgba(0, 212, 255, 0.35),
       inset 0 0 12px rgba(0, 212, 255, 0.1);
     text-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+  }
+
+  .chat-conversation-divider-export {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 10px;
+    padding: 3px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-cyber-cyan);
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, background 0.15s ease;
+  }
+
+  .chat-conversation-divider-export:hover {
+    opacity: 1;
+    background: rgba(0, 212, 255, 0.12);
+  }
+
+  .chat-conversation-divider-export:focus-visible {
+    outline: 1.5px solid rgba(0, 212, 255, 0.7);
+    outline-offset: 1px;
+    opacity: 1;
   }
 
 

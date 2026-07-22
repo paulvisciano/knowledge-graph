@@ -1,8 +1,7 @@
 import { lightragClient } from '$lib/services/lightrag-client';
 import { llamaClient } from '$lib/services/llama-client';
 import { kgApiClient } from '$lib/services/kg-api-client';
-import { mcpClient } from '$lib/services/mcp-client.svelte';
-import { eventBus } from './event-bus.svelte';
+  import { mcpClient } from '$lib/services/mcp-client.svelte';
 
 class ConnectionStore {
   lightragConnected = $state(false);

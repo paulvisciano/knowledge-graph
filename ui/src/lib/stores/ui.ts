@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type TabId = 'graph' | 'ingestion' | 'activity';
+export type TabId = 'graph' | 'ingestion';
 
 export const activeTab = writable<TabId>('graph');
 

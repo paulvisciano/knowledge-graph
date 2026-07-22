@@ -4,7 +4,6 @@
   import { kgApiClient } from '$lib/services/kg-api-client';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
-  import { eventBus } from '$lib/stores/event-bus.svelte';
   const ACCENT_COLORS = ['#00d4ff', '#a855f7', '#00ff88', '#ff8c00'];
 
   function formatCreatedAt(value: unknown): string {
@@ -300,15 +299,6 @@
       clearLabelSuccess();
       labelSuccess = true;
       labelSuccessTimer = setTimeout(() => clearLabelSuccess(), 2500);
-      eventBus.pushEvent({
-        id: crypto.randomUUID(),
-        type: 'graph_update',
-        title: 'Face labeled',
-        description: `Renamed "${result.old_name}" to "${result.new_name}"`,
-        timestamp: Date.now(),
-        status: 'completed',
-        meta: { face_id: faceId, old_name: result.old_name, new_name: result.new_name },
-      });
     } catch (err) {
       labelError = err instanceof Error ? err.message : 'Labeling failed.';
     } finally {

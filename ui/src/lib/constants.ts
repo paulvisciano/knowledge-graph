@@ -266,12 +266,3 @@ export interface OllamaChatChunk {
   eval_count?: number;
 }
 
-export interface ActivityEvent {
-  id: string;
-  type: 'ingestion' | 'query' | 'mcp_call' | 'graph_update' | 'system';
-  title: string;
-  description: string;
-  timestamp: number;
-  status?: 'running' | 'completed' | 'error';
-  meta?: Record<string, unknown>;
-}

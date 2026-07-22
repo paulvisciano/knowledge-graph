@@ -25,17 +25,6 @@ export async function uploadImage(page: Page, filePath: string) {
   return fileInput;
 }
 
-/**
- * Wait for an SSE event to appear in the activity feed.
- * The activity feed shows events with their names (e.g. "photo node created").
- */
-export async function waitForActivityEvent(page: Page, eventName: string, timeout = 60_000) {
-  const activityFeed = page.getByTestId('activity-feed');
-  await expect(
-    activityFeed.getByText(eventName, { exact: false })
-  ).toBeVisible({ timeout });
-}
-
 /** Wait for a specific number of nodes to appear in the graph store. */
 export async function waitForNodeCount(page: Page, minCount: number, timeout = 60_000) {
   await page.waitForFunction(

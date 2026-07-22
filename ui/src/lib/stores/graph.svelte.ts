@@ -1,7 +1,6 @@
 import type { KGNode, KGEdge } from '$lib/constants';
 import { API } from '$lib/constants';
 import { lightragClient } from '$lib/services/lightrag-client';
-import { eventBus } from './event-bus.svelte';
 
 const KG_API_BASE = '/api/kg';
 
@@ -59,25 +58,9 @@ class GraphStore {
       const preservedEdges = this.edges.filter((e) => !lightragEdgeIds.has(e.id));
       this.nodes = [...graph.nodes, ...preservedNodes];
       this.edges = [...graph.edges, ...preservedEdges];
-      eventBus.pushEvent({
-        id: crypto.randomUUID(),
-        type: 'graph_update',
-        title: 'Graph loaded',
-        description: `${graph.nodes.length} nodes, ${graph.edges.length} edges`,
-        timestamp: Date.now(),
-        status: 'completed',
-        meta: { nodeCount: graph.nodes.length, edgeCount: graph.edges.length },
-      });
       this.fetchPhotoImages(graph.nodes);
     } catch (err) {
-      eventBus.pushEvent({
-        id: crypto.randomUUID(),
-        type: 'graph_update',
-        title: 'Graph load failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        timestamp: Date.now(),
-        status: 'error',
-      });
+      console.error('Graph load failed:', err);
     } finally {
       this.isLoading = false;
     }

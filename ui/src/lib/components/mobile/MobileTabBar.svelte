@@ -5,7 +5,6 @@
   const tabs: { id: TabId; icon: string; label: string }[] = [
     { id: 'graph', icon: 'graph', label: 'Graph' },
     { id: 'ingestion', icon: 'upload', label: 'Ingest' },
-    { id: 'activity', icon: 'activity', label: 'Activity' },
   ];
 </script>
 

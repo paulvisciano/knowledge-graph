@@ -5,7 +5,6 @@ import {
   waitForNodeWithLabel,
   waitForNodeWithId,
   waitForEdge,
-  waitForActivityEvent,
   resetPage,
 } from './helpers';
 
@@ -104,22 +103,13 @@ test.describe('Image processing workflow', () => {
     expect(edgeCount).toBeGreaterThanOrEqual(1);
   });
 
-  test('activity feed shows processing events', async ({ page }) => {
-    const testImage = 'e2e/fixtures/test-photo.jpg';
-
-    await uploadImage(page, testImage);
-
-    // The activity feed should show at least "extracting exif" or "photo node created"
-    await waitForActivityEvent(page, 'photo node created', 90_000);
-  });
-
   test('graph refresh after pipeline completion preserves nodes', async ({ page }) => {
     const testImage = 'e2e/fixtures/test-photo.jpg';
 
     await uploadImage(page, testImage);
 
-    // Wait for pipeline to complete (the pipeline_complete event)
-    await waitForActivityEvent(page, 'pipeline complete', 120_000);
+    // Wait for the pipeline to complete (graphStore.pipelineDone is set on pipeline_complete)
+    await page.waitForFunction(() => !!(window as any).__graphStore?.pipelineDone, { timeout: 120_000 });
 
     // The Photo node should still exist after the graph refreshes
     await waitForNodeWithId(page, '(Photo)', 30_000);
