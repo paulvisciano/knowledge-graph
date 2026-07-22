@@ -68,6 +68,7 @@
   const EXIF_DISPLAY_KEYS: Record<string, string> = {
     camera: 'Camera',
     date_taken_friendly: 'Date',
+    location: 'Location',
     lens: 'Lens',
     f_number: 'f/',
     iso: 'ISO',
@@ -80,43 +81,124 @@
     orientation: 'Orientation',
   };
 
-  const PROMINENT_KEYS = ['camera', 'lens', 'f_number', 'iso', 'exposure_time', 'date_taken_friendly'];
+  function formatExifRows(exif: Record<string, unknown>): { label: string; value: string }[] {
+    const rows: { label: string; value: string }[] = [];
+    for (const [key, displayLabel] of Object.entries(EXIF_DISPLAY_KEYS)) {
+      const val = exif[key];
+      if (val != null && val !== '') {
+        const strVal = String(val);
+        if (key === 'f_number') {
+          rows.push({ label: displayLabel, value: `f/${strVal}` });
+        } else {
+          rows.push({ label: displayLabel, value: strVal });
+        }
+      }
+    }
+    return rows;
+  }
 
-  let { node, onClose, onDelete } = $props<{
-    node: KGNode | null;
+  let {
+    node,
+    kgNode,
+    onClose,
+  }: {
+    node: CanvasNode | null;
+    kgNode: KGNode | null;
     onClose: () => void;
-    onDelete: (id: string) => void;
-  }>();
+  } = $props();
 
-  let { 
-    persons = [], 
-    locations = [], 
-    events = [], 
-    others = [], 
-    summaryContent = '', 
-    summaryLoading = false, 
-    summaryError = null 
-  } = $derived(node?.properties || {});
+  const exifCache = new Map<string, { label: string; value: string }[] | null>();
+  let fetchedExifNodeId = $state<string | null>(null);
+  let fetchedExifRows = $state<{ label: string; value: string }[]>([]);
+  let fullscreenUrl = $state<string | null>(null);
+  let deleting = $state(false);
+  let personPhotoErrors = $state(new Set<string>());
 
-  let secondaryExifRows = $derived(
-    Object.entries(node?.properties || {})
-      .filter(([k]) => EXIF_DISPLAY_KEYS[k] && !PROMINENT_KEYS.includes(k))
-      .map(([k, v]) => ({ label: EXIF_DISPLAY_KEYS[k], value: String(v) }))
+  async function fetchExifForNode(nodeId: string, fileSource: string) {
+    if (exifCache.has(nodeId)) {
+      fetchedExifRows = exifCache.get(nodeId) ?? [];
+      fetchedExifNodeId = nodeId;
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/kg${API.kg.photoExif(fileSource)}`);
+      if (!resp.ok) {
+        exifCache.set(nodeId, null);
+        return;
+      }
+      const exif = (await resp.json()) as Record<string, unknown>;
+      const rows = formatExifRows(exif);
+      exifCache.set(nodeId, rows);
+      fetchedExifRows = rows;
+      fetchedExifNodeId = nodeId;
+    } catch {
+      exifCache.set(nodeId, null);
+    }
+  }
+
+  let neighborNodes = $derived.by<KGNode[]>(() => {
+    const id = node?.id;
+    if (!id) return [];
+    const nbrEdges = graphStore.edges.filter(
+      (e) => e.source === id || e.target === id,
+    );
+    const nbrIds = new Set(
+      nbrEdges.flatMap((e) => [e.source, e.target]).filter((nid) => nid !== id),
+    );
+    return graphStore.nodes.filter((n) => nbrIds.has(n.id));
+  });
+
+  let persons = $derived(neighborNodes.filter((n) => classifyKind(n) === 'person'));
+  let locations = $derived(neighborNodes.filter((n) => classifyKind(n) === 'location'));
+  let events = $derived(neighborNodes.filter((n) => classifyKind(n) === 'event'));
+  let others = $derived(
+    neighborNodes.filter(
+      (n) => !['person', 'location', 'event'].includes(classifyKind(n)),
+    ),
   );
 
-  let fileName = $derived(node ? (node.properties?.filename as string) ?? (node.properties?.name as string) ?? node.id : '');
+  let fileName = $derived(
+    (kgNode?.properties?.source_id as string) ??
+      (kgNode?.properties?.file_path as string) ??
+      node?.id ??
+      'Photo',
+  );
+
+  let descriptionContent = $derived(
+    (kgNode?.properties?.description as string) ??
+      (kgNode?.properties?.summary as string) ??
+      null,
+  );
+
   let locationText = $derived(
-    locations.length > 0 ? getNodeName(locations[0]) : 
-    (node?.properties?.location as string) ?? null
+    locations.length > 0
+      ? getNodeName(locations[0])
+      : ((kgNode?.properties?.location as string) ?? (node?.properties?.location as string) ?? null),
   );
   let dateText = $derived(
-    (node?.properties?.date_taken_friendly as string) ?? 
-    (node?.properties?.created_at as string) ?? null
+    (kgNode?.properties?.date_taken_friendly as string) ??
+      (kgNode?.properties?.created_at as string) ??
+      (node?.properties?.date_taken_friendly as string) ??
+      (node?.properties?.created_at as string) ??
+      null,
   );
 
-  let personPhotoErrors = $state(new Set<string>());
-  let deleting = $state(false);
-  let fullscreenUrl = $state<string | null>(null);
+  $effect(() => {
+    const id = node?.id;
+    if (!id) return;
+    const live = imageProcessingStore.getExifSummary(id);
+    if (live.length > 0) {
+      fetchedExifNodeId = id;
+      fetchedExifRows = live;
+      return;
+    }
+    const fileSource =
+      (kgNode?.properties?.source_id as string) ??
+      (kgNode?.properties?.file_path as string);
+    if (fileSource) {
+      fetchExifForNode(id, fileSource);
+    }
+  });
 
   function openFullscreen(url: string) {
     fullscreenUrl = url;
@@ -127,14 +209,29 @@
   }
 
   function handleClose() {
+    fullscreenUrl = null;
     onClose();
   }
 
   async function handleDelete() {
-    if (!node) return;
+    const fileSource =
+      (kgNode?.properties?.source_id as string) ??
+      (kgNode?.properties?.file_path as string) ??
+      node?.id;
+    if (!fileSource || deleting) return;
     deleting = true;
     try {
-      await kgApiClient.deleteNode(node.id);
+      const docId = await lightragClient.resolveDocumentId(fileSource);
+      if (docId) {
+        await lightragClient.deleteDocument(docId);
+      }
+      try {
+        await kgApiClient.deletePhotoEntities(fileSource);
+      } catch {
+        // Best-effort cleanup — entity deletion may fail if already gone
+      }
+      graphStore.refresh();
+      fullscreenUrl = null;
       onClose();
     } catch (err) {
       console.error('[NodeOverlay] Delete failed:', err);
@@ -148,6 +245,7 @@
   {@const status = imageProcessingStore.statuses[node.id]}
   {@const imageUrl = node.imageUrl ?? graphStore.photoImages[node.id]}
   {@const fullUrl = node.fullUrl ?? (imageUrl ? imageUrl.replace(/([?&]w=)\d+\b/, '$1full') : undefined)}
+  {@const exifRows = fetchedExifNodeId === node.id ? fetchedExifRows : []}
   {@const isProcessing = status && status.stage !== 'complete' && status.stage !== 'error'}
   {@const isComplete = status?.stage === 'complete'}
   {@const isError = status?.stage === 'error'}
@@ -160,7 +258,6 @@
     <span class="hud-corner hud-corner-br" aria-hidden="true"></span>
     <div class="hud-scan" aria-hidden="true"></div>
 
-    <!-- LEFT PANEL: Photo -->
     <div class="hud-photo-panel">
       <span class="hud-corner hud-corner-tl" aria-hidden="true"></span>
       <span class="hud-corner hud-corner-tr" aria-hidden="true"></span>
@@ -168,8 +265,8 @@
       <span class="hud-corner hud-corner-br" aria-hidden="true"></span>
 
       <div class="hud-photo-stage">
-        {#if imageUrl}
-          <img src={imageUrl} alt={fileName} class="hud-photo-img" />
+        {#if fullUrl ?? imageUrl}
+          <img src={fullUrl ?? imageUrl} alt={fileName} class="hud-photo-img" />
         {:else}
           <div class="hud-photo-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -181,7 +278,6 @@
         {/if}
         <div class="hud-photo-overlay" aria-hidden="true"></div>
 
-        <!-- Tags overlaid on photo (bottom) -->
         <div class="hud-photo-tags">
           {#if locationText}
             <span class="hud-tag hud-tag-loc">
@@ -197,14 +293,12 @@
           {/if}
         </div>
 
-        <!-- Fullscreen button overlaid on photo (top-right) -->
         {#if fullUrl}
           <button class="hud-photo-fullscreen" onclick={() => openFullscreen(fullUrl)} aria-label="View full screen">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </button>
         {/if}
 
-        <!-- Processing status overlay on photo (top-left) -->
         {#if isProcessing || isComplete || isError}
           <div class="hud-photo-status">
             {#if isProcessing}
@@ -236,7 +330,6 @@
       </div>
     </div>
 
-    <!-- RIGHT PANEL: Info -->
     <div class="hud-info-panel">
       <span class="hud-corner hud-corner-tl" aria-hidden="true"></span>
       <span class="hud-corner hud-corner-tr" aria-hidden="true"></span>
@@ -254,24 +347,15 @@
       </header>
 
       <div class="hud-info-body">
-        <!-- Description section -->
         <section class="hud-section">
           <h3 class="hud-h3">[ DESCRIPTION ]</h3>
-          {#if summaryLoading}
-            <div class="hud-summary-loading">
-              <span class="hud-spinner" aria-hidden="true"></span>
-              <span>Loading description…</span>
-            </div>
-          {:else if summaryError}
-            <div class="hud-summary-error">{summaryError}</div>
-          {:else if summaryContent}
-            <div class="hud-summary prose-cyber">{@html renderMarkdown(summaryContent)}</div>
+          {#if descriptionContent}
+            <div class="hud-summary prose-cyber">{@html renderMarkdown(descriptionContent)}</div>
           {:else}
             <div class="hud-summary-empty">No description available.</div>
           {/if}
         </section>
 
-        <!-- People -->
         {#if persons.length > 0}
           <section class="hud-section">
             <h3 class="hud-h3">[ PEOPLE <span class="hud-count">{persons.length}</span> ]</h3>
@@ -304,7 +388,6 @@
           </section>
         {/if}
 
-        <!-- Locations -->
         {#if locations.length > 0}
           <section class="hud-section">
             <h3 class="hud-h3">[ LOCATIONS <span class="hud-count">{locations.length}</span> ]</h3>
@@ -319,7 +402,6 @@
           </section>
         {/if}
 
-        <!-- Events -->
         {#if events.length > 0}
           <section class="hud-section">
             <h3 class="hud-h3">[ EVENTS <span class="hud-count">{events.length}</span> ]</h3>
@@ -331,7 +413,6 @@
           </section>
         {/if}
 
-        <!-- Entities -->
         {#if others.length > 0}
           <section class="hud-section">
             <h3 class="hud-h3">[ ENTITIES <span class="hud-count">{others.length}</span> ]</h3>
@@ -345,12 +426,11 @@
           </section>
         {/if}
 
-        <!-- EXIF -->
-        {#if secondaryExifRows.length > 0}
+        {#if exifRows.length > 0}
           <section class="hud-section">
             <h3 class="hud-h3">[ EXIF DATA ]</h3>
             <div class="hud-exif">
-              {#each secondaryExifRows as row (row.label)}
+              {#each exifRows as row (row.label)}
                 <div class="hud-exif-row">
                   <span class="hud-exif-label">{row.label}</span>
                   <span class="hud-exif-value">{row.value}</span>
@@ -398,7 +478,7 @@
     position: absolute;
     top: 16px;
     right: 16px;
-    width: min(920px, 72vw);
+    width: min(960px, 72vw);
     max-width: calc(100vw - 32px);
     height: calc(100% - 104px);
     z-index: 100;
@@ -448,7 +528,7 @@
     z-index: 1;
     background: linear-gradient(to bottom, transparent 0%, rgba(0, 212, 255, 0.05) 50%, transparent 100%);
     background-size: 100% 8px;
-    opacity: 0.4;
+    opacity: 0.3;
     mix-blend-mode: screen;
     animation: hud-scan-move 6s linear infinite;
   }
@@ -457,13 +537,14 @@
     100% { background-position: 0 100%; }
   }
 
-  /* PHOTO PANEL */
+  /* PHOTO PANEL — hero, ~60% width */
   .hud-photo-panel {
     position: relative;
-    width: 56%;
-    background: rgba(8, 12, 20, 0.6);
+    width: 60%;
+    background: #0a0e17;
     overflow: hidden;
     flex-shrink: 0;
+    box-shadow: inset 0 0 60px rgba(0, 212, 255, 0.06);
   }
   .hud-photo-panel .hud-corner {
     width: 10px;
@@ -478,6 +559,7 @@
     align-items: center;
     justify-content: center;
     min-height: 0;
+    padding: 14px;
   }
   .hud-photo-img {
     max-width: 100%;
@@ -509,6 +591,29 @@
     flex-wrap: wrap;
     gap: 6px;
     z-index: 2;
+  }
+
+  .hud-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10px;
+    border-radius: 2px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid;
+  }
+  .hud-tag-loc {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.4);
+  }
+  .hud-tag-date {
+    color: #00d4ff;
+    background: rgba(0, 212, 255, 0.12);
+    border-color: rgba(0, 212, 255, 0.4);
   }
 
   .hud-photo-fullscreen {
@@ -555,10 +660,10 @@
   .hud-photo-status .hud-spinner { width: 12px; height: 12px; }
   .hud-photo-status .hud-status-icon { width: 14px; height: 14px; }
 
-  /* INFO PANEL */
+  /* INFO PANEL — ~40% width */
   .hud-info-panel {
     position: relative;
-    width: 44%;
+    width: 40%;
     display: flex;
     flex-direction: column;
     border-left: 1px solid rgba(0, 212, 255, 0.3);
@@ -615,8 +720,8 @@
     align-items: center;
     justify-content: center;
     background: rgba(0, 212, 255, 0.1);
-    border: 1px solid rgba(0, 212, 255, 0.3);
-    border-radius: 4px;
+    border: 1px solid rgba(0, 212, 255, 0.4);
+    border-radius: 50%;
     cursor: pointer;
     color: #00d4ff;
     transition: all 0.15s;
@@ -633,10 +738,10 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 14px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 212, 255, 0.2) transparent;
   }
@@ -753,7 +858,7 @@
     border-radius: 2px;
   }
 
-  /* Summary */
+  /* Summary / Description */
   .hud-summary {
     font-size: 12px;
     line-height: 1.6;
@@ -772,7 +877,6 @@
     background: rgba(0, 212, 255, 0.2);
     border-radius: 2px;
   }
-  .hud-summary-loading,
   .hud-summary-empty {
     display: flex;
     align-items: center;
@@ -781,14 +885,6 @@
     font-size: 11px;
     color: #64748b;
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  }
-  .hud-summary-error {
-    padding: 8px 12px;
-    font-size: 11px;
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.08);
-    border: 1px solid rgba(248, 113, 113, 0.3);
-    border-radius: 2px;
   }
 
   /* Markdown overrides */
@@ -1017,7 +1113,7 @@
     }
     .hud-photo-panel {
       width: 100%;
-      height: 40vh;
+      height: 42vh;
     }
     .hud-info-panel {
       width: 100%;
