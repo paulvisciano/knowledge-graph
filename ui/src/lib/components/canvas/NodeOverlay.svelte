@@ -398,8 +398,7 @@
       </header>
 
       <div class="hud-info-body">
-        <section class="hud-section">
-          <h3 class="hud-h3 hud-h3-hero">[ DESCRIPTION ]</h3>
+        <section class="hud-section hud-section-description">
           {#if docLoading}
             <div class="hud-summary-loading">
               <span class="hud-spinner" aria-hidden="true"></span>
@@ -607,7 +606,6 @@
     align-items: center;
     justify-content: center;
     min-height: 0;
-    padding: 14px;
   }
   .hud-photo-img {
     max-width: 100%;
