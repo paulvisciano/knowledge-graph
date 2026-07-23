@@ -21,14 +21,15 @@ export const MAX_VELOCITY = 3.2;
 
 /**
  * Absolute depth (world units) at which the far depth-fade ramp begins.
- * Tuned relative to MAX_CAMERA_Z (1000): planes start fading at ~45% zoom-out
- * and are fully invisible by ~70%, so users see depth fade as they zoom out.
- * Mirrors the reference repo's 140/260 band scaled to our larger world.
+ * Scaled up alongside INITIAL_CAMERA_Z (600) so the newest bucket — whose
+ * nodes sit at absDepth ∈ (INITIAL_CAMERA_Z - CHUNK_SIZE, INITIAL_CAMERA_Z]
+ * = (440, 600] — stays fully opaque on first load while the view starts
+ * zoomed further out.
  */
-export const DEPTH_FADE_START = 450;
+export const DEPTH_FADE_START = 650;
 
 /** Absolute depth (world units) at which planes are fully hidden by depth fade. */
-export const DEPTH_FADE_END = 700;
+export const DEPTH_FADE_END = 900;
 
 /** Mouse-parallax drift amplitude base; multiplied by zoom factor each frame. */
 export const DRIFT_AMOUNT = 8.0;
@@ -63,18 +64,23 @@ export const VELOCITY_LERP = 0.16;
 /** Per-frame decay applied to velocity when no input is active (inertia). */
 export const VELOCITY_DECAY = 0.9;
 
-/** Initial camera Z (distance from the z=0 plane of the canvas). */
-export const INITIAL_CAMERA_Z = 250;
+/**
+ * Initial camera Z (distance from the z=0 plane of the canvas).
+ * 600 starts the view noticeably more zoomed-out than the reference 250.
+ * DEPTH_FADE_START (650) is kept above the newest bucket's depth window
+ * so those photos remain fully opaque and clearly visible on first load.
+ */
+export const INITIAL_CAMERA_Z = 600;
 
 /**
  * Gap (in chunks) between consecutive time buckets along the depth axis.
  * Spacing buckets several chunks apart ensures each month/layer sits fully
  * outside the visible depth range of its neighbors, so the user must
  * deliberately zoom to travel between time periods instead of seeing every
- * bucket at once. 6 chunks (960 world units) exceeds DEPTH_FADE_END (700),
+ * bucket at once. 8 chunks (1280 world units) exceeds DEPTH_FADE_END (900),
  * so adjacent buckets fade fully out of view before the next comes into focus.
  */
-export const TIME_BUCKET_SPACING = 6;
+export const TIME_BUCKET_SPACING = 8;
 
 /** Minimum camera Z — prevents flying through the canvas. */
 export const MIN_CAMERA_Z = 5;
