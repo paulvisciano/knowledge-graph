@@ -101,9 +101,37 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS photo_metadata (
                 file_source TEXT PRIMARY KEY,
                 exif_data JSONB NOT NULL DEFAULT '{}',
+                date_taken TEXT,
+                date_taken_friendly TEXT,
+                image_width INTEGER,
+                image_height INTEGER,
                 created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
                 updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
             );
+
+            -- Backfill the typed columns onto pre-existing rows. Idempotent so
+            -- re-running init_db on an already-migrated DB is a no-op.
+            ALTER TABLE photo_metadata
+                ADD COLUMN IF NOT EXISTS date_taken TEXT,
+                ADD COLUMN IF NOT EXISTS date_taken_friendly TEXT,
+                ADD COLUMN IF NOT EXISTS image_width INTEGER,
+                ADD COLUMN IF NOT EXISTS image_height INTEGER;
+
+            -- Populate the typed columns from the JSONB blob for any row that
+            -- was written before the columns existed. Runs once per startup;
+            -- the WHERE clause skips rows already populated.
+            UPDATE photo_metadata
+               SET date_taken = (exif_data->>'date_taken'),
+                   date_taken_friendly = (exif_data->>'date_taken_friendly'),
+                   image_width = NULLIF(exif_data->>'image_width','')::int,
+                   image_height = NULLIF(exif_data->>'image_height','')::int
+             WHERE date_taken IS NULL
+               AND date_taken_friendly IS NULL
+               AND image_width IS NULL
+               AND image_height IS NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_photo_metadata_dates
+                ON photo_metadata(file_source);
 
             -- Single-row app settings. id is fixed at 0; the CHECK constraint
             -- rejects any other id, so reads/writes don't need a WHERE clause.
@@ -127,17 +155,80 @@ async def close_db() -> None:
 
 
 async def save_photo_exif(file_source: str, exif_data: dict) -> None:
+    """Persist EXIF metadata, writing the layout-critical fields to typed
+    columns so the graph-load path can read them without parsing JSONB or
+    touching image files.
+
+    ``date_taken`` / ``date_taken_friendly`` / ``image_width`` / ``image_height``
+    are pulled out of ``exif_data`` and stored as columns. When the extractor
+    didn't emit pixel dimensions (older extractor path, or a file whose EXIF
+    only sets ``ExifImageLength``), the dimensions are back-filled here from
+    the actual image via PIL so the expensive I/O happens exactly once, at
+    processing time — never on the per-load graph query path.
+    """
     import json
+
+    date_taken = exif_data.get("date_taken")
+    friendly = exif_data.get("date_taken_friendly")
+    width = exif_data.get("image_width")
+    height = exif_data.get("image_height")
+
+    # Backfill pixel dimensions from the file when EXIF omitted them, so the
+    # graph query never has to open an image. Best-effort; failures leave the
+    # columns NULL and the layout falls back to a default aspect ratio.
+    if (width is None or height is None):
+        dims = _image_dims_from_file(file_source)
+        if dims:
+            if width is None:
+                width = dims[0]
+            if height is None:
+                height = dims[1]
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO photo_metadata (file_source, exif_data, created_at, updated_at)
-               VALUES ($1, $2, extract(epoch from now()), extract(epoch from now()))
+            """INSERT INTO photo_metadata
+                 (file_source, exif_data, date_taken, date_taken_friendly,
+                  image_width, image_height, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, extract(epoch from now()), extract(epoch from now()))
                ON CONFLICT (file_source)
-               DO UPDATE SET exif_data = $2, updated_at = extract(epoch from now())""",
+               DO UPDATE SET
+                 exif_data = $2,
+                 date_taken = COALESCE($3, photo_metadata.date_taken),
+                 date_taken_friendly = COALESCE($4, photo_metadata.date_taken_friendly),
+                 image_width = COALESCE($5, photo_metadata.image_width),
+                 image_height = COALESCE($6, photo_metadata.image_height),
+                 updated_at = extract(epoch from now())""",
             file_source, json.dumps(exif_data),
+            str(date_taken) if date_taken is not None else None,
+            str(friendly) if friendly is not None else None,
+            int(width) if width is not None else None,
+            int(height) if height is not None else None,
         )
+
+
+def _image_dims_from_file(file_source: str) -> tuple[int, int] | None:
+    """Return (width, height) for the image at INPUT_DIR/file_source, or None
+    on failure. Honours EXIF orientation so portrait photos keep correct
+    proportions. Synchronous (call from a threadpool)."""
+    import os
+    from pathlib import Path
+
+    input_dir = Path(os.environ.get(
+        "INPUT_DIR",
+        str(Path(__file__).resolve().parent.parent.parent / "inputs"),
+    ))
+    file_path = input_dir / file_source
+    if not file_path.is_file():
+        return None
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(str(file_path)) as img:
+            img = ImageOps.exif_transpose(img)
+            return img.size  # (width, height) post-orientation
+    except Exception:
+        return None
 
 
 async def get_photo_exif(file_source: str) -> dict | None:
@@ -154,79 +245,45 @@ async def get_photo_exif(file_source: str) -> dict | None:
     return None
 
 
-async def get_bulk_photo_dates() -> dict[str, dict[str, object]]:
+async def get_photo_dates_for_sources(
+    file_sources: list[str],
+) -> dict[str, dict[str, object]]:
     """Return {file_source: {date_taken?, date_taken_friendly?, width?, height?}}
-    for every photo with EXIF data.
+    scoped to a set of file_sources.
 
-    `width`/`height` are included so the infinite-canvas layout can preserve
-    each photo's native aspect ratio (portrait vs landscape). Rows whose
-    persisted EXIF is missing `image_height` (produced by an older extractor
-    that looked for `ExifImageHeight` instead of the spec name
-    `ExifImageLength`) are back-filled on the fly from the actual image file
-    via PIL, so existing photos get correct proportions without a full
-    re-process.
+    Used by the /graphs proxy to enrich only the Photo nodes present in the
+    current graph view instead of scanning every photo in the DB.
     """
-    import json
-    import os
-    from pathlib import Path
-
+    if not file_sources:
+        return {}
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT file_source, exif_data FROM photo_metadata")
-
-    input_dir = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
+        rows = await conn.fetch(
+            """SELECT file_source, date_taken, date_taken_friendly,
+                      image_width, image_height
+                 FROM photo_metadata
+                WHERE file_source = ANY($1)
+                  AND (date_taken IS NOT NULL
+                       OR date_taken_friendly IS NOT NULL
+                       OR image_width IS NOT NULL
+                       OR image_height IS NOT NULL)""",
+            file_sources,
+        )
 
     out: dict[str, dict[str, object]] = {}
     for row in rows:
-        try:
-            data = json.loads(row["exif_data"]) if row["exif_data"] else {}
-        except (json.JSONDecodeError, TypeError):
-            data = {}
-
-        date_taken = data.get("date_taken")
-        friendly = data.get("date_taken_friendly")
-        width = data.get("image_width")
-        height = data.get("image_height")
-
-        if not (date_taken or friendly or width or height):
-            continue
-
         entry: dict[str, object] = {}
-        if date_taken:
-            entry["date_taken"] = str(date_taken)
-        if friendly:
-            entry["date_taken_friendly"] = str(friendly)
-        if width is not None:
-            entry["width"] = int(width)
-        if height is not None:
-            entry["height"] = int(height)
-
-        if ("width" not in entry or "height" not in entry):
-            file_path = input_dir / row["file_source"]
-            if file_path.is_file():
-                try:
-                    from PIL import Image, ImageOps
-
-                    def _dims() -> tuple[int, int] | None:
-                        with Image.open(str(file_path)) as img:
-                            img = ImageOps.exif_transpose(img)
-                            return img.size  # (width, height) post-orientation
-
-                    dims = await _run_in_threadpool(_dims)
-                    if dims:
-                        entry["width"] = dims[0]
-                        entry["height"] = dims[1]
-                except Exception:
-                    pass
-
-        out[row["file_source"]] = entry
+        if row["date_taken"] is not None:
+            entry["date_taken"] = str(row["date_taken"])
+        if row["date_taken_friendly"] is not None:
+            entry["date_taken_friendly"] = str(row["date_taken_friendly"])
+        if row["image_width"] is not None:
+            entry["width"] = int(row["image_width"])
+        if row["image_height"] is not None:
+            entry["height"] = int(row["image_height"])
+        if entry:
+            out[row["file_source"]] = entry
     return out
-
-
-async def _run_in_threadpool(func):
-    import asyncio
-
-    return await asyncio.get_event_loop().run_in_executor(None, func)
 
 
 async def get_app_settings() -> dict:

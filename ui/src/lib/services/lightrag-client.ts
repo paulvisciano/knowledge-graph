@@ -11,6 +11,7 @@ import {
 } from '$lib/constants';
 
 const PROXY_PREFIX = '/api/lightrag';
+const KG_API_PROXY = '/api/kg';
 
 export class LightragClient {
   private baseUrl: string;
@@ -205,10 +206,18 @@ export class LightragClient {
     const params = new URLSearchParams();
     params.set('label', label ?? 'default');
     if (nodeId) params.set('node_id', nodeId);
-    if (depth !== undefined) params.set('depth', String(depth));
+    if (depth !== undefined) params.set('max_depth', String(depth));
     const qs = params.toString();
-    const path = `${API.lightrag.graph.graph}${qs ? '?' + qs : ''}`;
-    return this.request<KGGraph>(path);
+    // Routed through the KG API proxy, which forwards to LightRAG and enriches
+    // Photo nodes with EXIF date/dimension fields from photo_metadata so the
+    // UI gets everything in one response (no separate bulk-dates round-trip).
+    const url = `${KG_API_PROXY}${API.kg.graph}?${qs}`;
+    const res = await fetch(url, { headers: this.headers() });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Graph ${res.status} ${res.statusText}: ${body}`);
+    }
+    return res.json();
   }
 
   async getLabels(): Promise<string[]> {

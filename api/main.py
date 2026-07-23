@@ -6,7 +6,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import health, images, settings, sync
+from api.routes import health, images, settings, sync, graph
 from api.services import config
 from api.services import db as db_module
 from api.services.job_manager import resume_pending_jobs
@@ -38,6 +38,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(images.router)
+app.include_router(graph.router)
 app.include_router(settings.router)
 app.include_router(sync.router)
 

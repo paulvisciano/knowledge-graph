@@ -576,17 +576,6 @@ async def get_photo(filename: str, w: Optional[str] = None):
             return FileResponse(str(file_path))
 
 
-@router.get("/exif/bulk-dates")
-async def get_bulk_photo_dates():
-    """Return EXIF date_taken (and friendly form) for every photo that has one.
-
-    The UI merges these into Photo node properties at graph-load time so the
-    canvas positions photos by the date they were taken (EXIF) rather than by
-    the LightRAG node-creation timestamp (upload time).
-    """
-    return await db_module.get_bulk_photo_dates()
-
-
 @router.get("/exif/{file_source:path}")
 async def get_photo_exif(file_source: str):
     """Return persisted EXIF metadata for a photo, keyed by file_source."""

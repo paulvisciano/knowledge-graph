@@ -15,7 +15,7 @@ export const API = {
     photoImageFull: (filename: string) => `/images/photo/${encodeURIComponent(filename)}?w=full`,
     photoImageThumb: (filename: string, w = 256) => `/images/photo/${encodeURIComponent(filename)}?w=${w}`,
     photoExif: (fileSource: string) => `/images/exif/${encodeURIComponent(fileSource)}`,
-    photoExifBulkDates: '/images/exif/bulk-dates',
+    graph: '/graphs',
     deletePhotoEntities: (fileSource: string) => `/images/photo-entities?file_source=${encodeURIComponent(fileSource)}`,
     faceCrop: (name: string) => `/images/faces/crops/${encodeURIComponent(name)}`,
     faceCropById: (faceId: string) => `/images/faces/crops/by-id/${encodeURIComponent(faceId)}`,
