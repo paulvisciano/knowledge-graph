@@ -78,7 +78,7 @@
   };
 
   const EXIF_CAMERA_KEYS = ['camera', 'date_taken_friendly', 'lens', 'flash'];
-  const EXIF_EXPOSURE_KEYS = ['f_number', 'iso', 'focal_length', 'exposure_time', 'white_balance', 'orientation'];
+  const EXIF_EXPOSURE_KEYS = ['f_number', 'iso', 'focal_length', 'exposure_time'];
   const EXIF_IMAGE_KEYS = ['image_width', 'image_height'];
 
   function formatExifRows(exif: Record<string, unknown>): { label: string; value: string }[] {
@@ -109,10 +109,12 @@
     node,
     kgNode,
     onClose,
+    onNavigate,
   }: {
     node: CanvasNode | null;
     kgNode: KGNode | null;
     onClose: () => void;
+    onNavigate?: (nodeId: string) => void;
   } = $props();
 
   const exifCache = new Map<string, { label: string; value: string }[] | null>();
@@ -121,6 +123,7 @@
   let fullscreenUrl = $state<string | null>(null);
   let deleting = $state(false);
   let personPhotoErrors = $state(new Set<string>());
+  let activeTab = $state<'details' | 'insights' | 'connections'>('details');
 
   async function fetchExifForNode(nodeId: string, fileSource: string) {
     if (exifCache.has(nodeId)) {
@@ -164,6 +167,145 @@
       (n) => !['person', 'location', 'event'].includes(classifyKind(n)),
     ),
   );
+
+  /** Parse a date from any known photo-timestamp property (mirrors Layout.parseNodeDate). */
+  function parsePhotoDate(n: KGNode): Date | null {
+    const p = n.properties ?? {};
+    const raw =
+      p.date_taken_friendly ??
+      p.datetime_original ??
+      p.created_at ??
+      p.timestamp ??
+      p.date_taken ??
+      p.datetime;
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === 'number') {
+      const ms = raw > 1e12 ? raw : raw * 1000;
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof raw === 'string') {
+      const m1 = raw.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+      if (m1) {
+        const [, Y, Mo, D, H, Mi, S] = m1;
+        return new Date(`${Y}-${Mo}-${D}T${H}:${Mi}:${S ?? '00'}`);
+      }
+      const m2 = raw.match(/^(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{2}):(\d{2})$/);
+      if (m2) {
+        const [, Y, Mo, D, H, Mi] = m2;
+        return new Date(`${Y}-${Mo}-${D}T${H}:${Mi}:00`);
+      }
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  }
+
+  function dayKeyOf(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate(),
+    ).padStart(2, '0')}`;
+  }
+
+  function monthKeyOf(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function dayLabelFor(d: Date): string {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(d);
+    target.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((today.getTime() - target.getTime()) / 86_400_000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    return target.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  /** All photo nodes from the same month as the current node, sorted chronologically. */
+  let sameDayPhotos = $derived.by<KGNode[]>(() => {
+    const id = node?.id;
+    if (!id || !kgNode) return [];
+    const currentDate = parsePhotoDate(kgNode);
+    if (!currentDate) return [];
+    const monthKey = monthKeyOf(currentDate);
+    return graphStore.nodes
+      .filter((n) => {
+        if (n.id === id) return false;
+        if (classifyKind(n) !== 'photo') return false;
+        const sourceId = n.properties?.source_id ?? n.properties?.file_path;
+        if (!sourceId || sourceId === 'manual_creation') return false;
+        const d = parsePhotoDate(n);
+        return d !== null && monthKeyOf(d) === monthKey;
+      })
+      .sort((a, b) => {
+        const da = parsePhotoDate(a);
+        const db = parsePhotoDate(b);
+        return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
+      });
+  });
+
+  /** Combined list including the current photo, for index tracking. */
+  let sameDayPhotosWithCurrent = $derived.by<KGNode[]>(() => {
+    if (!kgNode) return [];
+    const currentDate = parsePhotoDate(kgNode);
+    if (!currentDate) return [];
+    const monthKey = monthKeyOf(currentDate);
+    return graphStore.nodes
+      .filter((n) => {
+        if (classifyKind(n) !== 'photo') return false;
+        const sourceId = n.properties?.source_id ?? n.properties?.file_path;
+        if (!sourceId || sourceId === 'manual_creation') return false;
+        const d = parsePhotoDate(n);
+        return d !== null && monthKeyOf(d) === monthKey;
+      })
+      .sort((a, b) => {
+        const da = parsePhotoDate(a);
+        const db = parsePhotoDate(b);
+        return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
+      });
+  });
+
+  /** Photos grouped by day, for the filmstrip with dividers. */
+  let monthPhotosByDay = $derived.by<{ dayKey: string; label: string; photos: KGNode[] }[]>(() => {
+    if (!sameDayPhotosWithCurrent.length) return [];
+    const groups: { dayKey: string; label: string; photos: KGNode[] }[] = [];
+    for (const n of sameDayPhotosWithCurrent) {
+      const d = parsePhotoDate(n);
+      if (!d) continue;
+      const dk = dayKeyOf(d);
+      let group = groups.find((g) => g.dayKey === dk);
+      if (!group) {
+        group = { dayKey: dk, label: dayLabelFor(d), photos: [] };
+        groups.push(group);
+      }
+      group.photos.push(n);
+    }
+    return groups;
+  });
+
+  let currentMonthIndex = $derived(
+    node ? sameDayPhotosWithCurrent.findIndex((n) => n.id === node.id) : -1,
+  );
+
+  function photoThumbUrl(n: KGNode): string {
+    const existing = graphStore.photoImages[n.id];
+    if (existing) return existing;
+    const sourceId = n.properties?.source_id ?? n.properties?.file_path;
+    return `${KG_API_PROXY_BASE}${API.kg.photoImageThumb(String(sourceId))}`;
+  }
+
+  function navigateToPhoto(n: KGNode) {
+    onNavigate?.(n.id);
+  }
+
+  function navigateByOffset(offset: number) {
+    if (!sameDayPhotosWithCurrent.length || currentMonthIndex < 0) return;
+    const newIndex = currentMonthIndex + offset;
+    if (newIndex < 0 || newIndex >= sameDayPhotosWithCurrent.length) return;
+    const target = sameDayPhotosWithCurrent[newIndex];
+    if (target) navigateToPhoto(target);
+  }
 
   let fileName = $derived(
     (kgNode?.properties?.source_id as string) ??
@@ -221,6 +363,15 @@
       ? getNodeName(locations[0])
       : ((kgNode?.properties?.location as string) ?? (node?.properties?.location as string) ?? null),
   );
+  let cityText = $derived.by(() => {
+    if (!locationText) return null;
+    return locationText.split(',')[0]?.trim() ?? null;
+  });
+  let stateText = $derived.by(() => {
+    if (!locationText) return null;
+    const parts = locationText.split(',');
+    return parts.length > 1 ? parts.slice(1).join(',').trim() : null;
+  });
   let dateText = $derived.by(() => {
     const raw =
       (kgNode?.properties?.date_taken_friendly as string) ??
@@ -230,13 +381,11 @@
       null;
     if (!raw) return null;
 
-    // Already human-friendly: "2024-06-05 at 14:30"
     const friendlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2})/);
     if (friendlyMatch) {
       return `${friendlyMatch[1]} · ${friendlyMatch[2]}`;
     }
 
-    // Epoch seconds (from DB DOUBLE PRECISION) — new Date() expects ms
     const asNum = Number(raw);
     if (!isNaN(asNum) && asNum > 0) {
       const ms = asNum > 1e12 ? asNum : asNum * 1000;
@@ -252,7 +401,6 @@
       }
     }
 
-    // ISO string or other parseable format
     const parsed = new Date(raw);
     if (!isNaN(parsed.getTime())) {
       return parsed.toLocaleString(undefined, {
@@ -265,6 +413,129 @@
     }
 
     return raw;
+  });
+
+  let dateTimeText = $derived.by(() => {
+    const raw =
+      (kgNode?.properties?.date_taken_friendly as string) ??
+      (kgNode?.properties?.created_at as string) ??
+      (node?.properties?.date_taken_friendly as string) ??
+      (node?.properties?.created_at as string) ??
+      null;
+    if (!raw) return null;
+
+    let d: Date | null = null;
+    const friendlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2}) at (\d{2}:\d{2})/);
+    if (friendlyMatch) {
+      d = new Date(`${friendlyMatch[1]}-${friendlyMatch[2]}-${friendlyMatch[3]}T${friendlyMatch[4]}:00`);
+    } else {
+      const asNum = Number(raw);
+      if (!isNaN(asNum) && asNum > 0) {
+        const ms = asNum > 1e12 ? asNum : asNum * 1000;
+        d = new Date(ms);
+      }
+      if (!d || isNaN(d.getTime())) d = new Date(raw);
+    }
+    if (!d || isNaN(d.getTime())) return null;
+
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return time;
+  });
+
+  let dateLabel = $derived.by(() => {
+    const raw =
+      (kgNode?.properties?.date_taken_friendly as string) ??
+      (kgNode?.properties?.created_at as string) ??
+      (node?.properties?.date_taken_friendly as string) ??
+      (node?.properties?.created_at as string) ??
+      null;
+    if (!raw) return null;
+
+    let d: Date | null = null;
+    const friendlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2}) at/);
+    if (friendlyMatch) {
+      d = new Date(`${friendlyMatch[1]}-${friendlyMatch[2]}-${friendlyMatch[3]}`);
+    } else {
+      const asNum = Number(raw);
+      if (!isNaN(asNum) && asNum > 0) {
+        const ms = asNum > 1e12 ? asNum : asNum * 1000;
+        d = new Date(ms);
+      }
+      if (!d || isNaN(d.getTime())) d = new Date(raw);
+    }
+    if (!d || isNaN(d.getTime())) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((today.getTime() - d.getTime()) / 86_400_000);
+
+    if (diffDays === 0) return 'Photos from Today';
+    if (diffDays === 1) return 'Photos from Yesterday';
+    if (diffDays > 0 && diffDays < 7) return `Photos from ${diffDays} days ago`;
+    if (diffDays < 0 && diffDays > -7) return `Photos from in ${-diffDays} days`;
+
+    if (diffDays > 0) {
+      const months = Math.floor(diffDays / 30);
+      if (months <= 1) return 'Photos from last month';
+      if (months < 12) return `Photos from ${months} months ago`;
+      const years = Math.floor(diffDays / 365);
+      if (years === 1) return 'Photos from last year';
+      return `Photos from ${years} years ago`;
+    }
+
+    return 'Photos from ' + d.toLocaleDateString(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    });
+  });
+
+  let dayName = $derived.by(() => {
+    const raw =
+      (kgNode?.properties?.date_taken_friendly as string) ??
+      (kgNode?.properties?.created_at as string) ??
+      (node?.properties?.date_taken_friendly as string) ??
+      (node?.properties?.created_at as string) ??
+      null;
+    if (!raw) return null;
+
+    let d: Date | null = null;
+    const friendlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2}) at/);
+    if (friendlyMatch) {
+      d = new Date(`${friendlyMatch[1]}-${friendlyMatch[2]}-${friendlyMatch[3]}`);
+    } else {
+      const asNum = Number(raw);
+      if (!isNaN(asNum) && asNum > 0) {
+        const ms = asNum > 1e12 ? asNum : asNum * 1000;
+        d = new Date(ms);
+      }
+      if (!d || isNaN(d.getTime())) d = new Date(raw);
+    }
+    if (!d || isNaN(d.getTime())) return null;
+    return d.toLocaleDateString(undefined, { weekday: 'long' });
+  });
+
+  let exifCameraRow = $derived.by(() => {
+    const rows = fetchedExifNodeId === node?.id ? fetchedExifRows : [];
+    return filterExifGroup(rows, EXIF_CAMERA_KEYS);
+  });
+  let exifExposureRow = $derived.by(() => {
+    const rows = fetchedExifNodeId === node?.id ? fetchedExifRows : [];
+    return filterExifGroup(rows, EXIF_EXPOSURE_KEYS);
+  });
+  let exifImageRow = $derived.by(() => {
+    const rows = fetchedExifNodeId === node?.id ? fetchedExifRows : [];
+    return filterExifGroup(rows, EXIF_IMAGE_KEYS);
+  });
+  let exifCameraVal = $derived(exifCameraRow.find((r) => r.label === 'Camera')?.value ?? null);
+  let exifLensVal = $derived(exifCameraRow.find((r) => r.label === 'Lens')?.value ?? null);
+  let exifDimsVal = $derived.by(() => {
+    const w = exifImageRow.find((r) => r.label === 'Width')?.value;
+    const h = exifImageRow.find((r) => r.label === 'Height')?.value;
+    if (w && h) return `${w}x${h}`;
+    if (w) return w;
+    if (h) return h;
+    return null;
   });
 
   $effect(() => {
@@ -335,34 +606,29 @@
     }
   }
 
-  // Parallax effect
-  let parallaxEnabled = $state(true);
-  function handleParallax(e: MouseEvent) {
-    if (!parallaxEnabled) return;
-    const inner = document.querySelector('[data-od-id="scene-inner"]') as HTMLElement;
-    if (!inner) return;
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    const tx = ((e.clientX - cx) / cx) * 6;
-    const ty = ((e.clientY - cy) / cy) * -4;
-    inner.style.transform = `rotateX(${ty.toFixed(2)}deg) rotateY(${tx.toFixed(2)}deg)`;
+  function handlePersonImgError(n: KGNode) {
+    personPhotoErrors = new Set([...personPhotoErrors, n.id]);
   }
-
-  $effect(() => {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    parallaxEnabled = !isMobile;
-  });
 
   $effect(() => {
     if (!node) return;
     function onKeydown(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (fullscreenUrl) {
-        fullscreenUrl = null;
-      } else {
-        handleClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (fullscreenUrl) {
+          fullscreenUrl = null;
+        } else {
+          handleClose();
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateByOffset(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateByOffset(1);
       }
     }
     window.addEventListener('keydown', onKeydown);
@@ -374,23 +640,19 @@
   {@const status = imageProcessingStore.statuses[node.id]}
   {@const imageUrl = node.imageUrl ?? graphStore.photoImages[node.id]}
   {@const fullUrl = node.fullUrl ?? (imageUrl ? imageUrl.replace(/([?&]w=)\d+\b/, '$1full') : undefined)}
-  {@const exifRows = fetchedExifNodeId === node.id ? fetchedExifRows : []}
-  {@const exifCamera = filterExifGroup(exifRows, EXIF_CAMERA_KEYS)}
-  {@const exifExposure = filterExifGroup(exifRows, EXIF_EXPOSURE_KEYS)}
-  {@const exifImage = filterExifGroup(exifRows, EXIF_IMAGE_KEYS)}
   {@const isProcessing = status && status.stage !== 'complete' && status.stage !== 'error'}
   {@const isComplete = status?.stage === 'complete'}
   {@const isError = status?.stage === 'error'}
+  {@const descText = fetchedDocContent ?? descriptionContent ?? null}
 
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="spatial-scene" data-od-id="spatial-scene" onclick={handleClose}>
-    <div class="scene-inner" data-od-id="scene-inner" onmousemove={handleParallax} onclick={(e) => e.stopPropagation()}>
+  <div class="overlay-app" data-od-id="overlay-app" onclick={handleClose} role="presentation">
+    <div class="overlay-body" data-od-id="overlay-body" onclick={(e) => e.stopPropagation()} role="presentation">
 
-      <!-- Top bar -->
-      <div class="topbar" data-od-id="topbar">
+      <header class="topbar" data-od-id="topbar">
         <div class="topbar-left">
           {#if isProcessing || isComplete || isError}
-            <div class="status-pill {isProcessing ? 'is-processing' : isComplete ? 'is-complete' : isError ? 'is-error' : ''}" data-od-id="status-pill">
+            <div class="status-pill {isProcessing ? 'is-processing' : isComplete ? 'is-complete' : 'is-error'}" data-od-id="status-pill">
               {#if isProcessing}
                 <span class="status-dot is-processing" aria-hidden="true"></span>
                 <span>{status?.stageLabel ?? 'Processing...'}</span>
@@ -403,924 +665,951 @@
               {/if}
             </div>
           {/if}
-          <span class="filename" data-od-id="filename" title={fileName}>{fileName}</span>
+          <span class="filename" data-od-id="filename" title={fileName}>
+            {#if dateLabel}{dateLabel}{:else}{fileName}{/if}
+          </span>
         </div>
         <button class="close-btn" data-od-id="close-btn" aria-label="Close details (Esc)" onclick={handleClose}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
-      </div>
+      </header>
 
-      <!-- Image — central hero -->
-      <div class="image-stage" data-od-id="image-stage">
-        <div class="image-frame" data-od-id="image-frame">
-          {#if fullUrl ?? imageUrl}
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
-            <img
-              src={fullUrl ?? imageUrl}
-              alt={fileName}
-              data-od-id="photo-img"
-              role="button"
-              tabindex="0"
-              onclick={() => openFullscreen(fullUrl ?? imageUrl!)}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFullscreen(fullUrl ?? imageUrl!); } }}
-            />
-          {:else}
-            <div class="image-placeholder" data-od-id="image-placeholder">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-            </div>
-          {/if}
+      <div class="content" data-od-id="content">
 
-          <div class="image-tags" data-od-id="image-tags">
-            {#if locationText}
-              <span class="tag tag-loc">
-                <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                {locationText}
-              </span>
-            {/if}
-            {#if dateText}
-              <span class="tag tag-date">
-                <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-                {dateText}
-              </span>
-            {/if}
-          </div>
-
-          {#if fullUrl ?? imageUrl}
-            <div class="image-expand" data-od-id="image-expand" role="button" tabindex="-1" onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Description — secondary hero -->
-      <section class="description-panel" data-od-id="description-panel">
-        <div class="description-label">Description</div>
-        {#if docLoading}
-          <div class="description-loading" data-od-id="description-loading">
-            <span class="spinner" aria-hidden="true"></span>
-            <span>Loading description…</span>
-          </div>
-        {:else if docError}
-          <div class="description-error" data-od-id="description-error">{docError}</div>
-        {:else if fetchedDocNodeId === node?.id && fetchedDocContent}
-          <div class="description-text prose-spatial" data-od-id="description-content">{@html renderMarkdown(fetchedDocContent)}</div>
-        {:else if descriptionContent}
-          <div class="description-text prose-spatial" data-od-id="description-fallback">{@html renderMarkdown(descriptionContent)}</div>
-        {:else}
-          <div class="description-empty" data-od-id="description-empty">No description available.</div>
-        {/if}
-      </section>
-
-      <!-- Data panels — floating, layered -->
-      <div class="data-row" data-od-id="data-row">
-
-        {#if persons.length > 0}
-          <div class="data-panel" data-od-id="panel-people">
-            <div class="panel-label">People <span class="count">{persons.length}</span></div>
-            <div class="people-row" data-od-id="people-row">
-              {#each persons as person (person.id)}
-                <div class="person" title={getNodeName(person)} data-od-id="person-{person.id}">
-                  {#if !personPhotoErrors.has(person.id) && isPersonNamed(person)}
-                    <img
-                      src={resolvePersonThumbUrl(person)}
-                      alt={getNodeName(person)}
-                      class="person-thumb"
-                      data-od-id="thumb-{person.id}"
-                      onerror={() => {
-                        const updated = new Set(personPhotoErrors);
-                        updated.add(person.id);
-                        personPhotoErrors = updated;
-                      }}
-                    />
-                  {:else if isPersonNamed(person)}
-                    <div class="person-initial" style="background: oklch(28% 0.06 200 / 60%); color: oklch(80% 0.03 200);">
-                      {getInitials(getNodeName(person))}
-                    </div>
-                  {:else}
-                    <div class="person-silhouette" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg>
-                    </div>
-                  {/if}
-                  {#if isPersonNamed(person)}
-                    <span class="person-name">{getNodeName(person)}</span>
-                  {:else}
-                    <span class="person-unnamed">Unknown</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        {#if locations.length > 0}
-          <div class="data-panel" data-od-id="panel-locations">
-            <div class="panel-label">Locations <span class="count">{locations.length}</span></div>
-            <div class="chip-row" data-od-id="locations-row">
-              {#each locations as loc (loc.id)}
-                <span class="chip chip-loc">{getNodeName(loc)}</span>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        {#if events.length > 0}
-          <div class="data-panel" data-od-id="panel-events">
-            <div class="panel-label">Events <span class="count">{events.length}</span></div>
-            <div class="chip-row" data-od-id="events-row">
-              {#each events as ev (ev.id)}
-                <span class="chip chip-event">{getNodeName(ev)}</span>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        {#if others.length > 0}
-          <div class="data-panel" data-od-id="panel-entities">
-            <div class="panel-label">Entities <span class="count">{others.length}</span></div>
-            <div class="chip-row" data-od-id="entities-row">
-              {#each others as o (o.id)}
-                <span class="chip chip-entity">{getNodeName(o)}</span>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        {#if exifRows.length > 0}
-          <div class="data-panel exif-panel" data-od-id="panel-exif">
-            <div class="panel-label">Capture Data</div>
-            {#if exifCamera.length > 0}
-              <div class="exif-group" data-od-id="exif-camera">
-                <div class="exif-group-label">Camera</div>
-                <div class="exif-grid">
-                  {#each exifCamera as row (row.label)}
-                    <div class="exif-row">
-                      <span class="exif-label">{row.label}</span>
-                      <span class="exif-value">{row.value}</span>
-                    </div>
-                  {/each}
-                </div>
+        <main class="stage" data-od-id="main-stage">
+          <div class="viewer" data-od-id="image-viewer">
+            {#if fullUrl ?? imageUrl}
+              <img class="photo" data-od-id="main-photo"
+                   src={fullUrl ?? imageUrl!}
+                   alt={fileName}
+                   onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
+            {:else}
+              <div class="photo-placeholder" data-od-id="photo-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L3 21"/>
+                </svg>
               </div>
             {/if}
-            {#if exifExposure.length > 0}
-              <div class="exif-group" data-od-id="exif-exposure">
-                <div class="exif-group-label">Exposure</div>
-                <div class="exif-grid">
-                  {#each exifExposure as row (row.label)}
-                    <div class="exif-row">
-                      <span class="exif-label">{row.label}</span>
-                      <span class="exif-value">{row.value}</span>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-            {#if exifImage.length > 0}
-              <div class="exif-group" data-od-id="exif-image">
-                <div class="exif-group-label">Image</div>
-                <div class="exif-grid">
-                  {#each exifImage as row (row.label)}
-                    <div class="exif-row">
-                      <span class="exif-label">{row.label}</span>
-                      <span class="exif-value">{row.value}</span>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
 
-      {#if isProcessing && status?.stepper}
-        <div class="stepper" data-od-id="stepper">
-          {#each status.stepper.filter((s) => s.stage !== 'complete') as step (step.stage)}
-            <div class="step {step.state}">
-              <span class="step-dot">
-                {#if step.state === 'done'}
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            {#if dateTimeText}
+              <div class="viewer-badges" data-od-id="viewer-badges">
+                {#if dateTimeText}
+                  <div class="location-badge" data-od-id="time-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    <span>{dateTimeText}</span>
+                  </div>
                 {/if}
-              </span>
-              <span class="step-label">{step.label.replace('...', '')}</span>
+              </div>
+            {/if}
+          </div>
+
+          {#if sameDayPhotosWithCurrent.length > 1}
+            <div class="filmstrip" data-od-id="filmstrip">
+              <button class="filmstrip-nav filmstrip-nav-prev" data-od-id="filmstrip-prev"
+                aria-label="Previous photo"
+                disabled={currentMonthIndex <= 0}
+                onclick={() => navigateByOffset(-1)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <div class="filmstrip-track" data-od-id="filmstrip-track">
+                {#each monthPhotosByDay as group (group.dayKey)}
+                  <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
+                    <div class="filmstrip-day-label">{group.label}</div>
+                    <div class="filmstrip-day-photos">
+                      {#each group.photos as n (n.id)}
+                        <button class="filmstrip-thumb {n.id === node?.id ? 'is-active' : ''}"
+                          data-od-id="filmstrip-thumb-{n.id}"
+                          aria-label="Photo {getNodeName(n)}"
+                          onclick={() => navigateToPhoto(n)}>
+                          <img src={photoThumbUrl(n)} alt={getNodeName(n)} loading="lazy" />
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              <button class="filmstrip-nav filmstrip-nav-next" data-od-id="filmstrip-next"
+                aria-label="Next photo"
+                disabled={currentMonthIndex < 0 || currentMonthIndex >= sameDayPhotosWithCurrent.length - 1}
+                onclick={() => navigateByOffset(1)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
             </div>
-          {/each}
-        </div>
-      {/if}
-
-      <!-- Actions -->
-      <div class="action-area" data-od-id="action-area">
-        <button class="btn-delete" data-od-id="btn-delete" onclick={handleDelete} disabled={deleting}>
-          {#if deleting}
-            <span class="spinner spinner-sm" aria-hidden="true"></span>
-            Deleting...
-          {:else}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            Delete
           {/if}
-        </button>
-      </div>
+        </main>
 
+        <aside class="sidebar" data-od-id="details-sidebar">
+          <nav class="tabs" data-od-id="sidebar-tabs">
+            <button class="tab {activeTab === 'details' ? 'active' : ''}" data-od-id="tab-details" onclick={() => (activeTab = 'details')}>Details</button>
+            <button class="tab {activeTab === 'insights' ? 'active' : ''}" data-od-id="tab-insights" onclick={() => (activeTab = 'insights')}>AI Insights</button>
+            {#if others.length > 0}
+              <button class="tab {activeTab === 'connections' ? 'active' : ''}" data-od-id="tab-connections" onclick={() => (activeTab = 'connections')}>Related</button>
+            {/if}
+          </nav>
+
+          <div class="sidebar-content" data-od-id="sidebar-content">
+
+            {#if activeTab === 'details'}
+              <section class="section" data-od-id="sec-description">
+                <div class="section-header">Description</div>
+                {#if docLoading}
+                  <div class="loading-indicator" data-od-id="desc-loading">
+                    <span class="spinner"></span> Loading...
+                  </div>
+                {:else if docError}
+                  <div class="error-text" data-od-id="desc-error">{docError}</div>
+                {:else if descText}
+                  <div class="description">{@html renderMarkdown(descText)}</div>
+                {:else}
+                  <div class="empty-text">No description available.</div>
+                {/if}
+              </section>
+
+              {#if locationText}
+                <section class="section" data-od-id="sec-location">
+                  <div class="section-header">Location</div>
+                  <div class="location-row">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                    <div class="location-text">{locationText}</div>
+                  </div>
+                </section>
+              {/if}
+
+              {#if persons.length > 0}
+                <section class="section" data-od-id="sec-people">
+                  <div class="section-header">People - {persons.length}</div>
+                  <div class="people-grid">
+                    {#each persons as n (n.id)}
+                      <div class="person" data-od-id="person-{n.id}" tabindex="0" role="button">
+                        {#if isPersonNamed(n) && !personPhotoErrors.has(n.id)}
+                          <img class="avatar" src={resolvePersonThumbUrl(n)} alt={getNodeName(n)} onerror={() => handlePersonImgError(n)}>
+                        {:else if isPersonNamed(n)}
+                          <div class="avatar-initials">{getInitials(getNodeName(n))}</div>
+                        {:else}
+                          <div class="avatar-unknown">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+                          </div>
+                        {/if}
+                        <div class="person-name">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</div>
+                      </div>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+
+              {#if events.length > 0}
+                <section class="section" data-od-id="sec-events">
+                  <div class="section-header">Events</div>
+                  <div class="event-list">
+                    {#each events as n (n.id)}
+                      <div class="event-item" data-od-id="event-{n.id}">
+                        <span class="event-dot"></span>
+                        <span>{getNodeName(n)}</span>
+                      </div>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+
+              {#if exifExposureRow.length > 0}
+                <section class="section" data-od-id="sec-exif">
+                  <div class="section-header">Exposure</div>
+                  <div class="pills">
+                    {#each exifExposureRow as row}
+                      <span class="pill" data-od-id="exif-{row.label}">{row.value}</span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+            {/if}
+
+            {#if activeTab === 'insights'}
+              <section class="section" data-od-id="sec-insights-entities">
+                <div class="section-header">Entities - {others.length}</div>
+                {#if others.length > 0}
+                  <div class="pills">
+                    {#each others as n, i (n.id)}
+                      <span class="pill {i === 0 ? 'pill-accent' : ''}" data-od-id="entity-{n.id}">{getNodeName(n)}</span>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="empty-text">No entities detected.</div>
+                {/if}
+              </section>
+
+              {#if locations.length > 0}
+                <section class="section" data-od-id="sec-insights-locations">
+                  <div class="section-header">Locations</div>
+                  <div class="pills">
+                    {#each locations as n (n.id)}
+                      <span class="pill" data-od-id="loc-pill-{n.id}">{getNodeName(n)}</span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+
+              {#if events.length > 0}
+                <section class="section" data-od-id="sec-insights-events">
+                  <div class="section-header">Events</div>
+                  <div class="pills">
+                    {#each events as n (n.id)}
+                      <span class="pill" data-od-id="event-pill-{n.id}">{getNodeName(n)}</span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+
+              {#if persons.length > 0}
+                <section class="section" data-od-id="sec-insights-people">
+                  <div class="section-header">People</div>
+                  <div class="pills">
+                    {#each persons as n (n.id)}
+                      <span class="pill" data-od-id="person-pill-{n.id}">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+            {/if}
+
+            {#if activeTab === 'connections' && others.length > 0}
+              <section class="section" data-od-id="sec-connections">
+                <div class="section-header">Connected Entities - {others.length}</div>
+                <div class="connection-list">
+                  {#each others as n (n.id)}
+                    <div class="connection-item" data-od-id="conn-{n.id}">
+                      <span class="connection-kind">{classifyKind(n)}</span>
+                      <span class="connection-name">{getNodeName(n)}</span>
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {/if}
+
+          </div>
+
+          <div class="sidebar-footer" data-od-id="sidebar-footer">
+            <button class="btn-delete" data-od-id="btn-delete" onclick={handleDelete} disabled={deleting}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              {deleting ? 'Deleting...' : 'Delete Photo'}
+            </button>
+          </div>
+        </aside>
+
+      </div>
     </div>
   </div>
-{/if}
 
-{#if fullscreenUrl}
-  <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-  <div class="fullscreen" data-od-id="fullscreen-viewer" onclick={closeFullscreen} role="presentation">
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <img src={fullscreenUrl} alt="Full screen image" class="fullscreen-img" onclick={(e) => e.stopPropagation()} />
-    <button class="fullscreen-close" data-od-id="fullscreen-close" aria-label="Close" onclick={closeFullscreen}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-  </div>
-{/if}
+  {/if}
+
+  {#if fullscreenUrl}
+    <div class="fullscreen-overlay" data-od-id="fullscreen-overlay" onclick={closeFullscreen} role="presentation">
+      <img src={fullscreenUrl} alt={fileName} onclick={(e) => e.stopPropagation()} role="presentation">
+      <button class="fullscreen-close" data-od-id="fullscreen-close" aria-label="Close fullscreen" onclick={closeFullscreen}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  {/if}
 
 <style>
   :root {
-    --overlay-bg:          oklch(6% 0.02 260);
-    --overlay-fg:          oklch(90% 0.005 250);
-    --overlay-muted:       oklch(62% 0.02 255);
-    --overlay-faint:       oklch(48% 0.02 255);
-    --overlay-accent:      oklch(82% 0.14 210);
-    --overlay-accent-dim:  oklch(82% 0.14 210 / 18%);
-    --overlay-success:     oklch(72% 0.15 150);
-    --overlay-danger:      oklch(62% 0.20 18);
-    --overlay-glass:       oklch(16% 0.015 255 / 45%);
-    --overlay-glass-light: oklch(20% 0.015 255 / 30%);
-    --overlay-hairline:    oklch(50% 0.03 255 / 8%);
+    --bg:          #0B0C10;
+    --bg-elev:     #121317;
+    --surface:     rgba(255, 255, 255, 0.05);
+    --surface-2:   rgba(255, 255, 255, 0.08);
+    --surface-dark: rgba(0, 0, 0, 0.40);
+    --hairline:    rgba(255, 255, 255, 0.08);
+    --hairline-2:  rgba(255, 255, 255, 0.12);
+    --fg:          #FFFFFF;
+    --fg-2:        #C8C9CE;
+    --muted:       #A0A0A0;
+    --faint:       #6B6C72;
+    --accent:      #007AFF;
+    --accent-soft: rgba(0, 122, 255, 0.15);
+    --success:     #34C759;
+    --warn:        #FF9F0A;
+    --danger:      #FF3B30;
+    --font-body:   -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --font-display:-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    --font-mono:   ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  .spatial-scene {
+  .overlay-app {
     position: fixed;
     inset: 0;
-    z-index: 100;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    padding: 3vh 2vw 2vh;
-    perspective: 1200px;
-    perspective-origin: 50% 40%;
-    overflow-y: auto;
-    overflow-x: hidden;
-    background:
-      radial-gradient(ellipse 90% 70% at 50% 35%, oklch(14% 0.06 270 / 40%), transparent),
-      radial-gradient(ellipse 60% 50% at 30% 80%, oklch(10% 0.04 210 / 30%), transparent),
-      radial-gradient(ellipse 50% 40% at 80% 20%, oklch(8% 0.03 180 / 20%), transparent),
-      var(--overlay-bg);
-    background-attachment: fixed;
-    color: var(--overlay-fg);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    justify-content: center;
+    padding: 5vh 5vw;
+    font-family: var(--font-body);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    animation: fade-in 0.25s ease;
   }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-  .scene-inner {
-    position: relative;
+  .overlay-body {
+    display: flex;
+    flex-direction: column;
     width: 100%;
-    max-width: 920px;
-    transform-style: preserve-3d;
-    will-change: transform;
+    height: 100%;
+    max-width: 1200px;
+    max-height: 100%;
+    background: var(--bg);
+    border-radius: 16px;
+    border: 1px solid var(--hairline-2);
+    overflow: hidden;
+    box-shadow:
+      0 24px 80px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(255, 255, 255, 0.04);
+    animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.97) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
   }
 
   .topbar {
+    height: 56px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
-    margin-bottom: 2vh;
-    transform: translateZ(20px);
+    padding: 0 20px;
+    background: rgba(11, 12, 16, 0.80);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-bottom: 1px solid var(--hairline);
+    z-index: 100;
   }
-
   .topbar-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     min-width: 0;
-    flex: 1;
   }
-
+  .filename {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 400px;
+  }
   .status-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 12px;
-    background: var(--overlay-glass);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border-radius: 100px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
     font-size: 11px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--overlay-muted);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .status-pill.is-processing { border-color: rgba(255, 159, 10, 0.3); }
+  .status-pill.is-complete { border-color: rgba(52, 199, 89, 0.3); color: var(--success); }
+  .status-pill.is-error { border-color: rgba(255, 59, 48, 0.3); color: var(--danger); }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .status-dot.is-processing {
+    background: var(--warn);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .status-dot.is-error { background: var(--danger); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .close-btn {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--surface-dark);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--hairline-2);
+    color: rgba(255, 255, 255, 0.80);
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
     flex-shrink: 0;
   }
-  .status-pill.is-complete { color: var(--overlay-success); }
-  .status-pill.is-processing { color: var(--overlay-accent); }
-  .status-pill.is-error { color: var(--overlay-danger); }
-
-  .status-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
+  .close-btn:hover {
+    background: rgba(255, 59, 48, 0.15);
+    border-color: rgba(255, 59, 48, 0.4);
+    color: var(--danger);
+    transform: scale(1.05);
   }
-  .status-dot.is-processing { animation: status-pulse 1.6s ease-in-out infinite; }
-  @keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  .close-btn:active { transform: scale(0.95); }
+  .close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .close-btn svg { width: 16px; height: 16px; }
 
-  .filename {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  .content {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  .stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 20px;
+    gap: 14px;
+  }
+
+  .viewer {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    min-height: 0;
+  }
+
+  .photo {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 16px;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      0 0 80px rgba(0, 122, 255, 0.05);
+    object-fit: contain;
+    display: block;
+    cursor: zoom-in;
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .photo:hover { transform: translateY(-2px); }
+
+  .photo-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 300px;
+    height: 300px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    color: var(--faint);
+  }
+  .photo-placeholder svg { width: 48px; height: 48px; }
+
+  .viewer-badges {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .location-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(12px) saturate(1.3);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    border: 1px solid var(--hairline-2);
     font-size: 12px;
-    color: var(--overlay-muted);
+    font-weight: 500;
+    color: var(--fg);
+    max-width: 240px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .location-badge svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
+  .location-badge span { overflow: hidden; text-overflow: ellipsis; }
+
+  .filmstrip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 4px 0;
+  }
+  .filmstrip-nav {
+    width: 32px; height: 32px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--surface-dark);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--hairline);
+    color: var(--fg-2);
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .filmstrip-nav:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--hairline-2);
+    color: var(--fg);
+  }
+  .filmstrip-nav:active:not(:disabled) { transform: scale(0.92); }
+  .filmstrip-nav:disabled { opacity: 0.3; cursor: default; }
+  .filmstrip-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .filmstrip-nav svg { width: 16px; height: 16px; }
+
+  .filmstrip-track {
+    flex: 1;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+    padding: 2px 0;
+    min-width: 0;
+  }
+  .filmstrip-track::-webkit-scrollbar { height: 4px; }
+  .filmstrip-track::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 2px; }
+
+  .filmstrip-thumb {
+    flex-shrink: 0;
+    width: 52px; height: 52px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid transparent;
+    background: var(--surface);
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .filmstrip-thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .filmstrip-thumb:hover { transform: translateY(-2px); border-color: var(--hairline-2); }
+  .filmstrip-thumb.is-active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .filmstrip-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .filmstrip-day-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .filmstrip-day-photos {
+    display: flex;
+    gap: 6px;
+  }
+  .filmstrip-day-group + .filmstrip-day-group {
+    border-left: 1px solid var(--hairline-2);
+    padding-left: 8px;
+    margin-left: 4px;
+  }
+  .filmstrip-day-label {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
     letter-spacing: 0.06em;
+    color: var(--muted);
+    white-space: nowrap;
+    padding: 2px 0;
+  }
+
+  .meta-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    background: var(--surface);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 14px 18px;
+    flex-shrink: 0;
+  }
+  .meta-seg {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-right: 1px solid var(--hairline);
+    min-width: 0;
+  }
+  .meta-seg:first-child { padding-left: 0; }
+  .meta-seg:last-child { border-right: none; padding-right: 0; }
+  .meta-seg-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    display: grid; place-items: center;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .meta-seg-icon svg { width: 16px; height: 16px; }
+  .meta-seg-text { min-width: 0; flex: 1; }
+  .meta-seg-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  .close-btn {
-    width: 40px;
-    height: 40px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: oklch(20% 0.02 255 / 70%);
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
-    border-radius: 50%;
-    cursor: pointer;
-    color: var(--overlay-fg);
-    border: 2px solid oklch(60% 0.03 255 / 55%);
-    box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 12px oklch(0% 0 0 / 25%);
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .close-btn:hover {
-    color: var(--overlay-danger);
-    background: oklch(62% 0.20 18 / 18%);
-    border-color: oklch(62% 0.20 18 / 70%);
-    box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 16px oklch(62% 0.20 18 / 25%);
-    transform: scale(1.08);
-  }
-  .close-btn svg { width: 18px; height: 18px; transition: transform 0.2s; }
-  .close-btn:hover svg { transform: rotate(90deg); }
-
-  .image-stage {
-    position: relative;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    margin-bottom: 1.5vh;
-    transform: translateZ(0px);
-  }
-
-  .image-frame {
-    position: relative;
-    max-width: 720px;
-    width: 100%;
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow:
-      0 40px 100px oklch(0% 0 0 / 60%),
-      0 0 60px oklch(82% 0.14 210 / 8%),
-      0 0 0 1px oklch(50% 0.03 255 / 10%);
-    cursor: zoom-in;
-    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s;
-  }
-  .image-frame:hover {
-    transform: translateY(-4px);
-    box-shadow:
-      0 50px 120px oklch(0% 0 0 / 70%),
-      0 0 80px oklch(82% 0.14 210 / 12%),
-      0 0 0 1px oklch(82% 0.14 210 / 20%);
-  }
-
-  .image-frame img {
-    display: block;
-    width: 100%;
-    height: auto;
-    max-height: 55vh;
-    object-fit: cover;
-  }
-
-  .image-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 300px;
-    color: var(--overlay-faint);
-  }
-  .image-placeholder svg { width: 60px; height: 60px; }
-
-  .image-tags {
-    position: absolute;
-    bottom: 14px;
-    left: 14px;
-    display: flex;
-    gap: 6px;
-    z-index: 2;
-  }
-
-  .tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 10px;
-    background: oklch(6% 0.01 255 / 60%);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-radius: 100px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  .meta-seg-sub {
     font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    color: var(--muted);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
   }
-  .tag-loc { color: oklch(78% 0.13 155); }
-  .tag-date { color: var(--overlay-accent); }
 
-  .image-expand {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: oklch(6% 0.01 255 / 60%);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-radius: 50%;
-    color: var(--overlay-accent);
-    z-index: 2;
-    opacity: 0.7;
-    cursor: pointer;
-    transition: opacity 0.2s;
-  }
-  .image-frame:hover .image-expand { opacity: 1; }
-  .image-expand svg { width: 14px; height: 14px; }
-
-  .description-panel {
-    position: relative;
-    max-width: 920px;
-    width: 100%;
-    margin: 0 auto 1.5vh;
-    padding: 18px 24px;
-    background: var(--overlay-glass);
+  .sidebar {
+    width: 360px;
+    flex-shrink: 0;
+    background: rgba(15, 16, 20, 0.85);
     backdrop-filter: blur(24px) saturate(1.4);
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border-radius: 14px;
-    box-shadow:
-      0 20px 60px oklch(0% 0 0 / 30%),
-      0 0 0 1px oklch(50% 0.03 255 / 6%);
-    transform: translateZ(10px);
+    border-left: 1px solid var(--hairline);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
-  .description-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  .tab {
+    padding: 14px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+    font-family: var(--font-body);
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--fg-2); }
+  .tab.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+  }
+  .sidebar-content::-webkit-scrollbar { width: 6px; }
+  .sidebar-content::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 3px; }
+
+  .section { margin-bottom: 24px; }
+  .section:last-child { margin-bottom: 0; }
+  .section-header {
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.24em;
     text-transform: uppercase;
-    color: var(--overlay-accent);
-    margin-bottom: 8px;
-    opacity: 0.95;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 10px;
   }
 
-  .description-text {
-    font-size: 15px;
-    line-height: 1.75;
-    color: oklch(86% 0.004 250);
-    max-height: 240px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--overlay-accent-dim) transparent;
-  }
-  .description-text::-webkit-scrollbar { width: 2px; }
-  .description-text::-webkit-scrollbar-thumb { background: var(--overlay-accent-dim); }
-
-  .description-text :global(.overlay-p) { margin: 0.5em 0; }
-  .description-text :global(.overlay-p:first-child) { margin-top: 0; }
-  .description-text :global(.overlay-p:last-child) { margin-bottom: 0; }
-  .description-text :global(h1),
-  .description-text :global(h2),
-  .description-text :global(h3),
-  .description-text :global(h4) {
-    margin: 1em 0 0.5em;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    color: var(--overlay-accent);
-    line-height: 1.3;
+  .description {
     font-size: 13px;
+    line-height: 1.55;
+    color: var(--fg-2);
   }
-  .description-text :global(strong) { color: var(--overlay-fg); font-weight: 600; }
-  .description-text :global(em) { color: var(--overlay-muted); }
-  .description-text :global(.overlay-code) {
-    margin: 0.6em 0;
-    overflow-x: auto;
-    padding: 8px 10px;
-    background: oklch(8% 0.01 255);
-    border-radius: 6px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  .description :global(.overlay-p) { margin-bottom: 8px; }
+  .description :global(.overlay-p:last-child) { margin-bottom: 0; }
+  .description :global(.overlay-code) {
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 10px;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
     font-size: 12px;
-    line-height: 1.5;
-    color: var(--overlay-fg);
-  }
-  .description-text :global(a) { color: var(--overlay-accent); text-decoration: underline; }
-  .description-text :global(ul),
-  .description-text :global(ol) { padding-left: 1.5em; margin: 0.5em 0; }
-  .description-text :global(li) { margin: 0.25em 0; }
-  .description-text :global(blockquote) {
-    margin: 0.6em 0;
-    padding-left: 12px;
-    border-left: 2px solid var(--overlay-accent-dim);
-    color: var(--overlay-muted);
+    color: var(--fg-2);
+    margin-bottom: 8px;
   }
 
-  .description-loading,
-  .description-error,
-  .description-empty {
+  .loading-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 0;
     font-size: 12px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    color: var(--overlay-faint);
+    color: var(--muted);
   }
-  .description-error { color: var(--overlay-danger); }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--hairline-2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  .data-row {
+  .error-text { font-size: 13px; color: var(--danger); }
+  .empty-text { font-size: 13px; color: var(--faint); font-style: italic; }
+
+  .location-row {
     display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .location-row svg {
+    width: 16px; height: 16px;
+    color: var(--muted);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .location-text {
+    font-size: 13px;
+    color: var(--fg-2);
+    line-height: 1.5;
+  }
+
+  .people-grid {
+    display: flex;
+    flex-wrap: wrap;
     gap: 12px;
-    max-width: 920px;
-    width: 100%;
-    margin: 0 auto;
-    flex-wrap: wrap;
-    transform: translateZ(5px);
-  }
-
-  .data-panel {
-    flex: 1;
-    min-width: 200px;
-    padding: 14px 18px;
-    background: var(--overlay-glass-light);
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
-    border-radius: 12px;
-    box-shadow: 0 0 0 1px oklch(50% 0.03 255 / 5%);
-  }
-  .exif-panel {
-    flex-basis: 100%;
-    min-width: 100%;
-  }
-
-  .panel-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--overlay-accent);
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--overlay-accent-dim);
-  }
-  .panel-label .count {
-    color: var(--overlay-fg);
-    font-weight: 700;
-    margin-left: 6px;
-  }
-
-  .people-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
   }
   .person {
     display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 4px 8px 4px 4px;
-    border-radius: 100px;
-    transition: background 0.2s;
-    cursor: pointer;
-  }
-  .person:hover { background: oklch(20% 0.02 255 / 30%); }
-
-  .person-thumb {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-    filter: saturate(0.8);
-  }
-
-  .person-initials {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-  }
-
-  .person-silhouette {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: oklch(22% 0.02 255 / 50%);
-    color: var(--overlay-faint);
-  }
-  .person-silhouette svg { width: 12px; height: 12px; }
-
-  .person-name {
-    font-size: 13px;
-    color: var(--overlay-fg);
-    white-space: nowrap;
-  }
-  .person-unnamed {
-    font-size: 11px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    color: var(--overlay-muted);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 100px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
-    cursor: pointer;
-    transition: filter 0.15s;
-    letter-spacing: 0.02em;
-  }
-  .chip:hover { filter: brightness(1.25); }
-  .chip-loc {
-    color: oklch(78% 0.13 155);
-    background: oklch(72% 0.13 155 / 8%);
-  }
-  .chip-event {
-    color: oklch(80% 0.13 70);
-    background: oklch(74% 0.13 70 / 8%);
-  }
-  .chip-entity {
-    color: var(--overlay-muted);
-    background: oklch(20% 0.02 255 / 25%);
-  }
-  .chip-entity:hover { color: var(--overlay-fg); }
-
-  .exif-panel {
-    padding: 16px 20px;
-  }
-
-  .exif-group {
-    display: flex;
     flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 6px;
+    width: 60px;
+    cursor: pointer;
   }
-  .exif-group + .exif-group {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--overlay-hairline);
+  .person:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  .avatar {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline-2);
+    object-fit: cover;
+    background: var(--surface-2);
+    transition: border-color 0.15s ease, transform 0.15s ease;
   }
-  .exif-group-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  .person:hover .avatar { border-color: var(--accent); transform: scale(1.05); }
+  .avatar-initials {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline-2);
+    background: linear-gradient(135deg, #3A3B40, #2A2B30);
+    display: grid; place-items: center;
+    font-size: 14px; font-weight: 600;
+    color: var(--fg-2);
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .person:hover .avatar-initials { border-color: var(--accent); }
+  .avatar-unknown {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline-2);
+    background: var(--surface);
+    display: grid; place-items: center;
+    color: var(--faint);
+    transition: border-color 0.15s ease;
+  }
+  .person:hover .avatar-unknown { border-color: var(--accent); }
+  .avatar-unknown svg { width: 20px; height: 20px; }
+  .person-name {
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--overlay-accent);
-    margin-bottom: 6px;
-  }
-  .exif-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-  .exif-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 5px 8px;
-    gap: 12px;
-    border-radius: 6px;
-    transition: background 0.15s;
-  }
-  .exif-row:hover {
-    background: oklch(50% 0.03 255 / 6%);
-  }
-  .exif-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 11px;
-    color: var(--overlay-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .exif-value {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
-    color: var(--overlay-fg);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-    font-weight: 500;
+    color: var(--muted);
+    text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-width: 0;
+    width: 100%;
   }
 
-  .stepper {
+  .pills {
     display: flex;
     flex-wrap: wrap;
-    gap: 3px 14px;
-    padding: 8px 12px;
-    background: var(--overlay-glass);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-radius: 12px;
-    margin: 1vh auto 0;
-    max-width: 720px;
-    transform: translateZ(8px);
+    gap: 8px;
   }
-  .step {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 11px;
-    color: var(--overlay-muted);
+  .pill {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg-2);
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
-  .step.done { color: var(--overlay-success); }
-  .step.current { color: var(--overlay-accent); }
-  .step-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    border: 1px solid currentColor;
+  .pill:hover { background: var(--surface-2); border-color: var(--hairline-2); }
+  .pill-accent {
+    background: var(--accent-soft);
+    border-color: rgba(0, 122, 255, 0.3);
+    color: #5AC8FA;
   }
-  .step.done .step-dot { background: currentColor; }
-  .step.current .step-dot { animation: status-pulse 1.6s ease-in-out infinite; }
-  .step-dot svg { width: 8px; height: 8px; color: oklch(8% 0.02 260); }
 
-  .action-area {
+  .event-list { display: flex; flex-direction: column; gap: 8px; }
+  .event-item {
     display: flex;
-    justify-content: center;
-    margin-top: 1.5vh;
-    transform: translateZ(15px);
-  }
-  .btn-delete {
-    display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 10px 22px;
-    background: oklch(62% 0.20 18 / 10%);
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
-    border-radius: 100px;
-    border: 1px solid oklch(62% 0.20 18 / 20%);
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    cursor: pointer;
-    color: oklch(62% 0.20 18 / 80%);
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    gap: 10px;
+    font-size: 13px;
+    color: var(--fg-2);
   }
-  .btn-delete:hover:not(:disabled) {
-    color: oklch(62% 0.20 18);
-    background: oklch(62% 0.20 18 / 18%);
-    border-color: oklch(62% 0.20 18 / 50%);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 24px oklch(62% 0.20 18 / 15%);
-  }
-  .btn-delete:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-delete svg { width: 13px; height: 13px; opacity: 0.8; transition: opacity 0.2s; }
-  .btn-delete:hover svg { opacity: 1; }
-
-  .spinner {
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--overlay-accent-dim);
-    border-top-color: var(--overlay-accent);
+  .event-dot {
+    width: 6px; height: 6px;
     border-radius: 50%;
-    animation: overlay-spin 0.8s linear infinite;
+    background: var(--warn);
     flex-shrink: 0;
   }
-  .spinner-sm { width: 10px; height: 10px; }
-  @keyframes overlay-spin { to { transform: rotate(360deg); } }
 
-  .fullscreen {
+  .connection-list { display: flex; flex-direction: column; gap: 10px; }
+  .connection-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 10px;
+    border: 1px solid var(--hairline);
+  }
+  .connection-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+    min-width: 60px;
+  }
+  .connection-name {
+    font-size: 13px;
+    color: var(--fg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--hairline);
+    flex-shrink: 0;
+  }
+  .btn-delete {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    background: transparent;
+    border: 1px solid rgba(255, 59, 48, 0.3);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: var(--font-body);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-delete:hover:not(:disabled) {
+    background: rgba(255, 59, 48, 0.1);
+    border-color: var(--danger);
+  }
+  .btn-delete:active:not(:disabled) { transform: scale(0.98); }
+  .btn-delete:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+  .btn-delete:disabled { opacity: 0.5; cursor: default; }
+  .btn-delete svg { width: 14px; height: 14px; }
+
+  .fullscreen-overlay {
     position: fixed;
     inset: 0;
-    z-index: 9999;
-    background: oklch(0% 0 0 / 97%);
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.92);
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: zoom-out;
-    animation: fs-in 0.3s ease-out;
+    animation: fade-in 0.2s ease;
   }
-  @keyframes fs-in { from { opacity: 0; } to { opacity: 1; } }
-  .fullscreen-img {
-    max-width: 94vw;
-    max-height: 94vh;
-    object-fit: contain;
+  .fullscreen-overlay img {
+    max-width: 92%;
+    max-height: 92%;
     border-radius: 8px;
-    cursor: default;
+    box-shadow: 0 30px 100px rgba(0, 0, 0, 0.8);
   }
   .fullscreen-close {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: oklch(100% 0 0 / 5%);
+    position: absolute;
+    top: 20px; right: 20px;
+    width: 40px; height: 40px;
     border-radius: 50%;
-    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
+    display: grid; place-items: center;
     cursor: pointer;
-    color: oklch(100% 0 0 / 50%);
-    transition: background 0.2s, color 0.2s;
+    transition: all 0.15s ease;
   }
   .fullscreen-close:hover {
-    background: oklch(100% 0 0 / 10%);
-    color: oklch(100% 0 0 / 90%);
+    background: rgba(255, 59, 48, 0.2);
+    border-color: rgba(255, 59, 48, 0.4);
+    color: var(--danger);
   }
+  .fullscreen-close svg { width: 18px; height: 18px; }
 
-  .scene-inner > * {
-    animation: float-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .topbar { animation-delay: 0s; }
-  .image-stage { animation-delay: 0.08s; }
-  .description-panel { animation-delay: 0.16s; }
-  .data-row { animation-delay: 0.24s; }
-  .stepper { animation-delay: 0.28s; }
-  .action-area { animation-delay: 0.32s; }
-  @keyframes float-in {
-    from { opacity: 0; transform: translateY(20px) translateZ(-30px); }
-    to { opacity: 1; }
-  }
-
-  @media (max-width: 768px) {
-    .spatial-scene { padding: 2vh 4vw; perspective: none; }
-    .scene-inner { transform: none !important; }
-    .image-frame { border-radius: 12px; }
-    .image-frame img { max-height: 40vh; }
-    .description-panel { padding: 14px 18px; border-radius: 12px; }
-    .description-text { font-size: 13px; line-height: 1.65; }
-    .data-row { flex-direction: column; gap: 8px; }
-    .data-panel { min-width: 100%; border-radius: 10px; }
-    .topbar { margin-bottom: 1.5vh; }
-    .image-stage,
-    .description-panel,
-    .data-row,
-    .stepper,
-    .action-area {
-      transform: none !important;
+  @media (max-width: 900px) {
+    .content { flex-direction: column; }
+    .sidebar {
+      width: 100%;
+      border-left: none;
+      border-top: 1px solid var(--hairline);
+      max-height: 50vh;
     }
+    .stage { padding: 14px; gap: 10px; }
+    .photo { max-width: 100%; }
+    .meta-bar { flex-wrap: wrap; gap: 12px; padding: 12px; }
+    .meta-seg { flex: 1 1 45%; border-right: none; padding: 0; }
   }
-
   @media (max-width: 480px) {
-    .spatial-scene { padding: 1.5vh 3vw; }
-    .image-frame img { max-height: 35vh; }
-    .description-panel { padding: 12px 14px; }
-    .description-text { font-size: 12px; }
-    .people-row { gap: 6px; }
-    .person-name { font-size: 10px; }
-    .filename { display: none; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      animation-duration: 0.01ms !important;
-      transition-duration: 0.01ms !important;
-    }
+    .topbar { height: 48px; padding: 0 14px; }
+    .filename { font-size: 13px; }
+    .status-pill { display: none; }
+    .stage { padding: 10px; }
+    .meta-seg { flex: 1 1 100%; }
+    .sidebar-content { padding: 14px; }
+    .tab { padding: 12px 12px; font-size: 12px; }
+    .sidebar { max-height: 60vh; }
   }
 </style>

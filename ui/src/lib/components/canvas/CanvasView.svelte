@@ -47,6 +47,12 @@
     selectedCanvasNode = null;
   }
 
+  function navigateToNode(nodeId: string): void {
+    const cn = sceneManager?.getCanvasNode(nodeId);
+    selectedNodeId = nodeId;
+    selectedCanvasNode = cn ?? null;
+  }
+
   const THROTTLE_MS = 200;
 
   function wireSceneManager(sm: SceneManager): void {
@@ -249,9 +255,24 @@
   </div>
 {/if}
 
-<NodeOverlay node={selectedCanvasNode} kgNode={selectedKgNode} onClose={clearSelection} />
+<NodeOverlay node={selectedCanvasNode} kgNode={selectedKgNode} onClose={clearSelection} onNavigate={navigateToNode} />
 
 <style>
+  /* ── Tokens — match NodeOverlay's --overlay-* visual system ── */
+  :root {
+    --canvas-bg:          oklch(6% 0.02 260);
+    --canvas-fg:          oklch(90% 0.005 250);
+    --canvas-muted:       oklch(65% 0.02 255);
+    --canvas-faint:       oklch(55% 0.02 255);
+    --canvas-accent:      oklch(82% 0.14 210);
+    --canvas-accent-dim:  oklch(82% 0.14 210 / 18%);
+    --canvas-success:     oklch(72% 0.15 150);
+    --canvas-danger:      oklch(62% 0.20 18);
+    --canvas-glass:       oklch(16% 0.015 255 / 45%);
+    --canvas-glass-light: oklch(20% 0.015 255 / 30%);
+    --canvas-hairline:    oklch(50% 0.03 255 / 8%);
+  }
+
   .canvas-container {
     position: absolute;
     inset: 0;
@@ -260,6 +281,7 @@
     overflow: hidden;
   }
 
+  /* ── Empty state — glassmorphism, floating spatial ── */
   .empty-state {
     position: absolute;
     inset: 0;
@@ -267,126 +289,142 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 14px;
     pointer-events: none;
-    color: #00d4ff;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    color: var(--canvas-accent);
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    animation: float-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
+
   .empty-title {
     font-size: 1.25rem;
-    letter-spacing: 0.05em;
-    text-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--canvas-fg);
+    text-shadow: 0 0 24px oklch(82% 0.14 210 / 30%);
   }
+
   .empty-sub {
     font-size: 0.85rem;
-    color: rgba(0, 212, 255, 0.6);
+    line-height: 1.65;
+    color: var(--canvas-muted);
     max-width: 22rem;
     text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   }
+
   .empty-icon {
-    width: 3.5rem;
-    height: 3.5rem;
-    border-radius: 1rem;
-    background: rgba(0, 212, 255, 0.1);
+    width: 4rem;
+    height: 4rem;
+    border-radius: 50%;
+    background: var(--canvas-glass);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 10%),
+      0 20px 60px oklch(0% 0 0 / 40%);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #00d4ff;
+    color: var(--canvas-accent);
   }
+
   .retry-btn {
-    margin-top: 0.5rem;
-    padding: 0.4rem 0.9rem;
-    background: rgba(0, 212, 255, 0.12);
-    border: 1px solid rgba(0, 212, 255, 0.4);
-    border-radius: 6px;
-    color: #00d4ff;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 0.78rem;
+    margin-top: 6px;
+    padding: 8px 18px;
+    background: oklch(62% 0.20 18 / 10%);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border-radius: 100px;
+    border: 1px solid oklch(62% 0.20 18 / 20%);
+    color: oklch(62% 0.20 18 / 80%);
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
     cursor: pointer;
     pointer-events: auto;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .retry-btn:hover {
-    background: rgba(0, 212, 255, 0.22);
-    border-color: rgba(0, 212, 255, 0.7);
+    color: oklch(62% 0.20 18);
+    background: oklch(62% 0.20 18 / 18%);
+    border-color: oklch(62% 0.20 18 / 50%);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px oklch(62% 0.20 18 / 15%);
   }
 
-  .phase-badge {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.35rem 0.6rem;
-    background: rgba(10, 14, 23, 0.85);
-    border: 1px solid rgba(0, 212, 255, 0.35);
-    border-radius: 6px;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 0.72rem;
-    color: #00d4ff;
-    z-index: 10;
-    pointer-events: auto;
-    backdrop-filter: blur(4px);
-  }
-  .badge-label {
-    opacity: 0.85;
-  }
-  .badge-link {
-    color: #00d4ff;
-    text-decoration: none;
-    opacity: 0.7;
-    transition: opacity 0.15s ease;
-  }
-  .badge-link:hover {
-    opacity: 1;
-    text-decoration: underline;
-  }
-
+  /* ── Hover tooltip — glass pill ── */
   .hover-tooltip {
     position: absolute;
     z-index: 20;
-    padding: 0.3rem 0.6rem;
-    background: rgba(10, 14, 23, 0.92);
-    border: 1px solid rgba(0, 212, 255, 0.4);
-    border-radius: 6px;
-    color: #00d4ff;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 0.72rem;
+    padding: 5px 12px;
+    background: var(--canvas-glass);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-radius: 100px;
+    box-shadow: 0 0 0 1px oklch(50% 0.03 255 / 8%);
+    color: var(--canvas-muted);
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     white-space: nowrap;
     pointer-events: none;
-    backdrop-filter: blur(4px);
     transition: opacity 0.12s ease;
   }
 
+  /* ── Date indicator — floating glass panel ── */
   .date-indicator {
     position: absolute;
-    right: 14px;
-    bottom: 14px;
+    right: 16px;
+    bottom: 16px;
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.45rem 0.75rem;
-    background: rgba(10, 14, 23, 0.88);
-    border: 1px solid rgba(0, 212, 255, 0.35);
-    border-radius: 8px;
-    color: #00d4ff;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 0.78rem;
-    letter-spacing: 0.03em;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--canvas-glass);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border-radius: 100px;
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 8%),
+      0 8px 32px oklch(0% 0 0 / 30%);
+    color: var(--canvas-accent);
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.06em;
     white-space: nowrap;
     pointer-events: none;
-    backdrop-filter: blur(6px);
-    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
     transition: opacity 0.18s ease;
   }
+
   .date-indicator-icon {
     display: flex;
     align-items: center;
-    opacity: 0.85;
+    color: var(--canvas-muted);
   }
+
   .date-indicator-label {
     font-variant-numeric: tabular-nums;
+    color: var(--canvas-fg);
+  }
+
+  /* ── Shared animations ── */
+  @keyframes float-in {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 </style>
