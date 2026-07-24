@@ -180,7 +180,12 @@ services:
       - "${API_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    mem_limit: 512m
+    # PIL thumbnail generation for a 3MB RAW JPEG needs ~400MB native RSS per
+    # image; the thumbnail semaphore (api/routes/images.py) caps concurrency at
+    # 2, so peak native RSS alone is ~800MB before counting the event loop,
+    # deepface, and connection pools. 512m OOM-kills the worker mid-stream
+    # (ERR_INCOMPLETE_CHUNKED_ENCODING / 502 from nginx). 1.5g leaves headroom.
+    mem_limit: 1536m
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
