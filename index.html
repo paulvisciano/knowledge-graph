@@ -139,7 +139,39 @@
     opacity: 0.85;
   }
   .tech-chip:hover img { opacity: 1; }
-</style>
+
+  /* ─── Collapsible Sections ─── */
+  .collapse { margin: 0; }
+  .collapse > input.collapse-toggle { display: none; }
+  .collapse > .collapse-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.5rem 0;
+  }
+  .collapse > .collapse-header h2 {
+    margin: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+    flex: 1;
+  }
+  .collapse > .collapse-header .collapse-arrow {
+    font-size: 0.8rem;
+    color: var(--text2);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+  .collapse > .collapse-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  .collapse > input.collapse-toggle:checked ~ .collapse-body { max-height: none; }
+  .collapse > input.collapse-toggle:checked ~ .collapse-header .collapse-arrow { transform: rotate(90deg); }
+  .collapse > input.collapse-toggle:not(:checked) ~ .collapse-body { display: none; }
+ </style>
 </head>
 <body>
 
@@ -147,7 +179,11 @@
 <p class="subtitle">Personal knowledge graph stack: LightRAG + local LLMs + real-time image processing + 3D graph UI</p>
 
 <!-- ─── Getting Started ──────────────────────────────────────────────────── -->
-<h2>Getting Started</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-getting-started" class="collapse-toggle" checked>
+<label for="sec-getting-started" class="collapse-header"><h2>Getting Started</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card accent" style="margin-bottom:1rem">
   <p>Set up the full stack on a new machine. <strong>Prerequisites:</strong> macOS with Apple Silicon, ~10 GB free disk space for model files, and the following tools:</p>
@@ -311,9 +347,14 @@ curl -N -X POST http://localhost:8000/images/process \
     <tr><td>DeepFace weights download fails</td><td>First face recognition run downloads ~200 MB of model weights. Ensure internet access on first run. Weights are cached in a Docker volume.</td></tr>
   </table>
 </div>
-
+</div>
+</div>
 <!-- ─── Status Dashboard ────────────────────────────────────────────────── -->
-<h2>Current Status</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-current-status" class="collapse-toggle" >
+<label for="sec-current-status" class="collapse-header"><h2>Current Status</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card success" style="margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:0.75rem">
@@ -346,9 +387,14 @@ curl -N -X POST http://localhost:8000/images/process \
   </div>
   <p style="margin-top:0.5rem">Photo nodes rendered as 3D textured planes in the graph. Person nodes rendered as oval face crops. Real-time SSE pipeline streams processing progress (EXIF extraction → entity creation → VLM description → face recognition) to the UI with live graph updates. Photo images served from the API and displayed as in-graph textures. Persistent job queue for reliable image processing. Document deletion cleans up orphaned Photo/EXIF entities. Image nodes spaced apart with per-type force repulsion. Cursor-centered 3D graph zoom.</p>
 </div>
-
+</div>
+</div>
 <!-- ─── System Vitals ─────────────────────────────────────────────────────── -->
-<h2>System Vitals</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-system-vitals" class="collapse-toggle" >
+<label for="sec-system-vitals" class="collapse-header"><h2>System Vitals</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card accent">
   <p>Captured on a 16 GB Apple M2 Pro (10 cores). Three snapshots: pre-batch baseline, mid-batch (20-image pipeline run), and idle post-teardown. Full details in <code>docs/system-vitals-*.md</code>.</p>
@@ -422,9 +468,14 @@ curl -N -X POST http://localhost:8000/images/process \
   </div>
   <p class="muted" style="font-size:0.8rem;margin-top:0.5rem">Actual peak container usage: 0.75 GiB (25% of the old 3 GiB VM allocation).</p>
 </div>
-
+</div>
+</div>
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
-<h2>Roadmap</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-roadmap" class="collapse-toggle" >
+<label for="sec-roadmap" class="collapse-header"><h2>Roadmap</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card accent" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
@@ -479,9 +530,14 @@ curl -N -X POST http://localhost:8000/images/process \
   <p>Object detection, OCR, scene classification, and multi-photo graph queries. "Find all photos with Paul near the beach" or "show me everything from summer 2026."</p>
   <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Cross-photo entity resolution, multi-modal search, and richer visual understanding.</p>
 </div>
-
+</div>
+</div>
 <!-- ─── Architecture ────────────────────────────────────────────────────── -->
-<h2>Architecture</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-architecture" class="collapse-toggle" >
+<label for="sec-architecture" class="collapse-header"><h2>Architecture</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card accent">
 <pre>
@@ -570,9 +626,14 @@ curl -N -X POST http://localhost:8000/images/process \
     <td>418 MB</td>
   </tr>
 </table>
-
+</div>
+</div>
 <!-- ─── Configuration ────────────────────────────────────────────────────── -->
-<h2>Configuration</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-configuration" class="collapse-toggle" >
+<label for="sec-configuration" class="collapse-header"><h2>Configuration</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="grid grid-2">
   <div class="card">
@@ -609,9 +670,14 @@ curl -N -X POST http://localhost:8000/images/process \
     <tr><td>Doc Status</td><td><span class="badge purple">PGDocStatusStorage</span></td><td>PostgreSQL</td></tr>
   </table>
 </div>
-
+</div>
+</div>
 <!-- ─── Project Structure ────────────────────────────────────────────────── -->
-<h2>Project Structure</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-project-structure" class="collapse-toggle" >
+<label for="sec-project-structure" class="collapse-header"><h2>Project Structure</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card">
 <pre>
@@ -666,9 +732,14 @@ knowledge-graph/
 └── secrets/                <span class="muted"># SSL certs (not committed)</span>
 </pre>
 </div>
-
+</div>
+</div>
 <!-- ─── Quick Start ──────────────────────────────────────────────────────── -->
-<h2>Quick Start</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-quick-start" class="collapse-toggle" >
+<label for="sec-quick-start" class="collapse-header"><h2>Quick Start</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card success">
 <pre><span class="muted"># 1. Configure (single .env file for entire stack)</span>
@@ -696,9 +767,14 @@ open http://localhost:9621
 <span class="muted"># Stop everything</span>
 ./scripts/stop-all.sh</pre>
 </div>
-
+</div>
+</div>
 <!-- ─── Key Decisions ────────────────────────────────────────────────────── -->
-<h2>Key Decisions</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-key-decisions" class="collapse-toggle" >
+<label for="sec-key-decisions" class="collapse-header"><h2>Key Decisions</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="grid grid-2">
   <div class="card">
@@ -746,9 +822,14 @@ open http://localhost:9621
     <p>In production, nginx serves the static SvelteKit build and proxies all API calls — LightRAG, KG API, llama-server, MCP, and WebSocket sync — through a single port (<code>:5180</code>). No CORS issues, no mixed content, clean routing. In dev, Vite's proxy handles the same routes.</p>
   </div>
 </div>
-
+</div>
+</div>
 <!-- ─── Endpoints ────────────────────────────────────────────────────────── -->
-<h2>Endpoints</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-endpoints" class="collapse-toggle" >
+<label for="sec-endpoints" class="collapse-header"><h2>Endpoints</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 <table>
   <tr><th>Service</th><th>URL</th><th>Notes</th></tr>
   <tr><td>Nexus UI</td><td><a href="http://localhost:5180">http://localhost:5180</a></td><td>Custom SvelteKit frontend (chat, 3D graph with photo textures & face crops, drag-drop ingestion, job tracking & resumption, MCP)</td></tr>
@@ -765,9 +846,14 @@ open http://localhost:9621
     <tr><td>Face Crops by ID</td><td><code>GET /faces/crops/by-id/:face_id</code></td><td>Serve cropped face image keyed by <code>face_mapping.json</code> with on-the-fly fallback detection</td></tr>
   <tr><td>Job Queue</td><td><code>GET /images/jobs</code>, <code>GET /images/jobs/:id</code></td><td>Persistent job status tracking</td></tr>
 </table>
-
+</div>
+</div>
 <!-- ─── Changelog ────────────────────────────────────────────────────────── -->
-<h2>Changelog</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-changelog" class="collapse-toggle" >
+<label for="sec-changelog" class="collapse-header"><h2>Changelog</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 <div class="card">
   <table>
     <tr><th>Date</th><th>Change</th></tr>
@@ -829,9 +915,14 @@ open http://localhost:9621
     <tr><td>2026-07-17</td><td>Migrated embedding model from <code>nomic-embed-text-v2-moe</code> (768-dim) to <strong>BGE-M3</strong> (1024-dim, multilingual). Updated <code>.env</code>, <code>docker-compose.yml</code>, and <code>start-llama-servers.sh</code> (dropped the <code>--override-kv nomic-bert-moe.context_length</code> hack — BGE-M3 needs only <code>--embedding --pooling cls</code>). Existing vectors must be regenerated via <code>scripts/clear-graph.sh</code> + reprocess.</td></tr>
   </table>
 </div>
-
+</div>
+</div>
 <!-- ─── Improvement: BGE-M3 Embeddings ───────────────────────────────────── -->
-<h2>Improvement — Switching to BGE-M3 (1024-dim) Embeddings</h2>
+<div class="collapse">
+<input type="checkbox" id="sec-improvement-switching-to-bge-m3-1024-dim-embeddings" class="collapse-toggle" >
+<label for="sec-improvement-switching-to-bge-m3-1024-dim-embeddings" class="collapse-header"><h2>Improvement — Switching to BGE-M3 (1024-dim) Embeddings</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
+
 
 <div class="card accent">
   <p>The stack currently embeds documents and queries with <code>nomic-embed-text-v2-moe</code> (768-dim, 8&nbsp;K context, English-oriented) while reranking with <code>bge-reranker-v2-m3</code>. Replacing the embedding model with <strong>BGE-M3</strong> (<a href="https://huggingface.co/BAAI/bge-m3" target="_blank" rel="noopener">BAAI/bge-m3</a>) — a 1024-dim, 8&nbsp;K context, 100+-language model built on XLM-RoBERTa-large — aligns the embedding and reranker on the same M3 family and adds real multilingual + long-document retrieval capacity. GGUF builds are available (<a href="https://huggingface.co/gpustack/bge-m3-GGUF" target="_blank" rel="noopener">gpustack/bge-m3-GGUF</a>, <a href="https://huggingface.co/doof-ferb/bge-m3-gguf" target="_blank" rel="noopener">doof-ferb/bge-m3-gguf</a>) and run on llama.cpp with <code>--embedding --pooling cls</code> (no <code>--override-kv</code> hack needed, unlike nomic's MoE context-length patch).</p>
@@ -1054,10 +1145,14 @@ open http://localhost:9621
   <p><strong>The embedding model is the retrieval gatekeeper.</strong> Gemma extracts keywords, but BGE-M3 decides which entities, relations, and chunks get retrieved from PostgreSQL. The LLM never sees the raw document store — it only sees what the embedding model's vector search surfaced (step 3). So if BGE-M3 returns poor matches (wrong language, blurred proper nouns), Gemma gets bad context and produces a bad answer regardless of how good the LLM is.</p>
   <p style="margin-top:0.5rem">This is exactly why the BGE-M3 switch matters: <strong>steps 2-3 are where retrieval quality is decided</strong>, and that's purely the embedding model's job. Gemma runs identically before and after — but it receives better-ranked input. With BGE-M3, step 2 embeds in a 100+-language 1024-dim space (vs nomic's English-oriented 768-dim), and step 3's HNSW search returns more accurate, language-consistent candidates — so step 7's answer is grounded in better context with no LLM change.</p>
 </div>
-
+</div>
+</div>
 <!-- ─── Powered By ────────────────────────────────────────────────────────── -->
+<div class="collapse">
+<input type="checkbox" id="sec-powered-by" class="collapse-toggle" >
+<label for="sec-powered-by" class="collapse-header"><h2>Powered By</h2><span class="collapse-arrow">▶</span></label>
+<div class="collapse-body">
 <div class="tech-footer">
-  <h2>Powered By</h2>
   <p>Open-source-first. No cloud APIs. Runs entirely on local hardware.</p>
   <div class="tech-row"><span class="tech-row-label">AI</span>
     <a href="https://github.com/HKUDS/LightRAG" class="tech-chip" target="_blank" rel="noopener"><img src="https://avatars.githubusercontent.com/HKUDS" alt="" style="border-radius:2px" onerror="this.style.display='none'">LightRAG</a>
@@ -1088,6 +1183,7 @@ open http://localhost:9621
     <a href="https://developer.apple.com/metal/" class="tech-chip" target="_blank" rel="noopener"><img src="https://cdn.simpleicons.org/apple/white" alt="" onerror="this.style.display='none'">Apple Metal</a>
   </div>
 </div>
-
+</div>
+</div>
 </body>
 </html>
