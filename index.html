@@ -357,6 +357,82 @@ docker compose down</pre>
   <p style="margin-top:0.5rem">Photo nodes rendered as 3D textured planes in the graph. Person nodes rendered as oval face crops. Real-time SSE pipeline streams processing progress (EXIF extraction → entity creation → VLM description → face recognition) to the UI with live graph updates. Photo images served from the API and displayed as in-graph textures. Persistent job queue for reliable image processing. Document deletion cleans up orphaned Photo/EXIF entities. Image nodes spaced apart with per-type force repulsion. Cursor-centered 3D graph zoom.</p>
 </div>
 
+<!-- ─── System Vitals ─────────────────────────────────────────────────────── -->
+<h2>System Vitals</h2>
+
+<div class="card accent">
+  <p>Captured on a 16 GB Apple M2 Pro (10 cores). Three snapshots: pre-batch baseline, mid-batch (20-image pipeline run), and idle post-teardown. Full details in <code>docs/system-vitals-*.md</code>.</p>
+
+  <h3>Memory Pressure</h3>
+  <p>Free RAM (GB) across the three states — the batch run starved the host to 59 MB free; idle recovers to 4 GB.</p>
+  <div style="display:flex;gap:1rem;align-items:flex-end;height:180px;padding:1rem 0;border-bottom:1px solid var(--border)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:3%;background:var(--warning);border-radius:4px 4px 0 0;min-height:4px"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Pre-batch</span>
+      <span style="font-size:0.85rem;color:var(--warning)">66 MB</span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:1.5%;background:var(--danger);border-radius:4px 4px 0 0;min-height:3px"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Mid-batch</span>
+      <span style="font-size:0.85rem;color:var(--danger)">59 MB</span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:25%;background:var(--success);border-radius:4px 4px 0 0"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Idle</span>
+      <span style="font-size:0.85rem;color:var(--success)">4.0 GB</span>
+    </div>
+  </div>
+
+  <h3>Wired Memory</h3>
+  <p>Wired RAM (GB) — llama-server GPU weights + Docker VM drove wired to 13 GB during the batch; idle drops to 2 GB.</p>
+  <div style="display:flex;gap:1rem;align-items:flex-end;height:200px;padding:1rem 0;border-bottom:1px solid var(--border)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:27%;background:var(--accent);border-radius:4px 4px 0 0"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Pre-batch</span>
+      <span style="font-size:0.85rem;color:var(--accent)">4.3 GB</span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:82%;background:var(--danger);border-radius:4px 4px 0 0"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Mid-batch</span>
+      <span style="font-size:0.85rem;color:var(--danger)">13.1 GB</span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:60%;height:12%;background:var(--success);border-radius:4px 4px 0 0"></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Idle</span>
+      <span style="font-size:0.85rem;color:var(--success)">2.0 GB</span>
+    </div>
+  </div>
+
+  <h3>Image Processing Time</h3>
+  <p>Wall-clock duration per image across 73 completed jobs (created_at → updated_at). The long tail is driven by LightRAG insert-queue contention, not compute.</p>
+  <table style="margin-top:0.5rem;font-size:0.85rem">
+    <tr><th style="text-align:left;padding:0.3rem 0.5rem">Percentile</th><th style="text-align:left;padding:0.3rem 0.5rem">Duration</th></tr>
+    <tr><td style="padding:0.3rem 0.5rem">Min</td><td style="padding:0.3rem 0.5rem">5.5 min</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem">P50 (median)</td><td style="padding:0.3rem 0.5rem">28.5 min</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem">Mean</td><td style="padding:0.3rem 0.5rem">40.9 min</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem">P90</td><td style="padding:0.3rem 0.5rem">79 min</td></tr>
+    <tr><td style="padding:0.3rem 0.5rem;color:var(--danger)">P99 / Max</td><td style="padding:0.3rem 0.5rem;color:var(--danger)">6.8 hr</td></tr>
+  </table>
+
+  <h3>Docker Memory — Before vs After</h3>
+  <p>Container mem_limit caps and Docker VM allocation reduced to match actual usage, freeing ~1.5 GB of host RAM.</p>
+  <div style="display:flex;gap:2rem;align-items:flex-end;height:180px;padding:1rem 0;border-bottom:1px solid var(--border)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:45%;height:75%;background:var(--danger);border-radius:4px 4px 0 0;display:flex;align-items:flex-start;justify-content:center;padding-top:0.25rem"><span style="font-size:0.7rem;color:var(--bg);font-weight:600">3.0</span></div>
+      <div style="width:45%;height:25%;background:var(--danger);opacity:0.5;display:flex;align-items:flex-start;justify-content:center;padding-top:0.25rem"><span style="font-size:0.7rem;color:var(--bg);font-weight:600">4.5</span></div>
+      <span style="font-size:0.8rem;color:var(--text2)">Before</span>
+      <span style="font-size:0.75rem;color:var(--text2)">VM 3 GiB · caps 4.5 GiB</span>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+      <div style="width:45%;height:38%;background:var(--success);border-radius:4px 4px 0 0;display:flex;align-items:flex-start;justify-content:center;padding-top:0.25rem"><span style="font-size:0.7rem;color:var(--bg);font-weight:600">1.5</span></div>
+      <div style="width:45%;height:19%;background:var(--success);opacity:0.5;display:flex;align-items:flex-start;justify-content:center;padding-top:0.25rem"><span style="font-size:0.7rem;color:var(--bg);font-weight:600">1.75</span></div>
+      <span style="font-size:0.8rem;color:var(--text2)">After</span>
+      <span style="font-size:0.75rem;color:var(--text2)">VM 1.5 GiB · caps 1.75 GiB</span>
+    </div>
+  </div>
+  <p class="muted" style="font-size:0.8rem;margin-top:0.5rem">Actual peak container usage: 0.75 GiB (25% of the old 3 GiB VM allocation).</p>
+</div>
+
 <!-- ─── Roadmap ──────────────────────────────────────────────────────────── -->
 <h2>Roadmap</h2>
 
