@@ -169,7 +169,7 @@
       <td>Runs LLM, embedding, and reranker models on Metal GPU</td>
     </tr>
   </table>
-  <p class="muted" style="margin-top:0.5rem"><strong>Docker Desktop post-install:</strong> After installing, open Docker Desktop and wait for the engine to start (whale icon in menu bar stops animating). Allocate at least <strong>8 GB RAM</strong> in Settings → Resources. The API container uses DeepFace for face recognition which needs significant memory.</p>
+  <p class="muted" style="margin-top:0.5rem"><strong>Docker Desktop post-install:</strong> After installing, open Docker Desktop and wait for the engine to start (whale icon in menu bar stops animating). The stack auto-configures the VM memory from <code>DOCKER_VM_MEMORY_MIB</code> in <code>.env</code> (default 1.5 GiB) via <code>scripts/setup-docker.sh</code> — no manual Settings → Resources step needed.</p>
 </div>
 
 <h3>1. Clone &amp; Configure</h3>
@@ -250,28 +250,21 @@ brew upgrade llama.cpp</pre>
   <p class="muted" style="margin-top:0.5rem"><strong>⚠️ Version requirement:</strong> llama.cpp <strong>v9750+</strong> (June 2026 or later) is required for the <code>gemma4uv</code> projector type used by Gemma 4 12B's mmproj. Older versions crash with <code>unknown projector type: gemma4uv</code>. If you can't upgrade, move the mmproj aside — the stack will run in text-only mode with EXIF fallback for images.</p>
 </div>
 
-<h3>4. Start the LLM Servers (Host — Metal GPU)</h3>
+<h3>4. Start the Full Stack</h3>
 <div class="card">
-<p>The LLM, embedding, and reranker servers run <strong>natively on macOS</strong> for Metal GPU acceleration. Docker containers connect to them via <code>host.docker.internal</code>.</p>
-<pre><span class="muted"># Starts LLM (:8080), embedding (:8081), reranker (:8082)</span>
-./scripts/start-llama-servers.sh</pre>
-  <p class="muted" style="margin-top:0.5rem">Wait for all three ports to report healthy (the script auto-checks). First startup loads model weights and takes ~30s.</p>
+<p>The entire stack — Docker containers and host llama-servers — starts with a single command. The script first ensures Docker Desktop VM memory matches <code>.env</code>, then builds and starts the containers, then launches the llama-servers in the foreground for Metal GPU acceleration.</p>
+<pre><span class="muted"># Start everything: Docker containers + host llama-servers</span>
+./scripts/start-all.sh
+
+<span class="muted"># Containers: LightRAG, PostgreSQL, API, Nexus UI, MCP</span>
+<span class="muted"># Host: LLM (:8080), embeddings (:8081), reranker (:8082), whisper (:8090)</span>
+
+<span class="muted"># Press Ctrl+C to stop the llama-servers</span>
+<span class="muted"># Run ./scripts/stop-all.sh to tear down everything (containers + servers)</span></pre>
+  <p class="muted" style="margin-top:0.5rem">First build takes a few minutes for the LightRAG image (Python + Rust deps). First model load takes ~30s. The llama-servers run in the foreground so Ctrl+C stops them cleanly — use <code>stop-all.sh</code> to also tear down the Docker containers.</p>
 </div>
 
-<h3>5. Start Docker Services</h3>
-<div class="card">
-<pre><span class="muted"># Build and start everything (LightRAG, PostgreSQL, API, Nexus UI)</span>
-docker compose up -d --build
-
-<span class="muted"># Watch logs</span>
-docker compose logs -f
-
-<span class="muted"># Check service health</span>
-docker compose ps</pre>
-  <p style="margin-top:0.5rem">Services start in dependency order: PostgreSQL → LightRAG → API → Nexus. First build takes a few minutes for the LightRAG image (Python + Rust deps).</p>
-</div>
-
-<h3>6. Verify Everything Works</h3>
+<h3>5. Verify Everything Works</h3>
 <div class="card">
 <pre><span class="muted"># LightRAG health</span>
 curl -sf http://localhost:9621/health | python3 -m json.tool
@@ -289,7 +282,7 @@ open http://localhost:3000
 open http://localhost:9621</pre>
 </div>
 
-<h3>7. Process Your First Image</h3>
+<h3>6. Process Your First Image</h3>
 <div class="card">
 <pre><span class="muted"># Via the API (SSE stream — watch real-time progress)</span>
 curl -N -X POST http://localhost:8000/images/process \
@@ -300,11 +293,8 @@ curl -N -X POST http://localhost:8000/images/process \
 
 <h3>Stopping Everything</h3>
 <div class="card warning">
-<pre><span class="muted"># Stops llama-servers + Docker containers</span>
-./scripts/stop-all.sh
-
-<span class="muted"># Or just Docker</span>
-docker compose down</pre>
+<pre><span class="muted"># Stops llama-servers + whisper-server + Docker containers</span>
+./scripts/stop-all.sh</pre>
 </div>
 
 <h3>Troubleshooting</h3>
