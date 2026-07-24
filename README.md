@@ -6,7 +6,7 @@ Personal knowledge graph stack: LightRAG + local LLMs + custom UI.
 
 - **macOS with Apple Silicon** (Metal GPU for llama-server)
 - **Homebrew** — install: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-- **Docker Desktop** — install: `brew install --cask docker`, then open it and allocate at least 8 GB RAM in Settings → Resources
+- **Docker Desktop** — install: `brew install --cask docker`, then open it. `scripts/start-all.sh` sets the VM memory from `DOCKER_VM_MEMORY_MIB` in `.env` (default 1.5 GiB) automatically; no manual Settings → Resources step needed.
 - **llama.cpp** — install: `brew install llama.cpp`. **Must be version 9750+** (commit `bf533823c` or later, from June 2026+) for `gemma4uv` projector support. Older versions will crash when loading the mmproj with `unknown projector type: gemma4uv`. Check with `llama-server --version` and upgrade if needed: `brew upgrade llama.cpp`.
 - **whisper.cpp** — install: `brew install whisper-cpp`. Provides `whisper-server`, which runs the transcription model on the Metal GPU on the host (same pattern as llama-server). Required for voice memo transcription; if missing, `start-llama-servers.sh` skips it with a warning and the chat UI disables audio transcription.
 - **~11 GB disk space** for model files (includes Whisper)
@@ -30,18 +30,18 @@ cp .env.example .env
 # Pulls all five GGUF/model files into ~/models/ (or $MODEL_DIR if set in .env).
 # Re-runnable — skips files that already exist.
 
-# 4. Start llama-servers + whisper-server on the host (Metal GPU)
-./scripts/start-llama-servers.sh
-# Starts four host processes:
-#   • llama-server (LLM + mmproj vision)        :8080
-#   • llama-server (BGE-M3 embeddings)          :8081
-#   • llama-server (bge-reranker-v2-m3)         :8082
-#   • whisper-server (ggml-large-v3-turbo)     :8090
+# 4. Start the full stack (Docker containers + host llama-servers)
+./scripts/start-all.sh
+# Starts everything in order:
+#   • Ensures Docker Desktop VM memory matches .env (DOCKER_VM_MEMORY_MIB)
+#   • Docker containers: lightrag, postgres, api, nexus, mcp
+#   • Host llama-servers (LLM + mmproj vision)        :8080
+#   • Host llama-servers (BGE-M3 embeddings)          :8081
+#   • Host llama-servers (bge-reranker-v2-m3)         :8082
+#   • Host whisper-server (ggml-large-v3-turbo)       :8090
+# Ctrl+C stops llama-servers; ./scripts/stop-all.sh tears down everything.
 
-# 5. Start Docker services
-docker compose up -d --build
-
-# 6. Open Nexus UI
+# 5. Open Nexus UI
 open http://localhost:3000
 ```
 

@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile
     container_name: knowledge-graph-lightrag
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 384m
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,7 +111,7 @@ services:
     image: knowledge-graph-mcp:latest
     container_name: knowledge-graph-mcp
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 128m
     env_file:
       - .env
     environment:
@@ -136,7 +136,7 @@ services:
     image: pgvector/pgvector:pg18
     container_name: knowledge-graph-postgres
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lightrag}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
@@ -180,7 +180,7 @@ services:
       - "${API_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    mem_limit: 1g
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
