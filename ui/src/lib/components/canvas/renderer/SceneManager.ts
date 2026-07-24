@@ -93,6 +93,16 @@ export class SceneManager {
   private _lastChunkY = Infinity;
   private _lastChunkZ = Infinity;
 
+  // --- fly-to (animated camera Z travel) state -----------------------------
+  // null when idle; otherwise lerps _basePos.z from _flyFromZ to _flyToZ over
+  // _flyElapsed/_flyDuration ms. We only animate Z — the time axis — because X/Y
+  // are always centered (0,0) for the time-travel navigation the date pill uses.
+  private _flyToZ: number | null = null;
+  private _flyFromZ = 0;
+  private _flyElapsed = 0;
+  private _flyDuration = 700;
+  private _lastFrameMs = 0;
+
   /** Optional callback fired when the camera crosses a chunk boundary. */
   onChunkChange?: (cx: number, cy: number, cz: number) => void;
 
@@ -254,6 +264,40 @@ export class SceneManager {
     this._basePos.set(targetX, targetY, targetZ);
   }
 
+  /**
+   * Smoothly animate the camera's Z to `targetZ` (clamped to the current
+   * depth bounds), centering X/Y at 0. Cancels any in-flight fly and clears
+   * velocity so inertia from prior drag/wheel input doesn't fight the tween.
+   * Use for the date-pill timeline navigation.
+   */
+  flyTo(targetZ: number): void {
+    if (this._disposed) return;
+    const clampedZ = Math.max(this._minCameraZ, Math.min(this._maxCameraZ, targetZ));
+    this._flyFromZ = this._basePos.z;
+    this._flyToZ = clampedZ;
+    this._flyElapsed = 0;
+    this._velocity.set(0, 0, 0);
+  }
+
+  /** Cancels any active fly-to, leaving the camera wherever it currently sits. */
+  cancelFly(): void {
+    this._flyToZ = null;
+  }
+
+  /** Advances the fly-to tween by `deltaMs`. Returns true while flying. */
+  private tickFly(deltaMs: number): boolean {
+    if (this._flyToZ === null) return false;
+    this._flyElapsed += deltaMs;
+    const t = Math.min(1, this._flyElapsed / this._flyDuration);
+    // easeInOutCubic — slow start/end, fast middle, feels right for travel.
+    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    this._basePos.x = 0;
+    this._basePos.y = 0;
+    this._basePos.z = this._flyFromZ + (this._flyToZ - this._flyFromZ) * eased;
+    if (t >= 1) this._flyToZ = null;
+    return true;
+  }
+
   /** Begins the RAF loop. Safe to call once; idempotent if already running. */
   start(): void {
     if (this._running || this._disposed) return;
@@ -301,9 +345,17 @@ export class SceneManager {
     this._rafId = requestAnimationFrame(this.onFrame);
     if (!this._visible) return;
 
-    this.applyKeyboard();
-    this.applyVelocity();
-    this.applyDrift();
+    const now = performance.now();
+    const deltaMs = this._lastFrameMs ? Math.min(64, now - this._lastFrameMs) : 16;
+    this._lastFrameMs = now;
+
+    if (this.tickFly(deltaMs)) {
+      this._drift.set(0, 0);
+    } else {
+      this.applyKeyboard();
+      this.applyVelocity();
+      this.applyDrift();
+    }
 
     // Compose final camera position from basePos + drift. Chunk/fade logic
     // uses basePos only so mouse parallax never triggers remounts or pop-in.
@@ -345,7 +397,10 @@ export class SceneManager {
     if (k.has('ArrowDown') || k.has('s')) { this._velocity.y -= panStep; moved = true; }
     if (k.has('q')) { this._velocity.z += zoomStep; moved = true; }
     if (k.has('e')) { this._velocity.z -= zoomStep; moved = true; }
-    if (moved) this._userMoved = true;
+    if (moved) {
+      this._userMoved = true;
+      this.cancelFly();
+    }
   }
 
   /** Lerps basePos toward velocity, decays velocity, clamps basePos Z. */
@@ -392,6 +447,7 @@ export class SceneManager {
   };
 
   private onPointerDown = (e: PointerEvent): void => {
+    this.cancelFly();
     this._pointer.down = true;
     this._pointer.lastX = e.clientX;
     this._pointer.lastY = e.clientY;
@@ -435,6 +491,7 @@ export class SceneManager {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    this.cancelFly();
     // Inverted: scroll up (deltaY < 0) zooms in (z decreases), scroll down zooms out.
     this._basePos.z += e.deltaY * WHEEL_ZOOM_STEP;
     if (this._basePos.z < this._minCameraZ) this._basePos.z = this._minCameraZ;
