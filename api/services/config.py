@@ -78,6 +78,21 @@ def vlm_timeout() -> int:
     return _env_int("VLM_TIMEOUT", 300)
 
 
+def vlm_image_max_dim() -> int:
+    """Max dimension (px) for images sent to the VLM.
+
+    Full-resolution photos (10–12 MP) are needlessly expensive: the Gemma-4-12B
+    mmproj caps image tokens at --image-max-tokens (280), so detail beyond ~768px
+    is discarded by the projector anyway.  Resizing to 768px max-dim before
+    base64-encoding cuts the VLM payload ~50× (4 MB → ~80 KB) and the GPU wired
+    memory spike proportionally, while producing identical descriptions.
+
+    The original full-resolution file is never modified — only the in-memory
+    copy sent to the VLM is resized.  Set to 0 to disable resizing.
+    """
+    return max(0, _env_int("VLM_IMAGE_MAX_DIM", 768))
+
+
 def max_concurrent_jobs() -> int:
     return max(1, _env_int("MAX_CONCURRENT_JOBS", 3))
 

@@ -30,9 +30,24 @@ if [[ ! -f "$WHISPER_MODEL_PATH" ]]; then
     echo "WARNING: Whisper model not found: $WHISPER_MODEL_PATH (transcription will be unavailable)"
 fi
 
-LLAMA_SERVER="$(which llama-server 2>/dev/null || echo /opt/homebrew/bin/llama-server)"
-if [[ ! -x "$LLAMA_SERVER" ]]; then
-    echo "ERROR: llama-server not found. Install llama.cpp: brew install llama.cpp"
+# Prefer a Metal-enabled build from vendor/llama.cpp (built via build-llama-cpp.sh).
+# The Homebrew bottle of llama.cpp ships WITHOUT Metal support, so -ngl 99
+# is silently ignored and the model runs on CPU at 4-7 tok/s instead of 20-40.
+# If the project build exists, use it; otherwise fall back to Homebrew.
+PROJECT_LLAMA_SERVER="$PROJECT_DIR/vendor/llama.cpp/src/build/bin/llama-server"
+HOMEBREW_LLAMA_SERVER="$(which llama-server 2>/dev/null || echo /opt/homebrew/bin/llama-server)"
+
+if [[ -x "$PROJECT_LLAMA_SERVER" ]]; then
+    LLAMA_SERVER="$PROJECT_LLAMA_SERVER"
+    export DYLD_LIBRARY_PATH="$PROJECT_DIR/vendor/llama.cpp/src/build/bin:${DYLD_LIBRARY_PATH:-}"
+    echo "Using project-built llama-server (Metal): $LLAMA_SERVER"
+elif [[ -x "$HOMEBREW_LLAMA_SERVER" ]]; then
+    LLAMA_SERVER="$HOMEBREW_LLAMA_SERVER"
+    echo "WARNING: Using Homebrew llama-server — Metal may not be available."
+    echo "         Run ./scripts/build-llama-cpp.sh for GPU acceleration."
+else
+    echo "ERROR: llama-server not found. Install via: ./scripts/build-llama-cpp.sh"
+    echo "       Or fallback: brew install llama.cpp (CPU-only, not recommended)"
     exit 1
 fi
 

@@ -10,6 +10,7 @@
   import { buildCanvasLayout, buildTimeIndex } from './Layout';
   import type { TimeIndex } from './Layout';
   import NodeOverlay from './NodeOverlay.svelte';
+  import ProcessingOverlay from './ProcessingOverlay.svelte';
   import type { CanvasNode } from './renderer/types';
 
   const client = new LightragClient();
@@ -256,6 +257,10 @@
 {/if}
 
 <NodeOverlay node={selectedCanvasNode} kgNode={selectedKgNode} onClose={clearSelection} onNavigate={navigateToNode} />
+
+{#if sceneManager}
+  <ProcessingOverlay {sceneManager} />
+{/if}
 
 <style>
   /* ── Tokens — match NodeOverlay's --overlay-* visual system ── */

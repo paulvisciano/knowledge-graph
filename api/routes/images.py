@@ -37,13 +37,15 @@ from api.services.processor import (
     describe_image_with_vlm, describe_face_crop, create_exif_relations,
     link_exif_to_visual_entities, wait_for_lightrag_processing,
     delete_photo_entities, insert_metadata_into_lightrag,
+    prepare_vlm_image, cleanup_vlm_image,
 )
 from api.services import db as db_module
 from api.services import config
 from api.services.job_manager import (
     create_job, get_job, list_jobs, delete_job,
-    persist_uploaded_file, start_processing, subscribe_events,
+    persist_uploaded_file, subscribe_events,
     unsubscribe_events, get_events, update_job_status,
+    enqueue_and_maybe_batch,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,7 +165,7 @@ async def _emit_exif_entities(
             yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}))
 
 
-async def _process_and_stream(
+async def _run_exif_phase(
     file_path: str,
     file_source: str,
     skip_exif: bool,
@@ -171,6 +173,19 @@ async def _process_and_stream(
     insert: bool,
     note: str = "",
 ):
+    """Phase 1 of the two-phase pipeline: EXIF extraction, face detection,
+    and Photo/Date/Location/Camera entity creation in LightRAG.
+
+    Emits the same SSE events as the original ``_process_and_stream`` up
+    through ``exif_entities_complete`` (or ``pipeline_complete`` when
+    ``insert`` is False). Persists EXIF + ``metadata_text`` to
+    ``photo_metadata`` so phase 2 can resume from DB state.
+
+    Returns the ``metadata_text`` built from EXIF + faces (or None when no
+    EXIF/faces ran or ``insert`` is False). Phase 2 reads it back from the DB
+    by ``file_source`` when the job object is the only state crossing the
+    phase boundary.
+    """
     content_list: list[dict] | None = None
     metadata_text: str | None = None
     exif_data: dict | None = None
@@ -214,7 +229,50 @@ async def _process_and_stream(
         async for sse_event in _emit_exif_entities(file_source, exif_data):
             yield sse_event
 
-    # Phase 3: Upload to LightRAG (VLM description + insert)
+    # Mark the phase-1 boundary so the job manager/coordinator and the UI can
+    # distinguish "all EXIF/entities done, waiting for AI wave" from the
+    # transient extracting_metadata/creating_entities stages.
+    yield ServerSentEvent(
+        event="message",
+        data=json.dumps({"event": "exif_phase_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
+    )
+
+    # Persist EXIF + metadata_text so phase 2 (which may run much later, on a
+    # different task, or after a restart) can reconstruct the phase-1 output
+    # from DB state alone. save_photo_exif is idempotent (UPSERT on file_source).
+    if exif_data is not None:
+        try:
+            from api.services.db import save_photo_exif
+            await save_photo_exif(file_source, exif_data, metadata_text=metadata_text)
+        except Exception:
+            logger.exception("Failed to persist EXIF + metadata_text for %s", file_source)
+
+    return
+
+
+async def _run_ai_phase(
+    file_path: str,
+    file_source: str,
+    metadata_text: str | None,
+    note: str = "",
+    photo_name: str | None = None,
+):
+    """Phase 2 of the two-phase pipeline: VLM description, LightRAG
+    ingestion, and visual-entity linking.
+
+    Reads ``metadata_text`` back from the DB (``photo_metadata``) when the
+    caller passes None — phase 2 may run in a fresh process that only has the
+    Job object, so the bridge state lives in the DB. Emits ``describing_image``
+    through ``pipeline_complete`` events, identical to the original
+    ``_process_and_stream`` phase 3-5.
+    """
+    if metadata_text is None:
+        try:
+            from api.services.db import get_photo_metadata_text
+            metadata_text = await get_photo_metadata_text(file_source)
+        except Exception:
+            logger.exception("Failed to load metadata_text for %s", file_source)
+
     # Signal the UI that we're about to wait for the VLM semaphore/queue before
     # the describing_image (active AI run) event fires.
     yield ServerSentEvent(
@@ -228,9 +286,13 @@ async def _process_and_stream(
     try:
         if note:
             metadata_text = (f"User note: {note}\n\n" + metadata_text) if metadata_text else f"User note: {note}"
-        upload_result = await upload_image_to_lightrag(
-            config.lightrag_url(), file_path, filename=file_source, metadata_text=metadata_text,
-        )
+        vlm_image_path = prepare_vlm_image(file_path)
+        try:
+            upload_result = await upload_image_to_lightrag(
+                config.lightrag_url(), vlm_image_path, filename=file_source, metadata_text=metadata_text,
+            )
+        finally:
+            cleanup_vlm_image(vlm_image_path)
         if upload_result.get("status") == "error":
             yield ServerSentEvent(
                 event="message",
@@ -289,7 +351,8 @@ async def _process_and_stream(
     # polled the *global* label count which races with concurrent jobs —
     # another job creating entities could trigger an early break before our
     # document's entities exist.  Just proceed to linking directly.
-    photo_name = f"{file_source} (Photo)"
+    if photo_name is None:
+        photo_name = f"{file_source} (Photo)"
 
     try:
         visual_result = await link_exif_to_visual_entities(config.lightrag_url(), file_source, photo_name)
@@ -317,6 +380,36 @@ async def _process_and_stream(
         event="message",
         data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
     )
+
+
+async def _process_and_stream(
+    file_path: str,
+    file_source: str,
+    skip_exif: bool,
+    skip_faces: bool,
+    insert: bool,
+    note: str = "",
+):
+    """Legacy single-image pipeline: run phase 1 then phase 2 sequentially.
+
+    Kept for the synchronous single-upload endpoints (``/process``,
+    ``/reprocess``) that stream both phases to one SSE client. The batch
+    coordinator in ``job_manager`` drives the two phases independently via
+    ``_run_exif_phase`` / ``_run_ai_phase``.
+    """
+    metadata_text: str | None = None
+    async for ev in _run_exif_phase(file_path, file_source, skip_exif, skip_faces, insert, note):
+        yield ev
+
+    if not insert:
+        return
+
+    # Phase 1 persisted metadata_text to the DB; phase 2 reads it back so the
+    # two phases share state through the DB rather than an in-memory value
+    # that would be lost on restart. This also keeps phase 2's contract
+    # identical whether it runs chained or standalone.
+    async for ev in _run_ai_phase(file_path, file_source, None, note=note):
+        yield ev
 
 
 @router.post("/process")
@@ -427,9 +520,13 @@ async def process_image_json(
         # Phase 3: Upload to LightRAG
         upload_result = None
         try:
-            upload_result = await upload_image_to_lightrag(
-                config.lightrag_url(), tmp.name, filename=file_source, metadata_text=metadata_text,
-            )
+            vlm_image_path = prepare_vlm_image(tmp.name)
+            try:
+                upload_result = await upload_image_to_lightrag(
+                    config.lightrag_url(), vlm_image_path, filename=file_source, metadata_text=metadata_text,
+                )
+            finally:
+                cleanup_vlm_image(vlm_image_path)
             if upload_result.get("status") == "error":
                 events.append(ProcessingEvent(event="upload_failed", data=upload_result))
                 events.append(ProcessingEvent(event="pipeline_complete", data={"file_source": file_source, "status": "upload_failed"}))
@@ -1126,7 +1223,11 @@ async def create_image_job(
         insert=insert_bool,
         note=note or "",
     )
-    await start_processing(job)
+    # Enqueue into the two-phase batch coordinator. A single upload with no
+    # other pending jobs runs through phase 1 then phase 2 for this one job;
+    # a burst of uploads coalesces into one batch so all phase-1 (EXIF) work
+    # finishes before any phase-2 (VLM) work starts.
+    await enqueue_and_maybe_batch(job)
     return {"job_id": job.id, "status": job.status, "file_source": job.file_source}
 
 

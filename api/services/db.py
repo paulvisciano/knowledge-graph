@@ -105,6 +105,7 @@ async def init_db() -> None:
                 date_taken_friendly TEXT,
                 image_width INTEGER,
                 image_height INTEGER,
+                metadata_text TEXT,
                 created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
                 updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
             );
@@ -115,7 +116,8 @@ async def init_db() -> None:
                 ADD COLUMN IF NOT EXISTS date_taken TEXT,
                 ADD COLUMN IF NOT EXISTS date_taken_friendly TEXT,
                 ADD COLUMN IF NOT EXISTS image_width INTEGER,
-                ADD COLUMN IF NOT EXISTS image_height INTEGER;
+                ADD COLUMN IF NOT EXISTS image_height INTEGER,
+                ADD COLUMN IF NOT EXISTS metadata_text TEXT;
 
             -- Populate the typed columns from the JSONB blob for any row that
             -- was written before the columns existed. Runs once per startup;
@@ -154,7 +156,11 @@ async def close_db() -> None:
         _pool = None
 
 
-async def save_photo_exif(file_source: str, exif_data: dict) -> None:
+async def save_photo_exif(
+    file_source: str,
+    exif_data: dict,
+    metadata_text: str | None = None,
+) -> None:
     """Persist EXIF metadata, writing the layout-critical fields to typed
     columns so the graph-load path can read them without parsing JSONB or
     touching image files.
@@ -165,6 +171,11 @@ async def save_photo_exif(file_source: str, exif_data: dict) -> None:
     only sets ``ExifImageLength``), the dimensions are back-filled here from
     the actual image via PIL so the expensive I/O happens exactly once, at
     processing time — never on the per-load graph query path.
+
+    ``metadata_text`` is the phase-1 output (EXIF + faces captions built by
+    ``_build_metadata_text``) that phase 2 needs for VLM context and the
+    combined LightRAG document. Stored alongside EXIF so phase 2 can resume
+    from DB state without re-running EXIF.
     """
     import json
 
@@ -189,8 +200,8 @@ async def save_photo_exif(file_source: str, exif_data: dict) -> None:
         await conn.execute(
             """INSERT INTO photo_metadata
                  (file_source, exif_data, date_taken, date_taken_friendly,
-                  image_width, image_height, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, extract(epoch from now()), extract(epoch from now()))
+                  image_width, image_height, metadata_text, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, extract(epoch from now()), extract(epoch from now()))
                ON CONFLICT (file_source)
                DO UPDATE SET
                  exif_data = $2,
@@ -198,12 +209,14 @@ async def save_photo_exif(file_source: str, exif_data: dict) -> None:
                  date_taken_friendly = COALESCE($4, photo_metadata.date_taken_friendly),
                  image_width = COALESCE($5, photo_metadata.image_width),
                  image_height = COALESCE($6, photo_metadata.image_height),
+                 metadata_text = COALESCE($7, photo_metadata.metadata_text),
                  updated_at = extract(epoch from now())""",
             file_source, json.dumps(exif_data),
             str(date_taken) if date_taken is not None else None,
             str(friendly) if friendly is not None else None,
             int(width) if width is not None else None,
             int(height) if height is not None else None,
+            metadata_text,
         )
 
 
@@ -243,6 +256,18 @@ async def get_photo_exif(file_source: str) -> dict | None:
     if row and row["exif_data"]:
         return json.loads(row["exif_data"])
     return None
+
+
+async def get_photo_metadata_text(file_source: str) -> str | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT metadata_text FROM photo_metadata WHERE file_source = $1",
+            file_source,
+        )
+    if row is None:
+        return None
+    return row["metadata_text"]
 
 
 async def get_photo_dates_for_sources(

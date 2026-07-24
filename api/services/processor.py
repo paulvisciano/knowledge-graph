@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import io
 import os
 import re
 import sys
@@ -56,6 +57,31 @@ _PIPELINE_BUSY_MARKERS = (
 _PIPELINE_BUSY_TOTAL_TIMEOUT = int(os.environ.get("PIPELINE_BUSY_TIMEOUT", "300"))
 _PIPELINE_BUSY_MAX_SLEEP = 30.0
 
+# A 400/409 from /graph/{entity,relation}/create can mean one of two things:
+#   - "already exists": the entity/relation genuinely exists — verify & stop.
+#   - "entity not found": the source/target entity was never created — fail fast.
+# Without distinguishing these, a missing-entity 400 is misclassified as
+# "exists", sending the code into a 45s retry loop that can never succeed
+# because the edge was never created (ISSUE-1, bug 1b).
+_RELATION_EXISTS_MARKERS = (
+    "already exists",
+    "Already exists",
+    "already exist",
+    "Entity already exists",
+    "Relation already exists",
+)
+_ENTITY_NOT_FOUND_MARKERS = (
+    "not found",
+    "not exist",
+    "does not exist",
+    "No such entity",
+    "no entity",
+    "Source entity",
+    "Target entity",
+    "source_entity",
+    "target_entity",
+)
+
 
 def _classify_create_error(exc: BaseException) -> str:
     """Classify an error from /graph/{entity,relation}/create.
@@ -85,11 +111,15 @@ def _classify_create_error(exc: BaseException) -> str:
     if status == 409 or "409" in msg or "Conflict" in combined:
         if any(marker in combined for marker in _PIPELINE_BUSY_MARKERS):
             return "busy"
-        # 409 without the busy marker — treat as a genuine "already exists"
-        # conflict (the legacy stale-index case the helper was written for).
+        if any(marker in combined for marker in _ENTITY_NOT_FOUND_MARKERS):
+            return "error"
         return "exists"
-    if status == 400 or "400" in msg or "already exists" in combined:
-        return "exists"
+    if status == 400 or "400" in msg:
+        if any(marker in combined for marker in _ENTITY_NOT_FOUND_MARKERS):
+            return "error"
+        if any(marker in combined for marker in _RELATION_EXISTS_MARKERS):
+            return "exists"
+        return "error"
     return "error"
 
 # The llama-server runs with -np 1 (single processing slot), so only one
@@ -245,7 +275,7 @@ async def _create_relation_verified(
     try:
         def _preflight(se: str = source_entity) -> bool:
             req = Request(
-                f"{base_url}/graphs?label={url_quote(se, safe='')}",
+                f"{base_url}/graphs?label={url_quote(se, safe='')}&max_depth=1&max_nodes=500",
                 headers={"Content-Type": "application/json"},
             )
             with urlopen(req, timeout=config.http_timeouts().short) as resp:
@@ -311,10 +341,14 @@ async def _create_relation_verified(
                 continue
 
             # kind == "exists": verify the edge is actually present.
+            # Use max_depth=1 because the edge is always 1-hop; depth=3 causes
+            # BFS truncation on hub nodes (e.g. "2026-06-27 (Date)" with 584+
+            # edges) which drops the specific edge → false verify failure
+            # → 45s retry loop (ISSUE-1, bug 1c).
             try:
                 def _verify(se: str = source_entity) -> bool:
                     req = Request(
-                        f"{base_url}/graphs?label={url_quote(se, safe='')}",
+                        f"{base_url}/graphs?label={url_quote(se, safe='')}&max_depth=1&max_nodes=500",
                         headers={"Content-Type": "application/json"},
                     )
                     with urlopen(req, timeout=config.http_timeouts().short) as resp:
@@ -919,6 +953,58 @@ async def process_image(
     })
 
 
+def prepare_vlm_image(image_path: str) -> str:
+    """Pre-resize an image for VLM processing and return a temp file path.
+
+    Call this once before any server calls (VLM, LightRAG) so the full-
+    resolution file is never loaded again downstream.  The returned path
+    points to a temp JPEG that is auto-deleted when the caller is done with it
+    (caller responsibility via :func:`cleanup_vlm_image`).
+
+    If VLM_IMAGE_MAX_DIM is 0 or the image is already small enough, the
+    original path is returned unchanged and no temp file is created.
+    """
+    import tempfile
+
+    max_dim = config.vlm_image_max_dim()
+    if max_dim <= 0:
+        return image_path
+
+    from PIL import Image
+
+    img = Image.open(image_path)
+    w, h = img.size
+    if max(w, h) <= max_dim:
+        return image_path
+
+    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    img.save(tmp, format="JPEG", quality=85)
+    tmp.close()
+    orig_size = Path(image_path).stat().st_size
+    tmp_size = Path(tmp.name).stat().st_size
+    logger.info("Pre-resized %s: %.1fMB -> %.1fKB (max_dim=%d)",
+                Path(image_path).name, orig_size / 1e6, tmp_size / 1e3, max_dim)
+    return tmp.name
+
+
+def cleanup_vlm_image(path: str) -> None:
+    """Remove a temp file created by :func:`prepare_vlm_image`.
+
+    Only deletes if the path is in the system temp directory (i.e. a temp file,
+    not the original in INPUT_DIR).
+    """
+    import tempfile
+
+    try:
+        if path and Path(path).exists():
+            tmp_dir = Path(tempfile.gettempdir()).resolve()
+            if Path(path).resolve().parent == tmp_dir:
+                os.unlink(path)
+    except OSError:
+        pass
+
+
 async def describe_image_with_vlm(
     image_path: str,
     vlm_url: str | None = None,
@@ -1255,6 +1341,14 @@ def _find_matching_entity(entity_name: str, existing_labels: set[str], threshold
     if bare_name in existing_labels:
         return bare_name
 
+    # Photo entities are unique per file — never fuzzy-match them against
+    # other photos. SequenceMatcher sees PXL_20260628_005345424 vs
+    # PXL_20260628_001655204 as 0.86 similar (shared prefix/suffix) and
+    # reuses the wrong photo node, causing all downstream relations to fail
+    # with "entity not found" 400s (ISSUE-1, bug 1a root cause).
+    if entity_name.endswith(" (Photo)"):
+        return None
+
     target_norm = _normalize_for_matching(entity_name)
 
     best_match: str | None = None
@@ -1316,6 +1410,13 @@ async def create_exif_relations(
     photo_result["entity_type"] = "Photo"
     results["entities_created"].append(photo_result)
 
+    if photo_result.get("status") == "error":
+        logger.error(
+            "[EXIF Relations] Photo entity '%s' failed to create: %s — skipping relation creation",
+            photo_name, photo_result.get("error", "unknown"),
+        )
+        return results
+
     await asyncio.sleep(1.0)
 
     for dim in exif_dimensions:
@@ -1336,11 +1437,17 @@ async def create_exif_relations(
             entity_result["entity_name"] = entity_name
             entity_result["entity_type"] = dim["entity_type"]
             results["entities_created"].append(entity_result)
-            existing_labels.add(entity_name)
+            if entity_result.get("status") != "error":
+                existing_labels.add(entity_name)
+            dim["_create_failed"] = entity_result.get("status") == "error"
             await asyncio.sleep(0.5)
 
     for dim in exif_dimensions:
         entity_name = dim.get("_resolved_name") or dim["name"]
+
+        if dim.get("_create_failed"):
+            logger.warning("[EXIF Relations] Skipping relations for failed entity '%s'", entity_name)
+            continue
 
         relation_result = await _create_relation_verified(
             base_url, photo_name, entity_name,
@@ -1353,6 +1460,8 @@ async def create_exif_relations(
         for other_dim in exif_dimensions:
             other_name = other_dim.get("_resolved_name") or other_dim["name"]
             if other_name == entity_name:
+                continue
+            if other_dim.get("_create_failed"):
                 continue
             cross_result = await _create_relation_verified(
                 base_url, entity_name, other_name,

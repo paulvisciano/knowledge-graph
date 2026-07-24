@@ -2,7 +2,9 @@
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient } from '$lib/services/kg-api-client';
   import { graphStore } from '$lib/stores/graph.svelte';
+  import { imageProcessingStore, type ImageProcessingStatus } from '$lib/stores/image-processing.svelte';
   import type { DocStatus } from '$lib/constants';
+  import type { ImageStage } from '$lib/stores/image-processing.svelte';
   import StatusBadge from './StatusBadge.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -57,6 +59,81 @@
         )
       : docs
   );
+
+  const STAGE_TONE: Record<ImageStage, 'progress' | 'waiting' | 'ai' | 'complete' | 'error'> = {
+    extracting_exif: 'progress',
+    detecting_faces: 'progress',
+    building_captions: 'progress',
+    creating_entities: 'progress',
+    queued_for_ai: 'waiting',
+    describing_image: 'ai',
+    uploading_to_graph: 'ai',
+    graph_processing: 'ai',
+    linking_visual_entities: 'ai',
+    complete: 'complete',
+    error: 'error',
+  };
+
+  const TONE_CLASSES: Record<'progress' | 'waiting' | 'ai' | 'complete' | 'error', string> = {
+    progress: 'text-cyber-cyan border-cyber-cyan/40 bg-cyber-cyan/10',
+    waiting: 'text-amber-400 border-amber-400/40 bg-amber-400/10',
+    ai: 'text-fuchsia-400 border-fuchsia-400/40 bg-fuchsia-400/10',
+    complete: 'text-emerald-400 border-emerald-400/40 bg-emerald-400/10',
+    error: 'text-cyber-red border-cyber-red/40 bg-cyber-red/10',
+  };
+
+  const TONE_DOT: Record<'progress' | 'waiting' | 'ai' | 'complete' | 'error', string> = {
+    progress: 'bg-cyber-cyan',
+    waiting: 'bg-amber-400',
+    ai: 'bg-fuchsia-400',
+    complete: 'bg-emerald-400',
+    error: 'bg-cyber-red',
+  };
+
+  let processingStatuses = $derived(Object.values(imageProcessingStore.statuses));
+  let activeProcessing = $derived(
+    processingStatuses.filter((s) => s.stage !== 'complete' && s.stage !== 'error')
+  );
+  let completedProcessing = $derived(processingStatuses.filter((s) => s.stage === 'complete'));
+  let errorProcessing = $derived(processingStatuses.filter((s) => s.stage === 'error'));
+  let hasProcessing = $derived(processingStatuses.length > 0);
+
+  let orderedProcessing = $derived(
+    [
+      ...activeProcessing.sort((a, b) => a.updatedAt - b.updatedAt),
+      ...completedProcessing.sort((a, b) => b.updatedAt - a.updatedAt),
+      ...errorProcessing.sort((a, b) => b.updatedAt - a.updatedAt),
+    ]
+  );
+
+  let overallTone = $derived<'progress' | 'waiting' | 'ai' | 'complete' | 'error'>(
+    errorProcessing.length > 0
+      ? 'error'
+      : activeProcessing.length === 0
+        ? 'complete'
+        : activeProcessing.some((s) => STAGE_TONE[s.stage] === 'ai')
+          ? 'ai'
+          : activeProcessing.some((s) => STAGE_TONE[s.stage] === 'waiting')
+            ? 'waiting'
+            : 'progress'
+  );
+
+  function stageTone(stage: ImageStage): 'progress' | 'waiting' | 'ai' | 'complete' | 'error' {
+    return STAGE_TONE[stage];
+  }
+
+  // Auto-hide completed images 30s after they finish. Re-runs whenever the set
+  // of completed node ids changes; timers are cleaned up for vanished ids.
+  $effect(() => {
+    const completedIds = completedProcessing.map((s) => s.nodeId);
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    for (const id of completedIds) {
+      timers.set(id, setTimeout(() => imageProcessingStore.remove(id), 30_000));
+    }
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+    };
+  });
 
   async function loadDocs() {
     loading = true;
@@ -196,6 +273,79 @@
       <span class="text-xs text-cyber-text-dim">Nodes</span>
     </div>
   </div>
+
+  {#if hasProcessing}
+    <section class="animate-fade-in-up flex shrink-0 flex-col rounded-lg border border-cyber-border bg-cyber-surface">
+      <div class="flex shrink-0 items-center gap-2 border-b border-cyber-border px-3 py-2">
+        <span class="relative flex h-2 w-2">
+          {#if overallTone === 'progress' || overallTone === 'ai'}
+            <span class="absolute inline-flex h-full w-full animate-ping opacity-60 {TONE_DOT[overallTone]}"></span>
+          {/if}
+          <span class="relative inline-flex h-2 w-2 rounded-full {TONE_DOT[overallTone]}"></span>
+        </span>
+        <h3 class="text-sm font-semibold text-cyber-text">Image Processing</h3>
+        <span class="text-xs text-cyber-text-dim">
+          {activeProcessing.length > 0 ? `${activeProcessing.length} processing` : `${completedProcessing.length} done`}
+        </span>
+        {#if errorProcessing.length > 0}
+          <span class="text-xs text-cyber-red">· {errorProcessing.length} error</span>
+        {/if}
+      </div>
+
+      <div class="max-h-56 overflow-y-auto">
+        <ul class="divide-y divide-cyber-border/40">
+          {#each orderedProcessing as s (s.nodeId)}
+            {@const tone = stageTone(s.stage)}
+            {@const exif = imageProcessingStore.getExifSummary(s.nodeId)}
+            <li class="animate-fade-in-up flex items-start gap-3 px-3 py-2 transition-colors hover:bg-cyber-surface-2/30">
+              <div class="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded border border-cyber-border bg-cyber-bg">
+                {#if s.dataUrl}
+                  <img src={s.dataUrl} alt={s.fileName} class="h-full w-full object-cover" />
+                {/if}
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="truncate text-xs font-medium text-cyber-text" title={s.fileName}>{s.fileName}</span>
+                  <span class="inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-medium {TONE_CLASSES[tone]}">
+                    {s.stageLabel}
+                  </span>
+                </div>
+
+                <div class="mt-1 flex items-center gap-1">
+                  {#each s.stepper as step}
+                    <span
+                      class="h-1 flex-1 rounded-full transition-colors
+                        {step.state === 'done'
+                          ? 'bg-cyber-cyan/70'
+                          : step.state === 'current'
+                            ? TONE_DOT[tone] + ' animate-pulse'
+                            : 'bg-cyber-border/60'}"
+                      title={step.label}
+                    ></span>
+                  {/each}
+                </div>
+
+                {#if exif.length > 0}
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    {#each exif.slice(0, 4) as tag}
+                      <span class="rounded bg-cyber-bg/60 px-1.5 py-px text-[10px] text-cyber-text-dim">
+                        <span class="text-cyber-text-dim/70">{tag.label}:</span> {tag.value}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if s.stage === 'error' && s.error}
+                  <p class="mt-1 truncate text-[10px] text-cyber-red" title={s.error}>{s.error}</p>
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    </section>
+  {/if}
 
   <div class="flex min-h-0 flex-1 flex-col rounded-lg border border-cyber-border bg-cyber-surface">
     <div class="flex shrink-0 items-center gap-2 border-b border-cyber-border px-3 py-2">

@@ -161,6 +161,34 @@ export class SceneManager {
   }
 
   /**
+   * Returns the world-space position of the plane mesh for `nodeId`, or
+   * `null` when the node's chunk is not currently mounted. Safe to call
+   * outside the RAF loop — `getWorldPosition` updates the world matrix on
+   * demand, so the returned position is correct even between frames.
+   */
+  getPlaneWorldPosition(nodeId: string): THREE.Vector3 | null {
+    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
+    if (!plane) return null;
+    const worldPos = new THREE.Vector3();
+    plane.mesh.getWorldPosition(worldPos);
+    return worldPos;
+  }
+
+  /**
+   * Projects a world-space position to canvas-relative screen coordinates.
+   * Returns `null` when the point is behind the camera.
+   */
+  projectToScreen(worldPos: THREE.Vector3): { x: number; y: number } | null {
+    const rect = this._renderer.domElement.getBoundingClientRect();
+    const ndc = worldPos.clone().project(this._camera);
+    if (ndc.z > 1) return null;
+    return {
+      x: ((ndc.x + 1) / 2) * rect.width,
+      y: ((1 - ndc.y) / 2) * rect.height,
+    };
+  }
+
+  /**
    * (Re)builds the layout from canvas nodes and forwards to `ChunkManager`.
    *
    * @param nodes - all canvas nodes.

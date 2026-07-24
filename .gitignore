@@ -42,3 +42,4 @@ face_crops/
 .playwright-mcp/
 dist/
 graph-screenshot.png
+vendor/llama.cpp/src/build/
