@@ -6,7 +6,7 @@
   import { LightragClient } from '$lib/services/lightrag-client';
   import { textureCache } from '$lib/services/TextureCache';
   import { SceneManager } from './renderer/SceneManager';
-  import { TIME_BUCKET_SPACING } from './renderer/constants';
+  import { TIME_BUCKET_SPACING, CHUNK_SIZE, INITIAL_CAMERA_Z } from './renderer/constants';
   import { buildCanvasLayout, buildTimeIndex } from './Layout';
   import type { TimeIndex } from './Layout';
   import NodeOverlay from './NodeOverlay.svelte';
@@ -42,6 +42,14 @@
 
   let timeIndex: TimeIndex | null = null;
   let dateLabel = $state<string | null>(null);
+  let timelineOpen = $state(false);
+  let currentBucketIdx = $state(-1);
+
+  let timelineEntries = $derived.by(() => {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return [];
+    const labels = timeIndex.indexToLabel;
+    return labels.map((label, idx) => ({ idx, label }));
+  });
 
   function clearSelection(): void {
     selectedNodeId = null;
@@ -76,6 +84,7 @@
 
   function updateDateLabel(camChunkZ: number): void {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) {
+      currentBucketIdx = -1;
       dateLabel = null;
       return;
     }
@@ -84,14 +93,34 @@
     // camera chunk Z by the spacing to recover the dense bucket index.
     const bucketIdx = Math.round(camChunkZ / TIME_BUCKET_SPACING);
     if (bucketIdx < 0) {
+      currentBucketIdx = 0;
       dateLabel = labels[0];
       return;
     }
     if (bucketIdx >= labels.length) {
+      currentBucketIdx = labels.length - 1;
       dateLabel = labels[labels.length - 1];
       return;
     }
+    currentBucketIdx = bucketIdx;
     dateLabel = labels[bucketIdx];
+  }
+
+  function flyToBucket(bucketIdx: number): void {
+    if (!sceneManager || !timeIndex) return;
+    const n = timeIndex.indexToLabel.length;
+    if (bucketIdx < 0 || bucketIdx >= n) return;
+    const targetZ = bucketIdx * TIME_BUCKET_SPACING * CHUNK_SIZE + INITIAL_CAMERA_Z;
+    sceneManager.flyTo(targetZ);
+    timelineOpen = false;
+  }
+
+  function toggleTimeline(): void {
+    timelineOpen = !timelineOpen;
+  }
+
+  function closeTimeline(): void {
+    timelineOpen = false;
   }
 
   function rebuildLayout(): void {
@@ -246,13 +275,60 @@
 {/if}
 
 {#if dateLabel}
-  <div class="date-indicator" aria-live="polite">
-    <span class="date-indicator-icon" aria-hidden="true">
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-    </span>
-    {#key dateLabel}
-      <span class="date-indicator-label" in:fade={{ duration: 220 }}>{dateLabel}</span>
-    {/key}
+  <!-- Click-outside / escape backdrop for the timeline dropdown -->
+  {#if timelineOpen}
+    <div
+      class="timeline-backdrop"
+      role="button"
+      tabindex="-1"
+      aria-label="Close timeline"
+      onclick={closeTimeline}
+      onkeydown={(e) => (e.key === 'Escape' ? closeTimeline() : null)}
+    ></div>
+  {/if}
+
+  <div class="date-indicator-wrap">
+    <button
+      type="button"
+      class="date-indicator"
+      class:is-open={timelineOpen}
+      onclick={toggleTimeline}
+      aria-haspopup="listbox"
+      aria-expanded={timelineOpen}
+      aria-label="Open photo timeline"
+      data-testid="date-pill"
+    >
+      <span class="date-indicator-icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </span>
+      {#key dateLabel}
+        <span class="date-indicator-label" in:fade={{ duration: 220 }}>{dateLabel}</span>
+      {/key}
+      <span class="date-indicator-chevron" class:is-open={timelineOpen} aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </span>
+    </button>
+
+    {#if timelineOpen}
+      <div class="timeline-dropdown" role="listbox" aria-label="Photo timeline months" data-testid="timeline-dropdown">
+        <ul class="timeline-list">
+          {#each timelineEntries as entry (entry.idx)}
+            <li>
+              <button
+                type="button"
+                class="timeline-item"
+                class:is-current={entry.idx === currentBucketIdx}
+                onclick={() => flyToBucket(entry.idx)}
+                aria-current={entry.idx === currentBucketIdx ? 'true' : undefined}
+              >
+                <span class="timeline-dot" class:is-current={entry.idx === currentBucketIdx} aria-hidden="true"></span>
+                <span class="timeline-label">{entry.label}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -381,12 +457,22 @@
     transition: opacity 0.12s ease;
   }
 
-  /* ── Date indicator — floating glass panel ── */
-  .date-indicator {
+  /* ── Date indicator — floating glass pill (clickable) ── */
+  .date-indicator-wrap {
     position: absolute;
     right: 16px;
     bottom: 16px;
     z-index: 20;
+  }
+
+  .timeline-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    cursor: default;
+  }
+
+  .date-indicator {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -394,6 +480,7 @@
     background: var(--canvas-glass);
     backdrop-filter: blur(24px) saturate(1.4);
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border: 1px solid transparent;
     border-radius: 100px;
     box-shadow:
       0 0 0 1px oklch(50% 0.03 255 / 8%),
@@ -403,8 +490,26 @@
     font-size: 12px;
     letter-spacing: 0.06em;
     white-space: nowrap;
-    pointer-events: none;
-    transition: opacity 0.18s ease;
+    cursor: pointer;
+    pointer-events: auto;
+    transition:
+      border-color 0.18s ease,
+      box-shadow 0.18s ease,
+      transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .date-indicator:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 35%),
+      0 12px 36px oklch(0% 0 0 / 40%);
+  }
+
+  .date-indicator.is-open {
+    border-color: oklch(82% 0.14 210 / 40%);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 45%),
+      0 12px 36px oklch(0% 0 0 / 45%);
   }
 
   .date-indicator-icon {
@@ -416,6 +521,126 @@
   .date-indicator-label {
     font-variant-numeric: tabular-nums;
     color: var(--canvas-fg);
+  }
+
+  .date-indicator-chevron {
+    display: flex;
+    align-items: center;
+    color: var(--canvas-muted);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .date-indicator-chevron.is-open {
+    transform: rotate(180deg);
+  }
+
+  /* ── Timeline dropdown ── */
+  .timeline-dropdown {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    padding: 10px 12px 10px 10px;
+    background: oklch(14% 0.015 255 / 72%);
+    backdrop-filter: blur(28px) saturate(1.5);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    border-radius: 18px;
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 10%),
+      0 18px 56px oklch(0% 0 0 / 50%);
+    min-width: 150px;
+    max-height: min(56vh, 420px);
+    pointer-events: auto;
+    transform-origin: bottom right;
+    animation: timeline-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes timeline-pop {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .timeline-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: oklch(50% 0.03 255 / 20%) transparent;
+    position: relative;
+  }
+
+  .timeline-list > li {
+    position: relative;
+  }
+
+  /* Continuous connector line through the dot column. Top is inset to the
+     first dot's center (padding-top 7 + half-dot 4 = 11px); bottom likewise. */
+  .timeline-list::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 11px;
+    bottom: 11px;
+    width: 1px;
+    background: oklch(50% 0.03 255 / 18%);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .timeline-list::-webkit-scrollbar { width: 5px; }
+  .timeline-list::-webkit-scrollbar-thumb {
+    background: oklch(50% 0.03 255 / 20%);
+    border-radius: 3px;
+  }
+
+  .timeline-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 12px 7px 8px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    color: var(--canvas-muted);
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .timeline-item:hover {
+    background: oklch(82% 0.14 210 / 14%);
+    color: var(--canvas-fg);
+  }
+
+  .timeline-dot {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: oklch(40% 0.03 255 / 100%);
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .timeline-dot.is-current {
+    background: var(--canvas-accent);
+    box-shadow: 0 0 8px oklch(82% 0.14 210 / 60%);
+  }
+
+  .timeline-label {
+    flex: 1 1 auto;
+  }
+
+  .timeline-item.is-current {
+    color: var(--canvas-accent);
+    font-weight: 600;
+    background: oklch(82% 0.14 210 / 10%);
   }
 
   /* ── Shared animations ── */
