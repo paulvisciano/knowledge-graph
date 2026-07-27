@@ -4,7 +4,7 @@ with open(img_path, 'rb') as f:
     b64 = base64.b64encode(f.read()).decode()
 print(f"image bytes={len(b64)} (b64 chars)", file=sys.stderr)
 payload = {
-    "model": "Gemma-4-12B-OBLITERATED-Q4_K_M",
+    "model": "Bonsai-27B-Q1_0",
     "messages": [{"role": "user", "content": [
         {"type": "text", "text": "Describe this image in one sentence."},
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}

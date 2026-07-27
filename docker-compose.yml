@@ -45,10 +45,10 @@ services:
       WORKING_DIR: "${WORKING_DIR:-/app/data/rag_storage}"
       INPUT_DIR: "${INPUT_DIR:-/app/data/inputs}"
       LLM_BINDING: "${LLM_BINDING:-openai}"
-      LLM_MODEL: "${LLM_MODEL:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
+      LLM_MODEL: "${LLM_MODEL:-Bonsai-27B-Q1_0}"
       LLM_BINDING_HOST: "${LLM_BINDING_HOST:-http://host.docker.internal:8080}"
       LLM_BINDING_API_KEY: "${LLM_BINDING_API_KEY:-llama-server}"
-      QUERY_LLM_MODEL: "${QUERY_LLM_MODEL:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
+      QUERY_LLM_MODEL: "${QUERY_LLM_MODEL:-Bonsai-27B-Q1_0}"
       QUERY_LLM_BINDING: "${QUERY_LLM_BINDING:-openai}"
       QUERY_LLM_BINDING_HOST: "${QUERY_LLM_BINDING_HOST:-http://host.docker.internal:8080}"
       QUERY_LLM_BINDING_API_KEY: "${QUERY_LLM_BINDING_API_KEY:-llama-server}"
@@ -71,7 +71,7 @@ services:
       MIN_RERANK_SCORE: "${MIN_RERANK_SCORE:--1}"
       VLM_PROCESS_ENABLE: "${VLM_PROCESS_ENABLE:-true}"
       VLM_LLM_BINDING: "${VLM_LLM_BINDING:-openai}"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
+      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
       VLM_LLM_BINDING_HOST: "${VLM_LLM_BINDING_HOST:-http://host.docker.internal:8080}"
       VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
       LIGHTRAG_KV_STORAGE: "${LIGHTRAG_KV_STORAGE:-PGKVStorage}"
@@ -136,7 +136,7 @@ services:
     image: pgvector/pgvector:pg18
     container_name: knowledge-graph-postgres
     restart: unless-stopped
-    mem_limit: 512m
+    mem_limit: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lightrag}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
@@ -166,7 +166,7 @@ services:
       LIGHTRAG_URL: "http://lightrag:9621"
       KNOWN_FACES_PATH: "/app/known_faces"
       VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
+      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
       VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
       FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-mtcnn}"
       FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"

@@ -55,7 +55,7 @@ def vlm_url() -> str:
 
 
 def vlm_model() -> str:
-    return _env("VLM_LLM_MODEL", "Gemma-4-12B-OBLITERATED-Q4_K_M")
+    return _env("VLM_LLM_MODEL", "Bonsai-27B-Q1_0")
 
 
 def vlm_api_key() -> str:
@@ -81,7 +81,7 @@ def vlm_timeout() -> int:
 def vlm_image_max_dim() -> int:
     """Max dimension (px) for images sent to the VLM.
 
-    Full-resolution photos (10–12 MP) are needlessly expensive: the Gemma-4-12B
+    Full-resolution photos (10–12 MP) are needlessly expensive: the Bonsai-27B
     mmproj caps image tokens at --image-max-tokens (280), so detail beyond ~768px
     is discarded by the projector anyway.  Resizing to 768px max-dim before
     base64-encoding cuts the VLM payload ~50× (4 MB → ~80 KB) and the GPU wired
