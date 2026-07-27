@@ -373,12 +373,16 @@
     return parts.length > 1 ? parts.slice(1).join(',').trim() : null;
   });
   let dateText = $derived.by(() => {
-    const raw =
+    const rawRaw =
       (kgNode?.properties?.date_taken_friendly as string) ??
       (kgNode?.properties?.created_at as string) ??
       (node?.properties?.date_taken_friendly as string) ??
       (node?.properties?.created_at as string) ??
       null;
+    // `created_at` can be a Unix epoch integer (notes), in which case the
+    // `as string` cast above lies. Coerce to a string before regex/Date so
+    // `.match` never throws on a number; treat null/empty as absent.
+    const raw = rawRaw == null ? null : String(rawRaw);
     if (!raw) return null;
 
     const friendlyMatch = raw.match(/^(\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2})/);
@@ -416,12 +420,16 @@
   });
 
   let dateTimeText = $derived.by(() => {
-    const raw =
+    const rawRaw =
       (kgNode?.properties?.date_taken_friendly as string) ??
       (kgNode?.properties?.created_at as string) ??
       (node?.properties?.date_taken_friendly as string) ??
       (node?.properties?.created_at as string) ??
       null;
+    // `created_at` can be a Unix epoch integer (notes), in which case the
+    // `as string` cast above lies. Coerce to a string before regex/Date so
+    // `.match` never throws on a number; treat null/empty as absent.
+    const raw = rawRaw == null ? null : String(rawRaw);
     if (!raw) return null;
 
     let d: Date | null = null;
@@ -443,12 +451,16 @@
   });
 
   let dateLabel = $derived.by(() => {
-    const raw =
+    const rawRaw =
       (kgNode?.properties?.date_taken_friendly as string) ??
       (kgNode?.properties?.created_at as string) ??
       (node?.properties?.date_taken_friendly as string) ??
       (node?.properties?.created_at as string) ??
       null;
+    // `created_at` can be a Unix epoch integer (notes), in which case the
+    // `as string` cast above lies. Coerce to a string before regex/Date so
+    // `.match` never throws on a number; treat null/empty as absent.
+    const raw = rawRaw == null ? null : String(rawRaw);
     if (!raw) return null;
 
     let d: Date | null = null;
@@ -491,12 +503,16 @@
   });
 
   let dayName = $derived.by(() => {
-    const raw =
+    const rawRaw =
       (kgNode?.properties?.date_taken_friendly as string) ??
       (kgNode?.properties?.created_at as string) ??
       (node?.properties?.date_taken_friendly as string) ??
       (node?.properties?.created_at as string) ??
       null;
+    // `created_at` can be a Unix epoch integer (notes), in which case the
+    // `as string` cast above lies. Coerce to a string before regex/Date so
+    // `.match` never throws on a number; treat null/empty as absent.
+    const raw = rawRaw == null ? null : String(rawRaw);
     if (!raw) return null;
 
     let d: Date | null = null;
@@ -644,6 +660,8 @@
   {@const isComplete = status?.stage === 'complete'}
   {@const isError = status?.stage === 'error'}
   {@const descText = fetchedDocContent ?? descriptionContent ?? null}
+  {@const isNote = node.kind === 'note'}
+  {@const noteBody = fetchedDocContent ?? descriptionContent ?? node.textContent ?? ''}
 
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="overlay-app" data-od-id="overlay-app" onclick={handleClose} role="presentation">
@@ -677,64 +695,87 @@
       <div class="content" data-od-id="content">
 
         <main class="stage" data-od-id="main-stage">
-          <div class="viewer" data-od-id="image-viewer">
-            {#if fullUrl ?? imageUrl}
-              <img class="photo" data-od-id="main-photo"
-                   src={fullUrl ?? imageUrl!}
-                   alt={fileName}
-                   onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
-            {:else}
-              <div class="photo-placeholder" data-od-id="photo-placeholder">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L3 21"/>
-                </svg>
-              </div>
-            {/if}
-
-            {#if dateTimeText}
-              <div class="viewer-badges" data-od-id="viewer-badges">
-                {#if dateTimeText}
-                  <div class="location-badge" data-od-id="time-badge">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                    <span>{dateTimeText}</span>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
-
-          {#if sameDayPhotosWithCurrent.length > 1}
-            <div class="filmstrip" data-od-id="filmstrip">
-              <button class="filmstrip-nav filmstrip-nav-prev" data-od-id="filmstrip-prev"
-                aria-label="Previous photo"
-                disabled={currentMonthIndex <= 0}
-                onclick={() => navigateByOffset(-1)}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-              </button>
-              <div class="filmstrip-track" data-od-id="filmstrip-track">
-                {#each monthPhotosByDay as group (group.dayKey)}
-                  <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
-                    <div class="filmstrip-day-label">{group.label}</div>
-                    <div class="filmstrip-day-photos">
-                      {#each group.photos as n (n.id)}
-                        <button class="filmstrip-thumb {n.id === node?.id ? 'is-active' : ''}"
-                          data-od-id="filmstrip-thumb-{n.id}"
-                          aria-label="Photo {getNodeName(n)}"
-                          onclick={() => navigateToPhoto(n)}>
-                          <img src={photoThumbUrl(n)} alt={getNodeName(n)} loading="lazy" />
-                        </button>
-                      {/each}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-              <button class="filmstrip-nav filmstrip-nav-next" data-od-id="filmstrip-next"
-                aria-label="Next photo"
-                disabled={currentMonthIndex < 0 || currentMonthIndex >= sameDayPhotosWithCurrent.length - 1}
-                onclick={() => navigateByOffset(1)}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
+          {#if isNote}
+            <div class="note-reader" data-od-id="note-reader">
+              {#if noteBody}
+                <div class="note-content" data-od-id="note-content">
+                  {@html renderMarkdown(noteBody)}
+                </div>
+              {:else if docLoading}
+                <div class="note-loading" data-od-id="note-loading">
+                  <span class="spinner"></span> Loading note…
+                </div>
+              {:else if docError}
+                <div class="note-error" data-od-id="note-error">{docError}</div>
+              {:else}
+                <div class="note-empty">No content available.</div>
+              {/if}
+              {#if docLoading && noteBody}
+                <div class="note-loading note-loading-inline" data-od-id="note-loading-inline">
+                  <span class="spinner"></span> Loading full note…
+                </div>
+              {/if}
             </div>
+          {:else}
+            <div class="viewer" data-od-id="image-viewer">
+              {#if fullUrl ?? imageUrl}
+                <img class="photo" data-od-id="main-photo"
+                     src={fullUrl ?? imageUrl!}
+                     alt={fileName}
+                     onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
+              {:else}
+                <div class="photo-placeholder" data-od-id="photo-placeholder">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L3 21"/>
+                  </svg>
+                </div>
+              {/if}
+
+              {#if dateTimeText}
+                <div class="viewer-badges" data-od-id="viewer-badges">
+                  {#if dateTimeText}
+                    <div class="location-badge" data-od-id="time-badge">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                      <span>{dateTimeText}</span>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+
+            {#if sameDayPhotosWithCurrent.length > 1}
+              <div class="filmstrip" data-od-id="filmstrip">
+                <button class="filmstrip-nav filmstrip-nav-prev" data-od-id="filmstrip-prev"
+                  aria-label="Previous photo"
+                  disabled={currentMonthIndex <= 0}
+                  onclick={() => navigateByOffset(-1)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                <div class="filmstrip-track" data-od-id="filmstrip-track">
+                  {#each monthPhotosByDay as group (group.dayKey)}
+                    <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
+                      <div class="filmstrip-day-label">{group.label}</div>
+                      <div class="filmstrip-day-photos">
+                        {#each group.photos as n (n.id)}
+                          <button class="filmstrip-thumb {n.id === node?.id ? 'is-active' : ''}"
+                            data-od-id="filmstrip-thumb-{n.id}"
+                            aria-label="Photo {getNodeName(n)}"
+                            onclick={() => navigateToPhoto(n)}>
+                            <img src={photoThumbUrl(n)} alt={getNodeName(n)} loading="lazy" />
+                          </button>
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+                <button class="filmstrip-nav filmstrip-nav-next" data-od-id="filmstrip-next"
+                  aria-label="Next photo"
+                  disabled={currentMonthIndex < 0 || currentMonthIndex >= sameDayPhotosWithCurrent.length - 1}
+                  onclick={() => navigateByOffset(1)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+              </div>
+            {/if}
           {/if}
         </main>
 
@@ -811,7 +852,7 @@
                 </section>
               {/if}
 
-              {#if exifExposureRow.length > 0}
+              {#if !isNote && exifExposureRow.length > 0}
                 <section class="section" data-od-id="sec-exif">
                   <div class="section-header">Exposure</div>
                   <div class="pills">
@@ -890,7 +931,7 @@
           <div class="sidebar-footer" data-od-id="sidebar-footer">
             <button class="btn-delete" data-od-id="btn-delete" onclick={handleDelete} disabled={deleting}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              {deleting ? 'Deleting...' : 'Delete Photo'}
+              {deleting ? 'Deleting...' : isNote ? 'Delete Note' : 'Delete Photo'}
             </button>
           </div>
         </aside>
@@ -1588,6 +1629,160 @@
     color: var(--danger);
   }
   .fullscreen-close svg { width: 18px; height: 18px; }
+
+  /* ── Note reader ─────────────────────────────────────────────────────── */
+  .note-reader {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-2) transparent;
+    padding: 8px 0;
+  }
+  .note-reader::-webkit-scrollbar { width: 6px; }
+  .note-reader::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 3px; }
+
+  .note-content {
+    width: 100%;
+    max-width: 680px;
+    background: #f5e9c8;
+    color: #2b2620;
+    border-radius: 16px;
+    padding: 1.5rem 1.75rem;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.06),
+      0 20px 60px rgba(0, 0, 0, 0.45);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    overflow-wrap: break-word;
+  }
+  .note-content :global(h1),
+  .note-content :global(h2),
+  .note-content :global(h3),
+  .note-content :global(h4),
+  .note-content :global(h5),
+  .note-content :global(h6) {
+    font-family: var(--font-display);
+    color: #1c1812;
+    line-height: 1.3;
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+  }
+  .note-content :global(h1) { font-size: 1.5em; }
+  .note-content :global(h2) { font-size: 1.3em; }
+  .note-content :global(h3) { font-size: 1.15em; }
+  .note-content :global(h4),
+  .note-content :global(h5),
+  .note-content :global(h6) { font-size: 1em; }
+  .note-content :global(h1:first-child),
+  .note-content :global(h2:first-child),
+  .note-content :global(h3:first-child) { margin-top: 0; }
+  .note-content :global(.overlay-p),
+  .note-content :global(p) {
+    margin: 0 0 0.85em;
+  }
+  .note-content :global(.overlay-p:last-child),
+  .note-content :global(p:last-child) { margin-bottom: 0; }
+  .note-content :global(ul),
+  .note-content :global(ol) {
+    margin: 0 0 0.85em;
+    padding-left: 1.4em;
+  }
+  .note-content :global(li) { margin-bottom: 0.25em; }
+  .note-content :global(li:last-child) { margin-bottom: 0; }
+  .note-content :global(blockquote) {
+    margin: 0 0 0.85em;
+    padding: 0.25em 0.9em;
+    border-left: 3px solid rgba(43, 38, 32, 0.25);
+    color: #4a4338;
+    font-style: italic;
+  }
+  .note-content :global(a) {
+    color: #8a4b1a;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .note-content :global(a:hover) { color: #6d3a13; }
+  .note-content :global(strong) { font-weight: 600; color: #1c1812; }
+  .note-content :global(em) { font-style: italic; }
+  .note-content :global(.overlay-code),
+  .note-content :global(pre) {
+    background: rgba(43, 38, 32, 0.08);
+    border-radius: 8px;
+    padding: 0.75em 0.9em;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    color: #2b2620;
+    margin: 0 0 0.85em;
+  }
+  .note-content :global(.overlay-code:last-child),
+  .note-content :global(pre:last-child) { margin-bottom: 0; }
+  .note-content :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: rgba(43, 38, 32, 0.08);
+    padding: 0.12em 0.35em;
+    border-radius: 4px;
+  }
+  .note-content :global(.overlay-code code),
+  .note-content :global(pre code) {
+    background: transparent;
+    padding: 0;
+  }
+  .note-content :global(hr) {
+    border: none;
+    border-top: 1px solid rgba(43, 38, 32, 0.18);
+    margin: 1.2em 0;
+  }
+  .note-content :global(img) {
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 0 0 0.85em;
+  }
+  .note-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 0.85em;
+    font-size: 0.95em;
+  }
+  .note-content :global(th),
+  .note-content :global(td) {
+    border: 1px solid rgba(43, 38, 32, 0.18);
+    padding: 0.4em 0.6em;
+    text-align: left;
+  }
+  .note-content :global(th) { background: rgba(43, 38, 32, 0.08); font-weight: 600; }
+
+  .note-loading,
+  .note-error,
+  .note-empty {
+    width: 100%;
+    max-width: 680px;
+    text-align: center;
+    padding: 2.5rem 1rem;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .note-loading { display: inline-flex; align-items: center; gap: 8px; }
+  .note-loading-inline {
+    width: auto;
+    padding: 10px 14px;
+    margin-top: 12px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .note-error { color: var(--danger); }
+  .note-empty { font-style: italic; color: var(--faint); }
 
   @media (max-width: 900px) {
     .content { flex-direction: column; }

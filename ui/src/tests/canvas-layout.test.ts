@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCanvasLayout, classifyKind } from '$lib/components/canvas/Layout';
+import { buildCanvasLayout, classifyKind, isNoteFileSource, isNoteNode } from '$lib/components/canvas/Layout';
 import { TIME_BUCKET_SPACING } from '$lib/components/canvas/renderer/constants';
 import type { KGNode, KGEdge } from '$lib/constants';
 
@@ -21,6 +21,8 @@ const photo = (id: string, extra: Record<string, unknown> = {}) =>
 const person = (id: string) => makeNode(id, 'Person', { name: id });
 const location = (id: string) => makeNode(id, 'Location', { name: id });
 const event = (id: string) => makeNode(id, 'Event', { name: id });
+const note = (id: string, extra: Record<string, unknown> = {}) =>
+  makeNode(id, 'Note', { source_id: `note_${id}`, description: `body of ${id}`, ...extra });
 
 describe('classifyKind', () => {
   it('classifies photos by label and entity_type', () => {
@@ -33,6 +35,96 @@ describe('classifyKind', () => {
     expect(classifyKind(location('Miami'))).toBe('location');
     expect(classifyKind(event('Party'))).toBe('event');
     expect(classifyKind(makeNode('org', 'Organization'))).toBe('concept');
+  });
+
+  it('classifies note nodes by entity_type, (Note) label suffix, or note file_source', () => {
+    expect(classifyKind(note('n1'))).toBe('note');
+    expect(classifyKind(makeNode('diary-2026-07-22 (Note)', 'Photo', { source_id: 'diary-entry-2026-07-22' }))).toBe('note');
+    expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'chat-note-20260727-150000-123456' }))).toBe('note');
+    expect(classifyKind(makeNode('legacy', 'Photo', { source_id: 'note_1700000000' }))).toBe('note');
+    expect(classifyKind(makeNode('plan', 'Photo', { source_id: 'plan_entry' }))).toBe('note');
+    expect(classifyKind(makeNode('du', 'Photo', { source_id: 'daily_update' }))).toBe('note');
+    expect(classifyKind(makeNode('pcu', 'Photo', { source_id: 'personal_context_update' }))).toBe('note');
+    expect(classifyKind(makeNode('mcp', 'Photo', { source_id: 'mcp-foo-20260727-150000-123456' }))).toBe('note');
+  });
+
+  it('classifies a spurious (Photo) hub with a note source_id as note (defensive 404 guard)', () => {
+    const spurious = {
+      id: 'diary-entry-2026-07-22-abc (Photo)',
+      labels: ['Photo'],
+      properties: { entity_type: 'Photo', source_id: 'diary-entry-2026-07-22-abc' },
+    };
+    expect(classifyKind(spurious)).toBe('note');
+  });
+
+  it('does NOT misclassify real photos as notes (image heuristic wins)', () => {
+    expect(classifyKind(photo('p1', { source_id: 'PXL_20260727_123456.jpg' }))).toBe('photo');
+    expect(classifyKind(photo('p2', { source_id: 'IMG_1234.png' }))).toBe('photo');
+    expect(classifyKind(photo('p3', { source_id: 'shot.heic' }))).toBe('photo');
+    // A note prefix on a .jpg is still a photo.
+    expect(classifyKind(photo('p4', { source_id: 'diary-entry-fake.jpg' }))).toBe('photo');
+  });
+});
+
+describe('isNoteFileSource', () => {
+  it('recognizes legacy and prefixed note file_sources', () => {
+    expect(isNoteFileSource('note_1700000000')).toBe(true);
+    expect(isNoteFileSource('diary-entry-2026-07-22')).toBe(true);
+    expect(isNoteFileSource('chat-note-20260727-150000-123456')).toBe(true);
+    expect(isNoteFileSource('plan_entry')).toBe(true);
+    expect(isNoteFileSource('daily_update')).toBe(true);
+    expect(isNoteFileSource('personal_context_update')).toBe(true);
+    expect(isNoteFileSource('mcp-anything')).toBe(true);
+    expect(isNoteFileSource('preference-update-x')).toBe(true);
+    expect(isNoteFileSource('correction-y')).toBe(true);
+  });
+
+  it('recognizes the bare MCP timestamp suffix', () => {
+    expect(isNoteFileSource('something-20260727-150000-123456')).toBe(true);
+  });
+
+  it('rejects image strings even when they match a note prefix or timestamp suffix', () => {
+    expect(isNoteFileSource('PXL_20260727_123456.jpg')).toBe(false);
+    expect(isNoteFileSource('photo.RAW')).toBe(false);
+    expect(isNoteFileSource('pic.png')).toBe(false);
+    expect(isNoteFileSource('shot.heic')).toBe(false);
+    expect(isNoteFileSource('diary-entry-fake.jpg')).toBe(false);
+  });
+
+  it('rejects unrelated strings', () => {
+    expect(isNoteFileSource('manual_creation')).toBe(false);
+    expect(isNoteFileSource('')).toBe(false);
+    expect(isNoteFileSource('random-document.pdf')).toBe(false);
+  });
+});
+
+describe('isNoteNode', () => {
+  it('matches entity_type Note', () => {
+    expect(isNoteNode(note('n1'))).toBe(true);
+  });
+  it('matches a (Note) label suffix', () => {
+    expect(isNoteNode({ labels: ['diary (Note)'], properties: {} })).toBe(true);
+  });
+  it('matches a spurious (Photo) hub via source_id (note file_source)', () => {
+    expect(isNoteNode({ properties: { source_id: 'plan_entry' } })).toBe(true);
+    expect(isNoteNode({ properties: { source_id: 'daily_update' } })).toBe(true);
+    expect(isNoteNode({ properties: { source_id: 'note_1' } })).toBe(true);
+    expect(isNoteNode({ properties: { source_id: 'chat-note-1' } })).toBe(true);
+    expect(isNoteNode({ properties: { source_id: 'diary-entry-2026-07-27-20260727-154548-277583' } })).toBe(true);
+  });
+  it('does NOT match an extracted entity whose file_path is a note file_source', () => {
+    // Extracted entities (person/location/concept) carry the note's
+    // file_source in `file_path` (the document they were extracted FROM),
+    // but they are NOT notes — only the (Note) hub is. Checking file_path
+    // here would misclassify every entity extracted from a note.
+    expect(isNoteNode({ properties: { entity_type: 'person', file_path: 'daily_update' } })).toBe(false);
+    expect(isNoteNode({ properties: { entity_type: 'location', file_path: 'note_1784640603' } })).toBe(false);
+    expect(isNoteNode({ properties: { entity_type: 'concept', file_path: 'diary-entry-2026-07-22-20260722-145036-188422' } })).toBe(false);
+    // Compound <SEP>-joined file_path (multi-source entity) is also not a note.
+    expect(isNoteNode({ properties: { entity_type: 'person', file_path: 'personal_context_update<SEP>daily_update' } })).toBe(false);
+  });
+  it('false for a real photo', () => {
+    expect(isNoteNode(photo('p1'))).toBe(false);
   });
 });
 
@@ -157,5 +249,56 @@ describe('buildCanvasLayout', () => {
     expect(node.labels).toEqual(['Photo']);
     expect(node.properties.camera).toBe('Canon');
     expect(node.kind).toBe('photo');
+  });
+
+  it('renders note nodes as planes with textContent and no image URLs', () => {
+    const n = note('n1', { description: 'hello world', date_taken_friendly: '2024-01-01' });
+    const out = buildCanvasLayout([n], [], {}, {});
+    expect(out.map((x) => x.id)).toEqual(['n1']);
+    const node = out.find((x) => x.id === 'n1')!;
+    expect(node.kind).toBe('note');
+    expect(node.textContent).toBe('hello world');
+    expect(node.imageUrl).toBeUndefined();
+    expect(node.fullUrl).toBeUndefined();
+    // Text-friendly portrait aspect (~1 : 1.4) when no image dims present.
+    expect(node.height).toBeGreaterThanOrEqual(60);
+    expect(node.height).toBeLessThan(120);
+    expect(node.width).toBe(Math.round(node.height / 1.4));
+  });
+
+  it('note textContent falls back through summary → title → id', () => {
+    const a = makeNode('a', 'Note', { source_id: 'note_a', summary: 'S' });
+    const b = makeNode('b', 'Note', { source_id: 'note_b', title: 'T' });
+    const c = makeNode('c', 'Note', { source_id: 'note_c' });
+    const out = buildCanvasLayout([a, b, c], [], {}, {});
+    const byId = new Map(out.map((x) => [x.id, x]));
+    expect(byId.get('a')!.textContent).toBe('S');
+    expect(byId.get('b')!.textContent).toBe('T');
+    expect(byId.get('c')!.textContent).toBe('c');
+  });
+
+  it('a spurious (Photo) hub with a note source_id renders as a note plane, not a photo', () => {
+    const spurious: KGNode = {
+      id: 'diary-entry-2026-07-22-xyz (Photo)',
+      labels: ['Photo'],
+      properties: { entity_type: 'Photo', source_id: 'diary-entry-2026-07-22-xyz', description: 'D' },
+    };
+    const out = buildCanvasLayout([spurious], [], {}, {});
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('note');
+    expect(out[0].textContent).toBe('D');
+    // The defensive guard: no photo image URL is ever built for it.
+    expect(out[0].imageUrl).toBeUndefined();
+    expect(out[0].fullUrl).toBeUndefined();
+  });
+
+  it('renders photos and notes together in the same time bucket grid', () => {
+    const p = photo('p1', { date_taken_friendly: '2024-01-01' });
+    const n = note('n1', { date_taken_friendly: '2024-01-01' });
+    const out = buildCanvasLayout([p, n], [], {}, {});
+    expect(out.map((x) => x.id).sort()).toEqual(['n1', 'p1']);
+    const kinds = new Set(out.map((x) => x.kind));
+    expect(kinds.has('photo')).toBe(true);
+    expect(kinds.has('note')).toBe(true);
   });
 });

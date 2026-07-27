@@ -8,8 +8,14 @@
  */
 import type { KGNode } from '$lib/constants';
 
-/** High-level visual category of a canvas node. */
-export type NodeKind = 'photo' | 'person' | 'location' | 'event' | 'concept';
+/**
+ * High-level visual category of a canvas node.
+ *
+ * `note` covers text-only nodes (diary entries, chat notes, plan entries,
+ * daily updates, personal-context updates) that render as readable text
+ * planes baked into a `CanvasTexture` instead of a photo image.
+ */
+export type NodeKind = 'photo' | 'note' | 'person' | 'location' | 'event' | 'concept';
 
 /**
  * A node projected into canvas space. Mirrors `KGNode` identity but adds the
@@ -25,10 +31,16 @@ export interface CanvasNode {
   readonly properties: Record<string, unknown>;
   /** Visual category — drives material color and texture loading. */
   readonly kind: NodeKind;
-  /** Thumbnail URL (LOD) — loaded eagerly by `NodePlane`. */
+  /** Thumbnail URL (LOD) — loaded eagerly by `NodePlane` (photo only). */
   readonly imageUrl?: string;
-  /** Full-res URL — swapped in on hover/select (Phase 2). */
+  /** Full-res URL — swapped in on hover/select (Phase 2, photo only). */
   readonly fullUrl?: string;
+  /**
+   * Text payload for `note` nodes — rendered into a `CanvasTexture` by
+   * `NodePlane`. Sourced from `properties.description ?? summary ?? title ?? id`.
+   * Unused (and undefined) for `photo`/other kinds.
+   */
+  readonly textContent?: string;
   /** Chunk-space X coordinate (cellX = floor(worldX / CHUNK_SIZE)). */
   readonly cellX: number;
   /** Chunk-space Y coordinate. */

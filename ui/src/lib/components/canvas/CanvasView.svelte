@@ -130,6 +130,8 @@
       graphStore.edges,
       graphStore.photoImages,
       graphStore.personImages,
+      undefined,
+      graphStore.noteContents,
     );
     timeIndex = buildTimeIndex(graphStore.nodes, graphStore.edges);
     sceneManager.setNodes(nodes);
@@ -228,6 +230,7 @@
     void graphStore.nodes;
     void graphStore.edges;
     void graphStore.photoImages;
+    void graphStore.noteContents;
 
     if (!mounted) return;
     if (!firstLayoutApplied) {

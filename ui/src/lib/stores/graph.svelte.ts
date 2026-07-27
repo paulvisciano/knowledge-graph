@@ -1,6 +1,7 @@
 import type { KGNode, KGEdge } from '$lib/constants';
 import { API } from '$lib/constants';
 import { lightragClient } from '$lib/services/lightrag-client';
+import { isNoteNode } from '$lib/components/canvas/Layout';
 
 const KG_API_BASE = '/api/kg';
 
@@ -15,6 +16,11 @@ class GraphStore {
   photoImages = $state<Record<string, string>>({});
   /** nodeId → dataUrl for Person face-crop images */
   personImages = $state<Record<string, string>>({});
+  /** nodeId → full text content for Note nodes, fetched from the processed
+   *  LightRAG document (same source as the Ingest tab). Populated async by
+   *  `fetchNoteContents`; `buildCanvasLayout` reads this to bake the note
+   *  text into the plane's CanvasTexture. */
+  noteContents = $state<Record<string, string>>({});
 
   filteredNodes = $derived.by(() => {
     if (!this.searchQuery.trim()) return this.nodes;
@@ -45,9 +51,13 @@ class GraphStore {
       // during image processing that never completed/persisted, so keeping
       // them would show images with no backing processed document. This
       // mirrors the existing manual_creation filters in fetchPhotoImages
-      // (line 87) and GraphView.svelte.
+      // (line 87) and GraphView.svelte. A node that is actually a Note (even
+      // a spurious `(Photo)` hub whose source_id is a note file_source) is
+      // treated as stale from the photo-preservation perspective so it isn't
+      // kept as a photo — the canvas renders it as a `note` plane instead.
       const isStalePhotoNode = (n: KGNode): boolean => {
         if (!n.labels?.some((l) => /^(Photo|Image)$/i.test(l)) && n.properties?.entity_type !== 'Photo' && n.properties?.entity_type !== 'Image') return false;
+        if (isNoteNode(n)) return true;
         const sourceId = n.properties?.source_id ?? n.properties?.file_path;
         return !sourceId || sourceId === 'manual_creation';
       };
@@ -58,6 +68,7 @@ class GraphStore {
       this.nodes = [...graph.nodes, ...preservedNodes];
       this.edges = [...graph.edges, ...preservedEdges];
       this.fetchPhotoImages(graph.nodes);
+      this.fetchNoteContents(graph.nodes);
     } catch (err) {
       console.error('Graph load failed:', err);
     } finally {
@@ -65,26 +76,63 @@ class GraphStore {
     }
   }
 
-  /** Resolve thumbnail URLs for Photo nodes (no fetch — loaded on demand by TextureLoader/<img>). */
+  /** Resolve thumbnail URLs for Photo nodes (no fetch — loaded on demand by TextureLoader/<img>).
+   *  Notes are explicitly excluded even if they carry a `(Photo)` label/entity_type,
+   *  so a spurious `(Photo)` hub whose `source_id` is a note file_source never gets
+   *  routed to `/api/kg/images/photo/...` (which 404s). Notes render as text planes. */
   private async fetchPhotoImages(nodes: KGNode[]) {
     const photoNodes = nodes.filter((n) =>
-      n.labels?.some((l) => /^(Photo|Image)$/i.test(l))
-      || n.properties?.entity_type === 'Photo'
-      || n.properties?.entity_type === 'Image'
-      || n.id?.includes('(Photo)')
-      || n.id?.includes('(Image)')
+      !isNoteNode(n) && (
+        n.labels?.some((l) => /^(Photo|Image)$/i.test(l))
+        || n.properties?.entity_type === 'Photo'
+        || n.properties?.entity_type === 'Image'
+        || n.id?.includes('(Photo)')
+        || n.id?.includes('(Image)')
+      )
     );
     if (photoNodes.length === 0) return;
 
     const updates: Record<string, string> = {};
     for (const node of photoNodes) {
       if (this.photoImages[node.id]) continue;
+      if (isNoteNode(node)) continue;
       const sourceId = node.properties?.source_id ?? node.properties?.file_path;
       if (!sourceId || sourceId === 'manual_creation') continue;
       updates[node.id] = `${KG_API_BASE}${API.kg.photoImageThumb(String(sourceId))}`;
     }
     if (Object.keys(updates).length > 0) {
       this.photoImages = { ...this.photoImages, ...updates };
+    }
+  }
+
+  /** Fetch the full text content for Note nodes from the processed LightRAG
+   *  document (same source as the Ingest tab's `getDocumentFullContent`). The
+   *  note hub's `source_id` is the document's `file_path`; `resolveDocumentId`
+   *  maps it to a doc id, then `getDocumentFullContent` returns the text.
+   *  Populates `noteContents` so `buildCanvasLayout` can bake the real note
+   *  text into the plane texture (instead of the short `"Note: {file_source}"`
+   *  description label). Mirrors `fetchPhotoImages`'s async-then-populate
+   *  pattern; the CanvasView `$effect` rebuilds when `noteContents` updates. */
+  private async fetchNoteContents(nodes: KGNode[]) {
+    const noteNodes = nodes.filter((n) => isNoteNode(n));
+    if (noteNodes.length === 0) return;
+    const updates: Record<string, string> = {};
+    for (const node of noteNodes) {
+      if (this.noteContents[node.id]) continue;
+      const fileSource = node.properties?.source_id;
+      if (!fileSource || typeof fileSource !== 'string') continue;
+      try {
+        const docId = await lightragClient.resolveDocumentId(fileSource);
+        if (!docId) continue;
+        const data = await lightragClient.getDocumentFullContent(docId);
+        const content = data?.content ?? '';
+        if (content) updates[node.id] = content;
+      } catch (err) {
+        console.error('[fetchNoteContents] Failed for', node.id, err);
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      this.noteContents = { ...this.noteContents, ...updates };
     }
   }
 

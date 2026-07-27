@@ -29,6 +29,86 @@ const KG_API_BASE = '/api/kg';
 // Kind classification
 // ---------------------------------------------------------------------------
 
+/**
+ * Recognize a note `file_source` / `source_id` string, mirroring the backend
+ * predicate. A string is a note file_source if it:
+ *   - matches `^note_\d+$` (legacy), OR
+ *   - starts with one of: `diary-entry`, `chat-note`, `preference-update`,
+ *     `correction`, `plan_entry`, `daily_update`, `personal_context_update`,
+ *     `mcp-`, OR
+ *   - ends with the MCP timestamp suffix `\d{8}-\d{6}-\d{6}$` AND does not
+ *     look like an image.
+ *
+ * Conservative guard: any string that looks like an image (contains a photo
+ * extension or starts with `PXL_`) is treated as a photo, never a note, so
+ * real photos are never misrouted to the note renderer.
+ */
+export function isNoteFileSource(s: string): boolean {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  // LightRAG concatenates an entity's source documents with "<SEP>" (e.g.
+  // "personal_context_update<SEP>PXL_20260504....jpg<SEP>daily_update").
+  // Those compound strings are NOT a single note file_source — they belong
+  // to extracted entities (person/location/...), not to a Note hub. Reject
+  // them so entities don't get misclassified as notes.
+  if (s.includes('<SEP>')) return false;
+  // Image heuristic — checked first so real photos win even if they happen to
+  // match a note prefix or the MCP timestamp suffix.
+  if (/(?:\.jpe?g|\.raw|\.png|\.heic)$/i.test(s) || s.startsWith('PXL_')) {
+    return false;
+  }
+  if (/^note_\d+$/.test(s)) return true;
+  const notePrefixes = [
+    'diary-entry',
+    'diary_entry',
+    'chat-note',
+    'preference-update',
+    'correction',
+    'plan_entry',
+    'daily_update',
+    'personal_context_update',
+    'mcp-',
+  ];
+  for (const p of notePrefixes) {
+    if (s.startsWith(p)) return true;
+  }
+  // MCP-generated timestamp suffix without an explicit note prefix.
+  if (/\d{8}-\d{6}-\d{6}$/.test(s)) return true;
+  return false;
+}
+
+/**
+ * True if the node represents a Note entity (diary entry, chat note, plan
+ * entry, daily update, personal-context update, …). Matches any of:
+ *   - `properties.entity_type === 'Note'`, OR
+ *   - any label ending with ` (Note)`, OR
+ *   - `source_id` / `file_path` / `filename` / `file_source` is a note
+ *     file_source (see {@link isNoteFileSource}).
+ *
+ * This is checked BEFORE `isPhotoNode` in {@link classifyKind} so that a
+ * spurious `(Photo)` hub whose `source_id` is actually a note file_source is
+ * classified as `note` (not `photo`) and therefore never routed to the photo
+ * image URL path that 404s.
+ */
+export function isNoteNode(node: {
+  labels?: string[];
+  properties?: Record<string, unknown>;
+  id?: string;
+}): boolean {
+  const et = node.properties?.entity_type;
+  if (typeof et === 'string' && et === 'Note') return true;
+  if (node.labels?.some((l) => l.endsWith(' (Note)'))) return true;
+  // A spurious `(Photo)` hub (created by the orphan-repair script for note
+  // file_sources) has `entity_type === 'Photo'` but `source_id` = the note
+  // file_source. Reclassify it as a note via `source_id` so it isn't routed
+  // to the photo image path. Do NOT check `file_path`/`file_source` here:
+  // extracted entities (person/location/concept) carry the note's
+  // file_source in `file_path` (the document they were extracted FROM), but
+  // they are NOT notes — only the hub is.
+  const sid = node.properties?.source_id;
+  if (typeof sid === 'string' && isNoteFileSource(sid)) return true;
+  return false;
+}
+
 /** True if the node represents a Photo/Image entity. */
 function isPhotoNode(node: {
   labels?: string[];
@@ -87,9 +167,14 @@ function isEventNode(node: {
 
 /**
  * Classify a `KGNode` into one of the renderer's visual categories.
- * Order matters: photo → person → location → event → concept (fallback).
+ * Order matters: note → photo → person → location → event → concept.
+ *
+ * `note` is checked BEFORE `photo` so a spurious `(Photo)` hub whose
+ * `source_id` is actually a note file_source is classified as `note` and
+ * never routed to the photo image URL path (which 404s).
  */
 export function classifyKind(node: KGNode): NodeKind {
+  if (isNoteNode(node)) return 'note';
   if (isPhotoNode(node)) return 'photo';
   if (isPersonNode(node)) return 'person';
   if (isLocationNode(node)) return 'location';
@@ -288,34 +373,43 @@ interface TimePlan {
  * switch to month buckets so the Z axis stays bounded.
  */
 function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
-  const photoDate = new Map<string, Date>();
+  // Dates for renderable nodes that carry their own timestamp — photos AND
+  // notes. Both have `date_taken_friendly`/`created_at` (read by
+  // `parseNodeDate`) and must be bucketed by month/day like photos so a
+  // month containing only notes still produces its own bucket. The map is
+  // keyed by nodeId so the granularity decision and bucket-key collection
+  // cover notes too.
+  const renderableDate = new Map<string, Date>();
   for (const n of nodes) {
-    if (!isPhotoNode(n) || isStalePhotoNode(n)) continue;
+    const kind = classifyKind(n);
+    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind === 'photo' && isStalePhotoNode(n)) continue;
     const d = parseNodeDate(n);
-    if (d) photoDate.set(n.id, d);
+    if (d) renderableDate.set(n.id, d);
   }
 
   // Decide granularity for the depth (time) axis. The goal is a moderate
-  // number of depth layers (~4-16) with multiple photos per layer so the
-  // 2D within-bucket grid fills the viewport. Per-photo granularity (one
-  // layer per photo) would stack photos in a narrow single-file line along
-  // Z, defeating the width spread. Prefer the FINEST granularity that keeps
-  // at least ~3 photos per layer (more layers = more zoom travel).
+  // number of depth layers (~4-16) with multiple renderable nodes per layer
+  // so the 2D within-bucket grid fills the viewport. Per-node granularity
+  // (one layer per node) would stack nodes in a narrow single-file line
+  // along Z, defeating the width spread. Prefer the FINEST granularity that
+  // keeps at least ~3 renderable nodes per layer (more layers = more zoom
+  // travel).
   let granularity: 'month' | 'day' | 'photo' = 'photo';
-  if (photoDate.size > 0) {
+  if (renderableDate.size > 0) {
     let minT = Infinity;
     let maxT = -Infinity;
-    for (const d of photoDate.values()) {
+    for (const d of renderableDate.values()) {
       const t = d.getTime();
       if (t < minT) minT = t;
       if (t > maxT) maxT = t;
     }
     const spanDays = (maxT - minT) / 86_400_000;
-    const photoCount = photoDate.size;
+    const renderableCount = renderableDate.size;
     const dayBuckets = Math.max(1, Math.ceil(spanDays));
     const monthBuckets = Math.max(1, Math.ceil(spanDays / 30));
-    const perDay = photoCount / dayBuckets;
-    const perMonth = photoCount / monthBuckets;
+    const perDay = renderableCount / dayBuckets;
+    const perMonth = renderableCount / monthBuckets;
     if (perDay >= 3 && dayBuckets <= 16) {
       granularity = 'day';
     } else if (perMonth >= 3 && monthBuckets <= 16) {
@@ -337,7 +431,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   // cellZ=0 (furthest from camera); newest gets the highest cellZ (closest to
   // camera). Zooming in (camera z decreasing) travels back in time.
   const bucketKeys = new Set<string>();
-  for (const d of photoDate.values()) {
+  for (const d of renderableDate.values()) {
     bucketKeys.add(bucketKeyOf(d));
   }
   const sortedBuckets = Array.from(bucketKeys).sort();
@@ -368,24 +462,31 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
 
   const cellZOf = new Map<string, number>();
 
-  // Photos: direct bucket.
+  // Renderable nodes with their own date (photos AND notes): direct bucket
+  // assignment. Notes must be assigned to their own month/day bucket so a
+  // month containing only notes still clusters them together on the Z axis.
   for (const n of nodes) {
-    if (!isPhotoNode(n) || isStalePhotoNode(n)) continue;
-    const d = photoDate.get(n.id);
+    const kind = classifyKind(n);
+    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind === 'photo' && isStalePhotoNode(n)) continue;
+    const d = renderableDate.get(n.id);
     if (!d) continue;
     const key = bucketKeyOf(d);
     const idx = bucketIndex.get(key);
     if (idx !== undefined) cellZOf.set(n.id, idx * TIME_BUCKET_SPACING);
   }
 
-  // Non-photos: inherit most-recent connected photo's bucket.
+  // Non-renderable entities (person/location/event/concept): inherit the
+  // most-recent connected renderable node's bucket so they sit alongside
+  // the photos/notes they relate to.
   for (const n of nodes) {
-    if (isPhotoNode(n)) continue;
+    const kind = classifyKind(n);
+    if (kind === 'photo' || kind === 'note') continue;
     if (cellZOf.has(n.id)) continue;
     const neighbors = adjacency.get(n.id) ?? [];
     let best: { idx: number; t: number } | null = null;
     for (const nid of neighbors) {
-      const d = photoDate.get(nid);
+      const d = renderableDate.get(nid);
       if (!d) continue;
       const key = bucketKeyOf(d);
       const idx = bucketIndex.get(key);
@@ -521,11 +622,12 @@ export function buildTimeIndex(nodes: KGNode[], edges: KGEdge[]): TimeIndex {
  *    focused node, 1 = 2-hop, 2 = far; 0 when nothing is focused). Minor
  *    horizontal parallax axis.
  *
- * Within a chunk cell, photos are spread on a square grid sized to the cell's
- * node count so they never overlap. Only photo/image nodes are rendered to
- * the canvas; non-photo entities (person/location/event/concept) still
- * participate in the cluster-band and depth computation (via their edges)
- * but do not get planes — they inform the layout, not the render set.
+ * Within a chunk cell, nodes are spread on a square grid sized to the cell's
+ * node count so they never overlap. Only `photo`/`image` and `note` nodes are
+ * rendered to the canvas; non-photo/non-note entities
+ * (person/location/event/concept) still participate in the cluster-band and
+ * depth computation (via their edges) but do not get planes — they inform the
+ * layout, not the render set.
  *
  * @param nodes        all `KGNode`s in the graph (used for clustering + depth).
  * @param edges        all `KGEdge`s in the graph.
@@ -543,6 +645,7 @@ export function buildCanvasLayout(
   photoImages: Record<string, string>,
   _personImages: Record<string, string>,
   selectedNodeId?: string | null,
+  noteContents: Record<string, string> = {},
 ): CanvasNode[] {
   const timePlan = buildTimePlan(nodes, edges);
   const clusters = buildClusterAssignment(nodes, edges);
@@ -553,21 +656,27 @@ export function buildCanvasLayout(
   // into a compact vertical stack. Each band occupies one chunk-Y row.
   const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
 
-  // Group photo nodes by their time bucket (cellZ) so we can spread each
-  // layer across the screen. Without this, all photos in a bucket share
-  // cellX=0 (when nothing is focused) and collapse into a narrow column.
+  // Group renderable nodes (photos AND notes) by their time bucket (cellZ)
+  // so we can spread each layer across the screen. Without this, all nodes in
+  // a bucket share cellX=0 (when nothing is focused) and collapse into a
+  // narrow column. Notes share the photo timeline (the backend sets
+  // `date_taken_friendly`/`created_at` on them, read by `parseNodeDate`).
+  // Stale-photo filtering only applies to `photo` kind — notes don't need a
+  // `source_id` to render text, so a note with no source_id is kept.
   const photosByBucket = new Map<number, KGNode[]>();
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    if (classifyKind(node) !== 'photo' || isStalePhotoNode(node)) continue;
+    const kind = classifyKind(node);
+    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind === 'photo' && isStalePhotoNode(node)) continue;
     const z = timePlan.cellZOf.get(node.id) ?? i;
     const arr = photosByBucket.get(z);
     if (arr) arr.push(node);
     else photosByBucket.set(z, [node]);
   }
-  // Assign each photo a 2D grid cell (gridX, gridY) within its time bucket,
+  // Assign each node a 2D grid cell (gridX, gridY) within its time bucket,
   // centered on (0, 0) so each layer fills the viewport width AND height
-  // without exceeding RENDER_DISTANCE. A 1D line would push most photos
+  // without exceeding RENDER_DISTANCE. A 1D line would push most nodes
   // thousands of chunks outside the visible window.
   const gridPosOf = new Map<string, { x: number; y: number }>();
   for (const [, bucketNodes] of photosByBucket) {
@@ -597,7 +706,8 @@ export function buildCanvasLayout(
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const kind = classifyKind(node);
-    if (kind !== 'photo' || isStalePhotoNode(node)) continue;
+    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind === 'photo' && isStalePhotoNode(node)) continue;
     const depth = depthPlan.depthOf.get(node.id) ?? 0;
     const grid = gridPosOf.get(node.id) ?? { x: 0, y: 0 };
     // Relationship depth is a minor parallax offset layered on top of the
@@ -633,7 +743,9 @@ export function buildCanvasLayout(
     const ph = node.properties?.image_height ?? node.properties?.height;
     // Random base size in [60, 120) world units, then preserve the native
     // image aspect ratio (height = base, width = base * aspect) — same
-    // approach as the reference's displayScale.
+    // approach as the reference's displayScale. Notes rarely carry
+    // image_width/height, so they fall back to a text-friendly portrait
+    // aspect (~1 : 1.4) that reads well for wrapped prose.
     const base = 60 + seededRandom(seed + 4) * 60;
     let width: number;
     let height: number;
@@ -641,6 +753,9 @@ export function buildCanvasLayout(
       const aspect = pw / ph;
       height = base;
       width = Math.round(base * aspect);
+    } else if (kind === 'note') {
+      height = base;
+      width = Math.round(base / 1.4);
     } else {
       width = base;
       height = Math.round(base * 0.75);
@@ -648,15 +763,33 @@ export function buildCanvasLayout(
 
     let imageUrl: string | undefined;
     let fullUrl: string | undefined;
-    const cached = photoImages[node.id];
-    if (cached) {
-      imageUrl = cached;
+    let textContent: string | undefined;
+    if (kind === 'note') {
+      // Notes render text via a local CanvasTexture — no image URL, no
+      // TextureCache call (routing them through the URL cache is what caused
+      // the 404s on spurious `(Photo)` hubs with a note source_id).
+      // Prefer the full note text fetched from the processed LightRAG
+      // document (same source as the Ingest tab); fall back to the short
+      // description label while the async fetch is in-flight.
+      const np = node.properties ?? {};
+      const text =
+        noteContents[node.id] ??
+        (np.description as string | undefined) ??
+        (np.summary as string | undefined) ??
+        (np.title as string | undefined) ??
+        node.id;
+      textContent = typeof text === 'string' ? text : node.id;
     } else {
+      const cached = photoImages[node.id];
+      if (cached) {
+        imageUrl = cached;
+      } else {
+        const fname = photoFilename(node);
+        if (fname) imageUrl = `${KG_API_BASE}${API.kg.photoImageThumb(fname, 512)}`;
+      }
       const fname = photoFilename(node);
-      if (fname) imageUrl = `${KG_API_BASE}${API.kg.photoImageThumb(fname, 512)}`;
+      if (fname) fullUrl = `${KG_API_BASE}${API.kg.photoImageFull(fname)}`;
     }
-    const fname = photoFilename(node);
-    if (fname) fullUrl = `${KG_API_BASE}${API.kg.photoImageFull(fname)}`;
 
     out[i] = {
       id: node.id,
@@ -665,6 +798,7 @@ export function buildCanvasLayout(
       kind,
       imageUrl,
       fullUrl,
+      textContent,
       cellX,
       cellY,
       cellZ,
