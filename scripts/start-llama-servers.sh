@@ -20,6 +20,16 @@ EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/bonsai-27b/Bonsai-27B-mmproj-Q8_0.gguf}"
 WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-large-v3-turbo.bin}"
+
+# LLM sampler settings — anti-repetition (fixes verbatim phrase-loop degeneration at Q1 quant).
+# DRY sampler targets phrase-level repetition; repeat_penalty is a token-level backstop.
+LLM_REPEAT_PENALTY="${LLM_REPEAT_PENALTY:-1.1}"
+LLM_REPEAT_LAST_N="${LLM_REPEAT_LAST_N:-128}"
+LLM_DRY_MULTIPLIER="${LLM_DRY_MULTIPLIER:-0.5}"
+LLM_DRY_BASE="${LLM_DRY_BASE:-1.75}"
+LLM_DRY_ALLOWED_LENGTH="${LLM_DRY_ALLOWED_LENGTH:-2}"
+# Single slot gets the full context window (set LLM_SLOTS=2 to split for concurrency).
+LLM_SLOTS="${LLM_SLOTS:-1}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"
@@ -86,7 +96,9 @@ echo "Starting LLM on port ${LLM_PORT}..."
     --image-max-tokens 280 --image-min-tokens 40 \
     -c 131072 -b 2048 -ub 2048 \
     -ctk q4_0 -ctv q4_0 \
-    -np 2 -fa on -cram 0 -ngl 99 \
+    -np "$LLM_SLOTS" -fa on -cram 0 -ngl 99 \
+    --repeat-penalty "$LLM_REPEAT_PENALTY" --repeat-last-n "$LLM_REPEAT_LAST_N" \
+    --dry-multiplier "$LLM_DRY_MULTIPLIER" --dry-base "$LLM_DRY_BASE" --dry-allowed-length "$LLM_DRY_ALLOWED_LENGTH" \
     --reasoning off --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &
