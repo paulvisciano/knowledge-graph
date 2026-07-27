@@ -748,6 +748,13 @@
           model: selectedModel || undefined,
           messages: apiMessages,
           stream: true,
+          // At Q1 quant the model sometimes never emits <|im_end|> on long
+          // open-ended turns, falling into paraphrase loops until externally
+          // truncated. max_tokens caps generation so the stream always
+          // terminates; stop strings are a belt-and-suspenders backstop in
+          // case the chat-template EOS isn't honored in streaming.
+          max_tokens: 2048,
+          stop: ['<|im_end|>'],
         };
 
         if (tools.length > 0) {
