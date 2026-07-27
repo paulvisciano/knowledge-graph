@@ -19,6 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 _LIGHTRAG_API_URL = os.getenv("LIGHTRAG_API_URL", "http://localhost:9621")
 _LIGHTRAG_API_KEY = os.getenv("LIGHTRAG_API_KEY", "")
 _MCP_PORT = int(os.getenv("MEMORY_SEARCH_MCP_PORT", "9653"))
+_IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "600"))
 
 logger = logging.getLogger("knowledge_graph_mcp")
 
@@ -624,6 +625,12 @@ async def _fetch_image_descriptions(photo_names: list[str]) -> str:
 
     Two-step: (1) list all documents to build a file_path→doc_id map, (2) fetch
     full_content for each doc_id whose file_path matches a photo name.
+
+    Each description is truncated to the first _IMG_DESC_MAX_CHARS characters:
+    VLM descriptions start with a narrative scene summary ("This image depicts
+    ...") followed by a People section, then devolve into exhaustive Spatial /
+    Colors / Materials details that bloat the token count. Keeping the opening
+    preserves who/where/what while staying within the LLM's context window.
     """
     import httpx
     descriptions: list[str] = []
@@ -655,7 +662,12 @@ async def _fetch_image_descriptions(photo_names: list[str]) -> str:
                     continue
                 content = content_r.json().get("content", "")
                 if content:
-                    descriptions.append(content)
+                    # Keep filename header + truncated body so the model can
+                    # attribute details to a specific photo if needed.
+                    snippet = content[:_IMG_DESC_MAX_CHARS]
+                    if len(content) > _IMG_DESC_MAX_CHARS:
+                        snippet = snippet.rstrip() + "\n[...truncated]"
+                    descriptions.append(f"Image: {fp}\n{snippet}")
             except Exception:
                 continue
     return "\n\n---\n\n".join(descriptions)
