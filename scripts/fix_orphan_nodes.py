@@ -36,9 +36,16 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
 from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
-from urllib.error import URLError
+
+# Shared note/photo predicate — keeps this script and the one-time cleanup
+# (fix_note_photo_hubs.py) in sync on what counts as a note file_source.
+# scripts/ is a flat directory (no __init__.py); import from a sibling
+# module the way Python places ``scripts`` on sys.path when run as a script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from note_sources import is_note_file_source
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +66,7 @@ def _is_exif_entity(label: str) -> bool:
 def _hub_name_for(file_source: str) -> str:
     # Notes use a (Note) hub; images use a (Photo) hub.  An entity's file_path
     # lists its source documents, so the hub type is determined per source.
-    if file_source.startswith("note_"):
+    if is_note_file_source(file_source):
         return f"{file_source} (Note)"
     return f"{file_source} (Photo)"
 
@@ -149,7 +156,7 @@ def create_relation(base_url: str, source: str, target: str, description: str, k
 
 def create_hub_entity(base_url: str, file_source: str) -> dict[str, Any]:
     hub_name = _hub_name_for(file_source)
-    is_note = file_source.startswith("note_")
+    is_note = is_note_file_source(file_source)
     entity_data: dict[str, Any] = {
         "description": f"Note: {file_source}" if is_note else f"Photo: {file_source}",
         "entity_type": "Note" if is_note else "Photo",
@@ -347,19 +354,38 @@ def _note_date_strings(file_source: str) -> tuple[str, str] | None:
     # date_label matches "YYYY-MM-DD (Date)" (image Date nodes).
     # date_taken_friendly matches the "YYYY-MM-DD at HH:MM" shape the UI's
     # parseNodeDate reads (Layout.ts:126) so notes land on the timeline.
+    import os
     import re
-    from datetime import datetime
     import zoneinfo
-    m = re.match(r"^note_(\d+)$", file_source)
-    if not m:
-        return None
+    from datetime import datetime
+
     try:
-        tz = zoneinfo.ZoneInfo(__import__("os").environ.get("TZ", "America/New_York"))
-        dt = datetime.fromtimestamp(int(m.group(1)), tz=tz)
-        return (dt.strftime("%Y-%m-%d") + " (Date)", dt.strftime("%Y-%m-%d at %H:%M"))
-    except Exception as exc:
-        logger.warning("  Could not resolve date for %s: %s", file_source, exc)
+        tz = zoneinfo.ZoneInfo(os.environ.get("TZ", "America/New_York"))
+    except Exception:
+        tz = zoneinfo.ZoneInfo("America/New_York")
+
+    dt: datetime | None = None
+    m = re.match(r"^note_(\d+)$", file_source)
+    if m:
+        try:
+            dt = datetime.fromtimestamp(int(m.group(1)), tz=tz)
+        except (ValueError, OSError, OverflowError):
+            dt = None
+    else:
+        # MCP timestamp suffix: trailing YYYYMMDD-HHMMSS-microseconds.  Mirrors
+        # processor.py:_parse_file_source_date so MCP-saved notes (diary-entry-...,
+        # chat-note-...) get the same Date node as photos from that instant.
+        m = re.search(r"(\d{8})-(\d{6})-(\d{6})$", file_source)
+        if m:
+            ymd, hms, _ = m.groups()
+            try:
+                dt = datetime.strptime(f"{ymd}{hms}", "%Y%m%d%H%M%S").replace(tzinfo=tz)
+            except ValueError:
+                dt = None
+
+    if dt is None:
         return None
+    return (dt.strftime("%Y-%m-%d") + " (Date)", dt.strftime("%Y-%m-%d at %H:%M"))
 
 
 def _date_label_for_note(file_source: str) -> str | None:
@@ -367,7 +393,7 @@ def _date_label_for_note(file_source: str) -> str | None:
     return r[0] if r else None
 
 
-def _parse_date_label(label: str) -> "datetime | None":
+def _parse_date_label(label: str) -> datetime | None:
     import re
     from datetime import datetime
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2}) \(Date\)$", label)
