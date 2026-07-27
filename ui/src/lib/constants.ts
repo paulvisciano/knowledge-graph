@@ -213,6 +213,7 @@ export interface MCPToolCall {
   arguments: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+  composing?: boolean;
   timestamp: number;
   parsedKG?: {
     entities: { entity: string; type?: string; description?: string }[];

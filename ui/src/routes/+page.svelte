@@ -690,7 +690,7 @@
      streamingConversationId = activeConversationId;
 
      const tools = mcpClient.enabledOpenAITools;
-     const maxTurns = 10;
+     const maxTurns = 3;
      let turn = 0;
 
        type ContentPart = { type: string; text?: string; image_url?: { url: string } };
@@ -728,7 +728,7 @@
         if (!streamAbortController) break;
         turn++;
         if (streamingConversationId === activeConversationId) {
-          processingLabel = turn === 1 ? 'Processing prompt...' : `Tool call ${turn}...`;
+          processingLabel = 'Thinking...';
         }
 
         const assistantId = generateId();
@@ -751,14 +751,22 @@
         };
 
         if (tools.length > 0) {
-          requestBody.tools = tools;
           // Turn 1: force a tool call. The model (Bonsai-27B-Q1_0) reliably
           // skips tool calls under tool_choice='auto' and emits the literal
           // confirmation string ("Saved.") from the system prompt instead.
           // 'required' makes llama-server apply a grammar that guarantees a
           // tool_call is produced, so logging/retrieval always hits the graph.
-          // Turn 2+: allow 'auto' so the model can give its final conversational
-          // reply after the tool result is fed back.
+          // Turn 2+: only offer query tools — the model was calling
+          // save_to_knowledge_graph during retrieval queries and re-querying,
+          // both wasteful. Strip save + query tools after turn 1 so the model
+          // can only produce its final conversational answer.
+          const turnTools = turn === 1 ? tools : tools.filter(
+            (t: { function: { name: string } }) => {
+              const name = t.function?.name;
+              return name !== 'save_to_knowledge_graph' && name !== 'query_knowledge_graph' && name !== 'query_knowledge_graph_stream';
+            }
+          );
+          requestBody.tools = turnTools.length > 0 ? turnTools : undefined;
           requestBody.tool_choice = turn === 1 ? 'required' : 'auto';
         }
 
@@ -790,7 +798,7 @@
         let msgTimings: { promptN?: number; promptMs?: number; predictedN?: number; predictedMs?: number; predictedPerSecond?: number } = {};
 
         if (streamingConversationId === activeConversationId) {
-          processingLabel = 'Generating...';
+          processingLabel = 'Writing...';
         }
 
         // Throttled flush: batches streaming updates to avoid freezing the UI.
@@ -850,6 +858,12 @@
                   if (streamingConversationId === activeConversationId) {
                     isProcessing = false;
                   }
+                  // Clear composing state on all previous tool calls — the model
+                  // has started writing its answer, so tool calls are no longer pending.
+                  messages = messages.map((m) => ({
+                    ...m,
+                    mcpToolCalls: m.mcpToolCalls?.map((tc) => ({ ...tc, composing: false })),
+                  }));
                 }
                 accumulatedContent += delta.content;
                 // Throttled update: buffer and flush on next animation frame
@@ -966,13 +980,13 @@
           let isToolError = false;
 
           const toolLabels: Record<string, string> = {
-            query_knowledge_graph: 'Searching knowledge graph...',
-            query_knowledge_graph_stream: 'Searching knowledge graph...',
-            save_to_knowledge_graph: 'Saving to knowledge graph...',
-            list_documents: 'Listing documents...',
+            query_knowledge_graph: 'Looking through your memories...',
+            query_knowledge_graph_stream: 'Looking through your memories...',
+            save_to_knowledge_graph: 'Saving that for you...',
+            list_documents: 'Gathering your records...',
           };
           if (streamingConversationId === activeConversationId) {
-            processingLabel = toolLabels[tc.name] || `Running ${tc.name}...`;
+            processingLabel = toolLabels[tc.name] || `Working on it...`;
             isProcessing = true;
           }
 
@@ -990,7 +1004,7 @@
             parsedKG = parsed;
             const markerIdx = toolResult.indexOf('---IMAGE_REFS---');
             displayResult = markerIdx !== -1 ? toolResult.slice(0, markerIdx).trimEnd() : toolResult;
-            const MAX_TOOL_CHARS = 6000;
+            const MAX_TOOL_CHARS = 50000;
             let toolContent = parsed.contextText;
             if (toolContent.length > MAX_TOOL_CHARS) {
               const relIdx = toolContent.indexOf('Knowledge Graph Data (Relationship)');
@@ -1026,7 +1040,7 @@
             ...m,
             mcpToolCalls: m.mcpToolCalls?.map((mtc) =>
               mtc.id === tc.id
-                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG }
+                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG, composing: true }
                 : mtc
             ),
           }));
@@ -1826,7 +1840,9 @@
                         <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-cyber-purple/25 bg-cyber-purple/5 px-2.5 py-1.5 text-[11px] text-cyber-purple hover:bg-cyber-purple/10 transition-colors">
                           <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m0 16v1m-8-9H3m18 0h-1M5.636 5.636l-.707-.707M18.364 18.364l-.707-.707M5.636 18.364l-.707.707M18.364 5.636l-.707.707" stroke-linecap="round" stroke-linejoin="round"/></svg>
                           <span class="font-medium">Thinking</span>
-                          <span class="text-cyber-text-dim/50">{msg.thinkingContent.length} chars</span>
+                          {#if msg.isStreaming}
+                            <span class="text-cyber-text-dim/50 animate-pulse">...</span>
+                          {/if}
                           <svg class="ml-auto h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </summary>
                         <div class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-cyber-purple/10 bg-cyber-bg/50 p-2.5 text-[11px] leading-relaxed text-cyber-text-dim/80 whitespace-pre-wrap font-mono">{msg.thinkingContent}</div>
@@ -1852,7 +1868,7 @@
                             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 150ms"></span>
                             <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 300ms"></span>
                           </div>
-                          <span class="text-xs text-cyber-text-dim">Generating...</span>
+                          <span class="text-xs text-cyber-text-dim">Writing...</span>
                           <button
                             onclick={cancelStreaming}
                             class="ml-1 flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10"
@@ -1928,21 +1944,26 @@
                         {@const entityCount = parsed ? parsed.entities.length : 0}
                         {@const relCount = parsed ? parsed.relationships.length : 0}
                         {@const isRunning = !toolCall.result && !toolCall.isError}
+                        {@const isComposing = toolCall.composing && !toolCall.isError}
                         {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
                         {@const isSave = toolCall.toolName === 'save_to_knowledge_graph'}
                         {@const savedText = isSave ? String(toolCall.arguments?.text ?? '') : ''}
-                        <details class="group" open={true} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
-                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
+                        <details class="group" open={false} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
+                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : isComposing ? 'border-cyber-purple/30 bg-cyber-purple/5 hover:bg-cyber-purple/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
                             {#if toolCall.isError}
                               <svg class="h-3.5 w-3.5 shrink-0 text-cyber-red" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            {:else if isComposing}
+                              <span class="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyber-purple"></span>
                             {:else if toolCall.result}
                               <svg class="h-3.5 w-3.5 shrink-0 text-cyber-green" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
                             {:else}
                               <span class="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyber-orange"></span>
                             {/if}
-                            <span class="font-mono {toolCall.isError ? 'text-cyber-red' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{toolCall.toolName}</span>
+                            <span class="font-mono {toolCall.isError ? 'text-cyber-red' : isComposing ? 'text-cyber-purple' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{isSave ? 'Saved to knowledge graph' : 'Searched knowledge graph'}</span>
                             {#if isRunning}
-                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isSave ? 'saving to knowledge graph...' : 'searching knowledge graph...'}</span>
+                              <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isSave ? 'saving...' : 'looking...'}</span>
+                            {:else if isComposing}
+                              <span class="text-[10px] text-cyber-purple/80 animate-pulse">thinking...</span>
                             {:else if isSave && savedText}
                               <span class="truncate text-[10px] text-cyber-text-dim/70">{savedText}</span>
                             {:else if parsed}
@@ -1964,7 +1985,7 @@
                             {#if isRunning}
                               <div class="flex items-center gap-2 py-3 text-[11px] text-cyber-orange" data-testid="tool-call-running">
                                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                <span>{isSave ? 'Saving to knowledge graph...' : 'Querying knowledge graph...'}</span>
+                                <span>{isSave ? 'Saving that for you...' : 'Looking through your memories...'}</span>
                               </div>
                             {:else if isSave}
                               {#if savedText}
