@@ -35,7 +35,7 @@ from sse_starlette.sse import ServerSentEvent, EventSourceResponse
 from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
     describe_image_with_vlm, describe_face_crop, create_exif_relations,
-    link_exif_to_visual_entities, wait_for_lightrag_processing,
+    link_exif_to_visual_entities, link_note_to_date, wait_for_lightrag_processing,
     delete_photo_entities, insert_metadata_into_lightrag,
     prepare_vlm_image, cleanup_vlm_image,
 )
@@ -1235,6 +1235,14 @@ async def create_image_job(
 async def create_note(text: str = Form(...)):
     file_source = f"note_{int(time.time())}"
     await insert_metadata_into_lightrag(config.lightrag_url(), text, file_source)
+    try:
+        await wait_for_lightrag_processing(config.lightrag_url(), file_source)
+    except Exception as exc:
+        logger.warning("Note %s: wait_for_lightrag_processing failed: %s", file_source, exc)
+    try:
+        await link_note_to_date(config.lightrag_url(), file_source)
+    except Exception as exc:
+        logger.exception("Note %s: link_note_to_date failed: %s", file_source, exc)
     return {"status": "ok", "file_source": file_source}
 
 

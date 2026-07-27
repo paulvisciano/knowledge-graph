@@ -10,12 +10,14 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote as url_quote
 from urllib.request import Request, urlopen
+import zoneinfo
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _PROJECT_ROOT not in sys.path:
@@ -1562,6 +1564,233 @@ async def link_exif_to_visual_entities(
     except Exception as exc:
         logger.warning("[EXIF Links] Person entity creation failed for %s: %s", file_source, exc)
 
+    return results
+
+
+def _parse_file_source_date(file_source: str) -> datetime | None:
+    """Extract a local-calendar ``datetime`` from a note file_source.
+
+    Two formats are recognised (in order):
+
+    1. ``note_<epoch>`` — the legacy ``/notes`` endpoint shape, where the
+       integer suffix is a Unix epoch in seconds.
+    2. Any file_source ending in ``YYYYMMDD-HHMMSS-microseconds`` — the
+       timestamp suffix appended by the MCP ``save_to_knowledge_graph``
+       tool (server.py:356).  e.g. ``"diary-entry-2026-07-27-20260727-144715-618412"``
+       or ``"chat-note-20260727-150000-123456"``.  The trailing
+       ``YYYYMMDD`` is the reliable date source; the time-of-day and
+       microseconds are preserved so a note and photos from the same
+       instant share the Date node (``YYYY-MM-DD (Date)``).
+
+    The timezone used for the calendar conversion is taken from the
+    ``TZ`` environment variable (default ``America/New_York``), matching
+    the rest of this module.  Returns ``None`` if neither pattern matches
+    or the timestamp cannot be parsed.
+    """
+    try:
+        tz = zoneinfo.ZoneInfo(os.environ.get("TZ", "America/New_York"))
+    except Exception:
+        tz = zoneinfo.ZoneInfo("America/New_York")
+
+    # 1) Legacy note_<epoch> (Unix seconds).
+    m = re.match(r"^note_(\d+)$", file_source)
+    if m:
+        try:
+            return datetime.fromtimestamp(int(m.group(1)), tz=tz)
+        except (ValueError, OSError, OverflowError):
+            return None
+
+    # 2) MCP timestamp suffix: trailing YYYYMMDD-HHMMSS-microseconds.
+    #    Search for the last occurrence in case file_source itself contains
+    #    dates (e.g. "diary-entry-2026-07-27-20260727-144715-618412").
+    m = re.search(r"(\d{8})-(\d{6})-(\d{6})$", file_source)
+    if m:
+        ymd, hms, _ = m.groups()
+        try:
+            naive = datetime.strptime(f"{ymd}{hms}", "%Y%m%d%H%M%S")
+            return naive.replace(tzinfo=tz)
+        except ValueError:
+            return None
+
+    return None
+
+
+async def link_note_to_date(
+    lightrag_url: str,
+    file_source: str,
+) -> dict[str, Any]:
+    """Bridge a note's LLM-extracted entities into the temporal graph.
+
+    Mirrors ``link_exif_to_visual_entities`` for image documents.  Notes are
+    ingested as bare text via ``POST /documents/text`` (file_source =
+    ``note_<epoch>``).  Without this step the entities LightRAG extracts from
+    the note (Bike Ride, Evening, ...) carry a ``file_path`` of ``note_<epoch>``
+    but get no edges, leaving them as orphans disconnected from the rest of
+    the graph — including the ``(Date)`` nodes that images from that day link
+    to.  This creates two things:
+
+    1. A ``{file_source} (Note)`` hub node (the note analogue of the
+       ``{file_source} (Photo)`` node) so note entities can share a hub.
+    2. A ``{date} (Date)`` node for the note's local calendar date, plus an
+       edge ``Note -> written_on -> Date``.  Images create the same ``Date``
+       label (``YYYY-MM-DD (Date)``) from EXIF, so a note and any photos taken
+       the same day now share that node — the requested bridge between notes
+       and images by day.
+
+    Then each non-EXIF entity whose ``file_path`` includes this note's
+    file_source is linked to the Note hub via ``appears_in`` (the same edge
+    keyword the image flow uses), so the existing orphan detector and the UI
+    treat note entities identically to image entities.
+    """
+    base_url = lightrag_url.rstrip("/")
+    results: dict[str, Any] = {
+        "note_name": "",
+        "date_name": "",
+        "note_created": False,
+        "date_created": False,
+        "date_link_created": False,
+        "visual_links_created": [],
+    }
+
+    # file_source is "note_<epoch>"; resolve the local-calendar date so the
+    # Date node label matches the "YYYY-MM-DD (Date)" shape images produce
+    # from EXIF (exif_extractor.py:308) — a note and photos from the same
+    # instant then share one Date node.
+    note_name = f"{file_source} (Note)"
+    date_label = ""
+    date_taken_friendly = ""
+    date_dt = _parse_file_source_date(file_source)
+    if date_dt is not None:
+        try:
+            date_label = date_dt.strftime("%Y-%m-%d") + " (Date)"
+            # Same property name the UI's parseNodeDate reads for Photos
+            # (Layout.ts:126), so notes land on the timeline at their date.
+            date_taken_friendly = date_dt.strftime("%Y-%m-%d at %H:%M")
+        except Exception as exc:
+            logger.warning("[Note Links] Could not resolve date for %s: %s", file_source, exc)
+    else:
+        logger.warning(
+            "[Note Links] file_source '%s' has no parseable timestamp — skipping date link",
+            file_source,
+        )
+
+    results["note_name"] = note_name
+    results["date_name"] = date_label
+
+    note_entity_data: dict[str, Any] = {
+        "description": f"Note: {file_source}",
+        "entity_type": "Note",
+        "source_id": file_source,
+    }
+    if date_taken_friendly:
+        note_entity_data["date_taken_friendly"] = date_taken_friendly
+
+    note_result = await _create_entity_verified(
+        base_url, note_name,
+        note_entity_data,
+    )
+    results["note_created"] = note_result.get("status") != "error"
+    if not results["note_created"]:
+        logger.error("[Note Links] Note hub '%s' failed to create: %s — aborting linking", note_name, note_result.get("error"))
+        return results
+
+    if date_label:
+        date_result = await _create_entity_verified(
+            base_url, date_label,
+            {"description": f"Calendar date {date_label[:-len(' (Date)')]}", "entity_type": "Date", "source_id": date_label},
+        )
+        results["date_created"] = date_result.get("status") != "error"
+
+        date_link = await _create_relation_verified(
+            base_url, note_name, date_label,
+            {"description": f"Note {file_source} written on {date_label}", "keywords": "written_on", "weight": 1.0},
+        )
+        results["date_link_created"] = date_link.get("status") not in ("error",)
+        logger.info("[Note Links] Linked Note '%s' -> Date '%s': %s", note_name, date_label, date_link.get("status"))
+
+        # Chain this Date node to the previous/next existing (Date) nodes so a
+        # note whose day has no photos still joins the timeline spine and
+        # reaches the main graph through neighbouring dates that do.  Only
+        # chain to dates that already exist in the graph.
+        date_base = date_label[:-len(" (Date)")]
+        try:
+            this_dt = datetime.strptime(date_base, "%Y-%m-%d")
+        except ValueError:
+            this_dt = None
+        if this_dt:
+            for delta in (-1, +1):
+                nb_label = (this_dt + timedelta(days=delta)).strftime("%Y-%m-%d") + " (Date)"
+                try:
+                    def _label_exists(l: str = nb_label) -> bool:
+                        req = Request(f"{base_url}/graph/entity/exists?name={url_quote(l, safe='')}", headers={"Content-Type": "application/json"})
+                        with urlopen(req, timeout=config.http_timeouts().short) as resp:
+                            return bool(json.loads(resp.read().decode("utf-8")).get("exists"))
+                    if not await asyncio.to_thread(_label_exists):
+                        continue
+                except Exception:
+                    continue
+                source, target = (date_label, nb_label) if date_label < nb_label else (nb_label, date_label)
+                chain_result = await _create_relation_verified(
+                    base_url, source, target,
+                    {"description": f"{source[:-len(' (Date)')]} is adjacent to {target[:-len(' (Date)')]}", "keywords": "adjacent_day", "weight": 1.0},
+                )
+                logger.info("[Note Links] Chained Date '%s' <-> '%s': %s", source, target, chain_result.get("status"))
+
+    # LightRAG joins file_path from multiple sources with <SEP>; an entity
+    # appearing in both a note and a photo has "note_X<SEP>IMG_Y".  Membership
+    # test (not equality) is required or the entity stays orphaned — same
+    # fix as link_exif_to_visual_entities:1543.
+    try:
+        def _get_labels() -> list[str]:
+            req = Request(f"{base_url}/graph/label/list", headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=config.http_timeouts().long) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        all_labels = await asyncio.to_thread(_get_labels)
+    except Exception as exc:
+        logger.warning("[Note Links] Failed to get graph labels: %s", exc)
+        return results
+
+    exif_suffixes = (" (Date)", " (Camera)", " (Location)", " (Photo)", " (Note)")
+    normalized_source = file_source.replace("\u202f", " ").replace("\u00a0", " ")
+
+    for label in all_labels:
+        if label.endswith(exif_suffixes):
+            continue
+        try:
+            def _get_neighbors(l: str = label) -> dict:
+                req = Request(
+                    f"{base_url}/graphs?label={url_quote(l, safe='')}&max_depth=1&max_nodes=500",
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(req, timeout=config.http_timeouts().short) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            graph_data = await asyncio.to_thread(_get_neighbors)
+        except Exception as exc:
+            logger.warning("[Note Links] Failed to get neighbors for '%s': %s", label, exc)
+            continue
+
+        for node in graph_data.get("nodes", []):
+            if node.get("id") != label:
+                continue
+            props = node.get("properties", {})
+            file_path = props.get("file_path", "")
+            normalized_path = file_path.replace("\u202f", " ").replace("\u00a0", " ")
+            path_parts = [p.strip() for p in normalized_path.split("<SEP>") if p.strip()]
+            if normalized_source not in path_parts:
+                continue
+
+            link_result = await _create_relation_verified(
+                base_url, label, note_name,
+                {"description": f"{label} appears in {file_source}", "keywords": "appears_in", "weight": 1.0},
+            )
+            logger.info("[Note Links] Linked '%s' -> '%s': status=%s", label, note_name, link_result.get("status", "?"))
+            link_result["source"] = label
+            link_result["target"] = note_name
+            results["visual_links_created"].append(link_result)
+            break
+
+    logger.info("[Note Links] Linking complete for %s: %d visual links, date=%s",
+                file_source, len(results["visual_links_created"]), date_label)
     return results
 
 
