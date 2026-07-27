@@ -28,16 +28,17 @@ download() {
 echo "═══ Downloading models to $MODEL_DIR ═══"
 echo ""
 
-# ─── LLM: Gemma 4 12B OBLITERATED ──────────────────────────────────────────────
-GEMMA_DIR="$MODEL_DIR/gemma4-12b-obliterated"
+# ─── LLM: Bonsai-27B (1-bit Q1_0, Prism ML) ───────────────────────────────────
+# Requires the PrismML-Eng llama.cpp fork — run ./scripts/build-llama-cpp.sh.
+BONSAI_DIR="$MODEL_DIR/bonsai-27b"
 download \
-    "https://huggingface.co/Crackdot/Gemma-4-12B-OBLITERATED-Q4_K_M/resolve/main/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf" \
-    "$GEMMA_DIR/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf" \
-    "Gemma-4-12B-OBLITERATED Q4_K_M"
+    "https://huggingface.co/prism-ml/Bonsai-27B-gguf/resolve/main/Bonsai-27B-Q1_0.gguf" \
+    "$BONSAI_DIR/Bonsai-27B-Q1_0.gguf" \
+    "Bonsai-27B Q1_0 (1-bit, 3.8 GB)"
 download \
-    "https://huggingface.co/Crackdot/Gemma-4-12B-OBLITERATED-Q4_K_M/resolve/main/mmproj-BF16.gguf" \
-    "$GEMMA_DIR/mmproj-BF16.gguf" \
-    "Gemma-4-12B mmproj (vision)"
+    "https://huggingface.co/prism-ml/Bonsai-27B-gguf/resolve/main/Bonsai-27B-mmproj-Q8_0.gguf" \
+    "$BONSAI_DIR/Bonsai-27B-mmproj-Q8_0.gguf" \
+    "Bonsai-27B mmproj Q8_0 (vision)"
 
 # ─── Embedding: BGE-M3 ─────────────────────────────────────────────────────────
 download \

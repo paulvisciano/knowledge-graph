@@ -7,9 +7,9 @@ Personal knowledge graph stack: LightRAG + local LLMs + custom UI.
 - **macOS with Apple Silicon** (Metal GPU for llama-server)
 - **Homebrew** — install: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 - **Docker Desktop** — install: `brew install --cask docker`, then open it. `scripts/start-all.sh` sets the VM memory from `DOCKER_VM_MEMORY_MIB` in `.env` (default 1.5 GiB) automatically; no manual Settings → Resources step needed.
-- **llama.cpp** — install: `brew install llama.cpp`. **Must be version 9750+** (commit `bf533823c` or later, from June 2026+) for `gemma4uv` projector support. Older versions will crash when loading the mmproj with `unknown projector type: gemma4uv`. Check with `llama-server --version` and upgrade if needed: `brew upgrade llama.cpp`.
-- **whisper.cpp** — install: `brew install whisper-cpp`. Provides `whisper-server`, which runs the transcription model on the Metal GPU on the host (same pattern as llama-server). Required for voice memo transcription; if missing, `start-llama-servers.sh` skips it with a warning and the chat UI disables audio transcription.
-- **~11 GB disk space** for model files (includes Whisper)
+- **llama.cpp** — install: `./scripts/build-llama-cpp.sh`. Bonsai-27B uses 1-bit `Q1_0_g128` packed weights that are **not in upstream llama.cpp** — the build script clones the [PrismML-Eng fork](https://github.com/PrismML-Eng/llama.cpp) (branch `prism`) which carries the 1-bit Metal kernels. The Homebrew bottle will refuse to load the GGUF. The build lands at `vendor/llama.cpp/src/build/bin/llama-server` and `start-llama-servers.sh` picks it up automatically.
+- **whisper.cpp** — install: `brew install whisper-cpp`. **Must be version 1.9.1+** — older versions (1.8.x) have a language-detection bug against `ggml-large-v3-turbo` that returns `p = nan` and produces empty transcripts (`{"text":""}`). Check with `brew info whisper-cpp` and upgrade if needed: `brew upgrade whisper-cpp`. Provides `whisper-server`, which runs the transcription model on the Metal GPU on the host (same pattern as llama-server). Required for voice memo transcription; if missing, `start-llama-servers.sh` skips it with a warning and the chat UI disables audio transcription.
+- **~7 GB disk space** for model files (includes Whisper)
 
 ## Quick Start
 
@@ -51,23 +51,23 @@ open http://localhost:3000
 
 | Model | File | Size |
 |-------|------|------|
-| LLM (Gemma 4 12B) | `Gemma-4-12B-OBLITERATED-Q4_K_M.gguf` | ~6.9 GB |
-| Vision projection (mmproj) | `mmproj-BF16.gguf` | ~2.3 GB |
+| LLM (Bonsai-27B, 1-bit) | `Bonsai-27B-Q1_0.gguf` | ~3.8 GB |
+| Vision projection (mmproj) | `Bonsai-27B-mmproj-Q8_0.gguf` | ~629 MB |
 | Embedding (BGE-M3) | `bge-m3-Q4_K_M.gguf` | ~1.1 GB |
 | Reranker (bge-reranker-v2-m3) | `bge-reranker-v2-m3-Q4_K_M.gguf` | ~418 MB |
 | Transcription (Whisper) | `whisper/ggml-large-v3-turbo.bin` | ~1.5 GB |
 
-> **Why mmproj?** Gemma 4 has a vision architecture, but in llama.cpp the vision encoder weights are a separate file. The base GGUF contains only the language model — `mmproj-BF16.gguf` is the vision projection that maps image pixels into the model's embedding space. Without it, `llama-server` cannot process images. The start script passes it via `--mmproj`.
+> **Why mmproj?** Bonsai-27B is built on Qwen3.6-27B, which has a vision tower. In llama.cpp the vision encoder weights ship as a separate file — the base GGUF holds only the language model, and `Bonsai-27B-mmproj-Q8_0.gguf` is the vision projection that maps image pixels into the model's embedding space. Without it, `llama-server` cannot process images. The start script passes it via `--mmproj`.
 >
-> **mmproj compatibility:** The Gemma 4 12B mmproj uses the `gemma4uv` projector type, which requires llama.cpp **v9750+** (June 2026 or later). If your llama.cpp is older, you'll see `unknown projector type: gemma4uv` and the server will fail to start. Fix: `brew upgrade llama.cpp`. If you can't upgrade, move the mmproj aside (`mv mmproj-BF16.gguf mmproj-BF16.gguf.bak`) — the start script will skip `--mmproj` and the API will fall back to EXIF-only image processing (no visual descriptions, but EXIF metadata like location, date, and camera still works).
+> **Fork requirement:** Bonsai's `Q1_0_g128` packed 1-bit weights need custom Metal/CUDA kernels that live only in the [PrismML-Eng llama.cpp fork](https://github.com/PrismML-Eng/llama.cpp). Stock llama.cpp (Homebrew or `ggml-org/master`) will fail with an unknown-tensor-type error. Fix: run `./scripts/build-llama-cpp.sh`, which clones the fork and builds with `GGML_METAL=ON`. If you can't build the fork, move the mmproj aside (`mv Bonsai-27B-mmproj-Q8_0.gguf Bonsai-27B-mmproj-Q8_0.gguf.bak`) — the start script will skip `--mmproj` and the API will fall back to EXIF-only image processing (no visual descriptions, but EXIF metadata like location, date, and camera still works).
 
 Search for each model on [HuggingFace](https://huggingface.co/models) and download the `.gguf` file. Directory layout:
 
 ```
 ~/models/
-├── gemma4-12b-obliterated/
-│   ├── Gemma-4-12B-OBLITERATED-Q4_K_M.gguf
-│   └── mmproj-BF16.gguf
+├── bonsai-27b/
+│   ├── Bonsai-27B-Q1_0.gguf
+│   └── Bonsai-27B-mmproj-Q8_0.gguf
 ├── bge-m3/
 │   └── bge-m3-Q4_K_M.gguf
 ├── bge-reranker-v2-m3/
@@ -83,7 +83,7 @@ Search for each model on [HuggingFace](https://huggingface.co/models) and downlo
 Host llama-servers + whisper-server:
 
 ```sh
-curl -sf http://localhost:8080/health   # LLM (Gemma 4 12B + mmproj)
+curl -sf http://localhost:8080/health   # LLM (Bonsai-27B + mmproj)
 curl -sf http://localhost:8081/health   # Embeddings (BGE-M3)
 curl -sf http://localhost:8082/health   # Reranker (bge-reranker-v2-m3)
 curl -sf http://localhost:8090/health   # Whisper transcription

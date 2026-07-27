@@ -18,3 +18,14 @@ secrets/
 known_faces/*/
 known_faces/*.pkl
 inputs/*
+vendor/
+docs/
+lightrag/
+*.gguf
+*.bin
+*.pkl
+*.png
+*.jpg
+*.jpeg
+*.html
+tmp/

@@ -14,11 +14,11 @@ EMBED_PORT="${EMBED_MODEL_PORT:-8081}"
 RERANK_PORT="${RERANKER_PORT:-8082}"
 WHISPER_PORT="${WHISPER_PORT:-8090}"
 
-LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/gemma4-12b-obliterated/Gemma-4-12B-OBLITERATED-Q4_K_M.gguf}"
-LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Gemma-4-12B-OBLITERATED-Q4_K_M}"
+LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/bonsai-27b/Bonsai-27B-Q1_0.gguf}"
+LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Bonsai-27B-Q1_0}"
 EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
 RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
-MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/gemma4-12b-obliterated/mmproj-BF16.gguf}"
+MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/bonsai-27b/Bonsai-27B-mmproj-Q8_0.gguf}"
 WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-large-v3-turbo.bin}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
@@ -84,9 +84,9 @@ echo "Starting LLM on port ${LLM_PORT}..."
     --alias "$LLM_MODEL_ALIAS" \
     $MMPROJ_FLAG \
     --image-max-tokens 280 --image-min-tokens 40 \
-    -c 32768 -b 2048 -ub 2048 \
+    -c 131072 -b 2048 -ub 2048 \
     -ctk q4_0 -ctv q4_0 \
-    -np 4 -fa on -cram 0 -ngl 99 \
+    -np 2 -fa on -cram 0 -ngl 99 \
     --reasoning off --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &

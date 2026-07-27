@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build llama.cpp from source with Metal GPU support.
+# Build the PrismML-Eng llama.cpp fork from source with Metal GPU support.
 #
-# The Homebrew bottle of llama.cpp ships WITHOUT Metal support — the model
-# runs entirely on CPU at 4-7 tok/s instead of 20-40 tok/s on Apple Silicon.
-# This script clones the official repo, builds with GGML_METAL=ON, and
-# installs the binaries (llama-server + shared libs) into vendor/llama.cpp/.
+# Bonsai-27B uses custom Q1_0_g128 packed 1-bit weights with hybrid-attention
+# kernels that are NOT in upstream llama.cpp. Stock llama.cpp (Homebrew or
+# ggml-org/master) will fail to load Bonsai GGUFs. This script clones the
+# PrismML-Eng fork (default branch: `prism`), which carries the 1-bit Metal
+# kernels, and builds with GGML_METAL=ON into vendor/llama.cpp/.
+#
+# The Homebrew bottle of llama.cpp also ships WITHOUT Metal support — the
+# model would run on CPU at 4-7 tok/s instead of 20-40 tok/s on Apple Silicon.
 #
 # The start-llama-servers.sh script will prefer this build over the Homebrew
-# binary if it exists.  If the build is missing, it falls back to Homebrew.
+# binary if it exists.  If the build is missing, it falls back to Homebrew
+# (which will NOT be able to load Bonsai — re-run this script first).
 #
 # Usage:
 #   ./scripts/build-llama-cpp.sh          # clone + build
@@ -23,10 +28,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENDOR_DIR="$PROJECT_DIR/vendor/llama.cpp"
 LLAMA_SRC="$VENDOR_DIR/src"
-LLAMA_BUILD="$VENDOR_SRC/build"
+LLAMA_BUILD="$LLAMA_SRC/build"
 
-LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
-LLAMA_BRANCH="master"
+LLAMA_REPO="https://github.com/PrismML-Eng/llama.cpp.git"
+LLAMA_BRANCH="prism"
 
 # Some CommandLineTools installs have a broken libc++ discovery — clang can't
 # auto-find <array> etc.  Pass the SDK include path explicitly.
@@ -42,7 +47,7 @@ echo "C++ include: ${CXX_INCLUDE:-<auto>}"
 echo ""
 
 # Clone or update
-if [[ "$1" == "--update" && -d "$LLAMA_SRC/.git" ]]; then
+if [[ "${1:-}" == "--update" && -d "$LLAMA_SRC/.git" ]]; then
     echo "Updating existing clone..."
     cd "$LLAMA_SRC"
     git fetch origin "$LLAMA_BRANCH"

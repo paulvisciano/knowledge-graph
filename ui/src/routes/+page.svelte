@@ -247,6 +247,24 @@
     }
   }
 
+  // Wheel handler — catches the case where the user is already at scrollTop===0
+  // (or the content fits the viewport so scrollTop is always 0) and scrolls up
+  // with the mouse wheel. In that scenario the browser never fires a `scroll`
+  // event because the position doesn't change, so `handleMessagesScroll` alone
+  // would never trigger `loadOlderConversation`.
+  function handleMessagesWheel(e: WheelEvent) {
+    if (suppressScrollLoad || !messagesContainer) return;
+    // Only interested in scroll-up gestures (negative deltaY).
+    if (e.deltaY >= 0) return;
+    // Already at the top (or content too short to scroll).
+    if (messagesContainer.scrollTop > 0) return;
+    if (!isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable) {
+      atTop = true;
+      nearTop = true;
+      loadOlderConversation();
+    }
+  }
+
   // The active conversation object, for the divider label above the active
   // messages. Kept as a derived so the divider re-renders when the active
   // conversation changes or its title updates.
@@ -675,28 +693,16 @@
      const maxTurns = 10;
      let turn = 0;
 
-      type ContentPart = { type: string; text?: string; image_url?: { url: string }; input_audio?: { data: string; format: string } };
-      type ApiMessage = { role: string; content: string | ContentPart[] | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } | { role: 'tool'; tool_call_id: string; content: string };
-      let apiMessages: ApiMessage[] = [
-        { role: 'system', content: configStore.systemPrompt.replaceAll('{{CURRENT_DATE}}', new Date().toISOString().slice(0, 10)) },
-        ...messages
-          .filter((m) => !m.isStreaming)
-          .map((m) => {
-            if (m.role === 'user' && m.audioData) {
-              const parts: ContentPart[] = [];
-              if (m.content.trim()) parts.push({ type: 'text', text: m.content });
-              parts.push({ type: 'input_audio', input_audio: { data: m.audioData, format: m.audioFormat ?? 'wav' } });
-              return { role: m.role, content: parts } as ApiMessage;
-            }
-            return { role: m.role, content: m.content } as ApiMessage;
-          })
-      ];
-
-      const audioMsg = apiMessages.find((m) => 'content' in m && Array.isArray(m.content) && m.content.some((p: ContentPart) => p.type === 'input_audio'));
-      if (audioMsg) {
-        const audioPart = (audioMsg.content as ContentPart[]).find((p: ContentPart) => p.type === 'input_audio');
-        console.log('[audio] Sending input_audio to model, format:', audioPart?.input_audio?.format, 'data length:', audioPart?.input_audio?.data?.length);
-      }
+       type ContentPart = { type: string; text?: string; image_url?: { url: string } };
+       type ApiMessage = { role: string; content: string | ContentPart[] | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } | { role: 'tool'; tool_call_id: string; content: string };
+       let apiMessages: ApiMessage[] = [
+         { role: 'system', content: configStore.systemPrompt.replaceAll('{{CURRENT_DATE}}', new Date().toISOString().slice(0, 10)) },
+         ...messages
+           .filter((m) => !m.isStreaming)
+           .map((m) => {
+             return { role: m.role, content: m.content } as ApiMessage;
+           })
+       ];
 
       if (sentAttachments.length > 0) {
         let lastUserMsg = -1;
@@ -977,10 +983,24 @@
             parsedKG = parsed;
             const markerIdx = toolResult.indexOf('---IMAGE_REFS---');
             displayResult = markerIdx !== -1 ? toolResult.slice(0, markerIdx).trimEnd() : toolResult;
+            const MAX_TOOL_CHARS = 6000;
+            let toolContent = parsed.contextText;
+            if (toolContent.length > MAX_TOOL_CHARS) {
+              const relIdx = toolContent.indexOf('Knowledge Graph Data (Relationship)');
+              if (relIdx !== -1 && relIdx < MAX_TOOL_CHARS) {
+                const truncated = toolContent.slice(0, MAX_TOOL_CHARS);
+                const lastNl = truncated.lastIndexOf('\n');
+                toolContent = toolContent.slice(0, lastNl !== -1 ? lastNl : MAX_TOOL_CHARS) + '\n```';
+              } else {
+                const truncated = toolContent.slice(0, MAX_TOOL_CHARS);
+                const lastNl = truncated.lastIndexOf('\n');
+                toolContent = truncated.slice(0, lastNl !== -1 ? lastNl : MAX_TOOL_CHARS);
+              }
+            }
             apiMessages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: parsed.contextText,
+              content: toolContent,
             });
 
             if (parsed.imagePaths.length > 0) {
@@ -1737,6 +1757,7 @@
           class="chat-inline-messages"
           data-testid="messages-container"
           onscroll={handleMessagesScroll}
+          onwheel={handleMessagesWheel}
         >
           {#if nearTop && !isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable}
             <div class="chat-scroll-hint" data-testid="scroll-load-hint">
