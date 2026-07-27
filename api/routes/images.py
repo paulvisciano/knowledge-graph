@@ -148,8 +148,23 @@ async def _emit_exif_entities(
 
     if exif_dimensions:
         yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
-        try:
-            exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
+        exif_result = None
+        max_create_attempts = 3
+        for attempt in range(max_create_attempts):
+            try:
+                exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
+                failed_entities = [e for e in exif_result.get("entities_created", []) if e.get("status") == "error"]
+                if not failed_entities:
+                    break
+                logger.warning("[EXIF] attempt %d/%d had %d failed entities for %s, retrying",
+                               attempt + 1, max_create_attempts, len(failed_entities), file_source)
+            except Exception as exc:
+                logger.warning("[EXIF] attempt %d/%d raised for %s: %s",
+                                attempt + 1, max_create_attempts, file_source, exc)
+                exif_result = None
+            if attempt < max_create_attempts - 1:
+                await asyncio.sleep(2.0 * (attempt + 1))
+        if exif_result:
             for entity in exif_result.get("entities_created", []):
                 if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
                     entity["entity_name"] = entity["data"].get("entity_name", "")
@@ -160,9 +175,9 @@ async def _emit_exif_entities(
                 tgt = relation.get("target") or relation.get("target_entity") or ""
                 yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_relation_created", "data": {"source": src, "target": tgt, "relation_type": relation.get("keywords", "has_exif")}, "timestamp": time.time()}))
             yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_complete", "data": {"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}, "timestamp": time.time()}))
-        except Exception as exc:
-            logger.exception("EXIF entity creation failed for %s", file_source)
-            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": str(exc)}, "timestamp": time.time()}))
+        else:
+            logger.error("EXIF entity creation failed for %s after %d attempts", file_source, max_create_attempts)
+            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": "max retries exceeded", "exif_dimensions": exif_dimensions}, "timestamp": time.time()}))
 
 
 async def _run_exif_phase(
@@ -500,8 +515,23 @@ async def process_image_json(
                 exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
 
             if exif_dimensions:
-                try:
-                    exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
+                exif_result = None
+                max_create_attempts = 3
+                for attempt in range(max_create_attempts):
+                    try:
+                        exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
+                        failed_entities = [e for e in exif_result.get("entities_created", []) if e.get("status") == "error"]
+                        if not failed_entities:
+                            break
+                        logger.warning("[EXIF] attempt %d/%d had %d failed entities for %s, retrying",
+                                       attempt + 1, max_create_attempts, len(failed_entities), file_source)
+                    except Exception as exc:
+                        logger.warning("[EXIF] attempt %d/%d raised for %s: %s",
+                                        attempt + 1, max_create_attempts, file_source, exc)
+                        exif_result = None
+                    if attempt < max_create_attempts - 1:
+                        await asyncio.sleep(2.0 * (attempt + 1))
+                if exif_result:
                     for entity in exif_result.get("entities_created", []):
                         if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
                             entity["entity_name"] = entity["data"].get("entity_name", "")
@@ -513,9 +543,9 @@ async def process_image_json(
                         relation["source"] = src
                         relation["target"] = tgt
                     events.append(ProcessingEvent(event="exif_entities_complete", data={"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}))
-                except Exception as exc:
-                    logger.exception("EXIF entity creation failed for %s", file_source)
-                    events.append(ProcessingEvent(event="exif_entities_failed", data={"error": str(exc)}))
+                else:
+                    logger.error("EXIF entity creation failed for %s after %d attempts", file_source, max_create_attempts)
+                    events.append(ProcessingEvent(event="exif_entities_failed", data={"error": "max retries exceeded"}))
 
         # Phase 3: Upload to LightRAG
         upload_result = None

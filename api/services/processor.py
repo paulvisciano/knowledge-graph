@@ -1351,6 +1351,14 @@ def _find_matching_entity(entity_name: str, existing_labels: set[str], threshold
     if entity_name.endswith(" (Photo)"):
         return None
 
+    # Date entities are structured identifiers (YYYY-MM-DD), not names
+    # subject to typos. SequenceMatcher sees "2026-06-28" vs "2026-06-27"
+    # as 0.90 similar and links June 28 photos to the June 27 Date node,
+    # polluting the graph with wrong-date edges (adjacent-day bug).
+    # Require exact match only.
+    if entity_name.endswith(" (Date)"):
+        return None
+
     target_norm = _normalize_for_matching(entity_name)
 
     best_match: str | None = None
