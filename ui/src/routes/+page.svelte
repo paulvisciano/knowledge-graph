@@ -752,7 +752,14 @@
 
         if (tools.length > 0) {
           requestBody.tools = tools;
-          requestBody.tool_choice = 'auto';
+          // Turn 1: force a tool call. The model (Bonsai-27B-Q1_0) reliably
+          // skips tool calls under tool_choice='auto' and emits the literal
+          // confirmation string ("Saved.") from the system prompt instead.
+          // 'required' makes llama-server apply a grammar that guarantees a
+          // tool_call is produced, so logging/retrieval always hits the graph.
+          // Turn 2+: allow 'auto' so the model can give its final conversational
+          // reply after the tool result is fed back.
+          requestBody.tool_choice = turn === 1 ? 'required' : 'auto';
         }
 
         // If the stream was cancelled between turns, bail out
