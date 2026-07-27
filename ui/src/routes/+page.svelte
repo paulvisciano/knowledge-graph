@@ -858,12 +858,6 @@
                   if (streamingConversationId === activeConversationId) {
                     isProcessing = false;
                   }
-                  // Clear composing state on all previous tool calls — the model
-                  // has started writing its answer, so tool calls are no longer pending.
-                  messages = messages.map((m) => ({
-                    ...m,
-                    mcpToolCalls: m.mcpToolCalls?.map((tc) => ({ ...tc, composing: false })),
-                  }));
                 }
                 accumulatedContent += delta.content;
                 // Throttled update: buffer and flush on next animation frame
@@ -1040,7 +1034,7 @@
             ...m,
             mcpToolCalls: m.mcpToolCalls?.map((mtc) =>
               mtc.id === tc.id
-                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG, composing: true }
+                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG }
                 : mtc
             ),
           }));
@@ -1384,6 +1378,15 @@
   async function deleteConversation(id: string) {
     cancelStreaming();
     conversations = conversations.filter((c) => c.id !== id);
+    // Remove the deleted conversation from the scroll-up buffer too,
+    // otherwise its messages keep rendering below the (now-hidden) divider
+    // because `{#each olderConversationIds}` + `olderConversationMessages`
+    // are not gated on `conversations` containing the id.
+    if (olderConversationIds.includes(id)) {
+      olderConversationIds = olderConversationIds.filter((cid) => cid !== id);
+      const { [id]: _removed, ...rest } = olderConversationMessages;
+      olderConversationMessages = rest;
+    }
     syncClient.deleteConversation(id);
     if (activeConversationId === id) {
       const next = conversations[0];
@@ -1944,26 +1947,21 @@
                         {@const entityCount = parsed ? parsed.entities.length : 0}
                         {@const relCount = parsed ? parsed.relationships.length : 0}
                         {@const isRunning = !toolCall.result && !toolCall.isError}
-                        {@const isComposing = toolCall.composing && !toolCall.isError}
                         {@const hasPhotos = parsed && parsed.imagePaths.length > 0 && msg.imageUrls && msg.imageUrls.length > 0}
                         {@const isSave = toolCall.toolName === 'save_to_knowledge_graph'}
                         {@const savedText = isSave ? String(toolCall.arguments?.text ?? '') : ''}
                         <details class="group" open={false} data-testid="tool-call" data-tool-name={toolCall.toolName} data-tool-call-id={toolCall.id || ''}>
-                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : isComposing ? 'border-cyber-purple/30 bg-cyber-purple/5 hover:bg-cyber-purple/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
+                          <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors {toolCall.isError ? 'border-cyber-red/30 bg-cyber-red/5 hover:bg-cyber-red/10' : toolCall.result ? 'border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10' : 'border-cyber-orange/30 bg-cyber-orange/5 hover:bg-cyber-orange/10'}" data-testid="tool-call-summary">
                             {#if toolCall.isError}
                               <svg class="h-3.5 w-3.5 shrink-0 text-cyber-red" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                            {:else if isComposing}
-                              <span class="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyber-purple"></span>
                             {:else if toolCall.result}
                               <svg class="h-3.5 w-3.5 shrink-0 text-cyber-green" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
                             {:else}
                               <span class="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-cyber-orange"></span>
                             {/if}
-                            <span class="font-mono {toolCall.isError ? 'text-cyber-red' : isComposing ? 'text-cyber-purple' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{isSave ? 'Saved to knowledge graph' : 'Searched knowledge graph'}</span>
+                            <span class="font-mono {toolCall.isError ? 'text-cyber-red' : toolCall.result ? 'text-cyber-green' : 'text-cyber-orange'}">{isSave ? (isRunning ? 'Saving to knowledge graph' : 'Saved to knowledge graph') : (isRunning ? 'Searching knowledge graph' : 'Searched knowledge graph')}</span>
                             {#if isRunning}
                               <span class="text-[10px] text-cyber-orange/80 animate-pulse">{isSave ? 'saving...' : 'looking...'}</span>
-                            {:else if isComposing}
-                              <span class="text-[10px] text-cyber-purple/80 animate-pulse">thinking...</span>
                             {:else if isSave && savedText}
                               <span class="truncate text-[10px] text-cyber-text-dim/70">{savedText}</span>
                             {:else if parsed}
@@ -2166,10 +2164,10 @@
                 </span>
                 <span class="chat-conversation-divider-line"></span>
               </div>
+              {#each convMsgs as msg (msg.id)}
+                {@render messageRow(msg)}
+              {/each}
             {/if}
-            {#each convMsgs as msg (msg.id)}
-              {@render messageRow(msg)}
-            {/each}
           {/each}
 
           {#if configStore.systemPrompt.trim()}
