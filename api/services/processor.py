@@ -1191,34 +1191,34 @@ async def upload_image_to_lightrag(
 
     LightRAG's /documents/upload only accepts text-based file types, so we
     can't upload .jpg directly. Instead, we:
-    1. Send the image to the VLM (Gemma 4 with mmproj) to generate a description
-    2. Combine the VLM description with any available metadata (EXIF, faces)
-    3. Insert the combined text as a single document into LightRAG
+    1. Send the image to the VLM to generate a description of the visual content
+    2. Insert the VLM description as a single document into LightRAG
 
-    Combining VLM description and metadata into one document ensures that
-    entities from both sources (e.g. location from EXIF, objects from VLM)
-    are extracted together and properly linked in the knowledge graph,
-    rather than creating disconnected subgraphs.
+    EXIF metadata (location, date, camera) is deliberately excluded from the
+    LightRAG document — those facts are created as typed entities separately
+    via create_exif_relations. Including them here would cause the LLM to emit
+    duplicate untyped entities overlapping the EXIF nodes.
+
+    ``metadata_text`` is retained as a parameter for caller compatibility but
+    is not used.
     """
+    # The VLM must describe only what is visually in the image. EXIF facts
+    # (location/date/camera) are created as typed entities separately via
+    # create_exif_relations, so feeding them to the VLM/LLM here produces
+    # duplicate untyped entities that overlap the EXIF nodes.
     try:
-        vlm_context = None
-        if metadata_text:
-            vlm_context = metadata_text.split("\n")[0]
         description = await describe_image_with_vlm(
-            image_path, context=vlm_context, on_queued=on_queued
+            image_path, context=None, on_queued=on_queued
         )
     except Exception as exc:
         logger.exception("VLM description failed for %s", image_path)
-        if metadata_text:
-            logger.info("Falling back to EXIF-only insertion for %s", image_path)
-            file_name = filename or Path(image_path).name
-            fallback_text = f"Image: {file_name}\n\n[Image description unavailable — visual analysis failed.]\n\n{metadata_text}"
-            return await insert_metadata_into_lightrag(
-                lightrag_url,
-                fallback_text,
-                file_name,
-            )
-        return {"status": "error", "reason": "vlm_description_failed", "detail": str(exc)}
+        file_name = filename or Path(image_path).name
+        fallback_text = f"Image: {file_name}\n\n[Image description unavailable — visual analysis failed.]"
+        return await insert_metadata_into_lightrag(
+            lightrag_url,
+            fallback_text,
+            file_name,
+        )
 
     file_name = filename or Path(image_path).name
 
