@@ -377,6 +377,34 @@
   // resolves sees isRecording=false and starts ANOTHER recording, or a press
   // during stopRecording()'s await re-enters and throws "No active recording".
   let micBusy = $state(false);
+  // Push-to-talk on the mic button. Press and hold for HOLD_TO_RECORD_MS to
+  // start recording (a 3..2..1 countdown is shown while holding). Release after
+  // the countdown completes stops the recording and sends the transcript. A
+  // quick tap (release before TAP_THRESHOLD_MS) does NOT record — on the
+  // collapsed orb it reveals the sibling options (Type / Add images), on the
+  // expanded panel it focuses the textarea. Releasing mid-count cancels.
+  const HOLD_TO_RECORD_MS = 3000;
+  const HOLD_TICK_MS = 50;
+  const TAP_THRESHOLD_MS = 350;
+  let holdActive = $state(false); // pointer is down (counting or recording)
+  let holdElapsed = $state(0); // ms accumulated toward HOLD_TO_RECORD_MS
+  let holdCountdown = $derived(
+    Math.max(1, Math.ceil((HOLD_TO_RECORD_MS - holdElapsed) / 1000))
+  );
+  let holdTimer: ReturnType<typeof setInterval> | null = null;
+  // Collapsed orb: a tap toggles the sibling "Add images" / "Type a message"
+  // options open (pinned), complementing the existing CSS hover reveal.
+  let orbOptionsOpen = $state(false);
+  // Hover tooltip for the mic button. The native title attribute flashes on
+  // focus and can't be styled, so we render a small custom tooltip instead.
+  let micTooltipVisible = $state(false);
+  let micTooltipMessage = $derived(
+    isTranscribing
+      ? 'Transcribing…'
+      : isRecording
+        ? 'Release to send'
+        : 'Hold to record'
+  );
   let promptEditing = $state(false);
   let promptDraft = $state('');
   let promptSaving = $state(false);
@@ -447,6 +475,102 @@
       }
     } finally {
       micBusy = false;
+    }
+  }
+
+  // ── Push-to-talk ──────────────────────────────────────────────
+  // pointerdown on the mic button starts a timer. If held for
+  // HOLD_TO_RECORD_MS, recording begins (push-to-talk). pointerup either
+  // cancels the in-progress countdown (short hold) or stops + sends the
+  // recording (release to send). A tap below TAP_THRESHOLD_MS is treated as a
+  // click: on the collapsed orb it toggles the sibling options, on the
+  // expanded panel it focuses the textarea. Recording also forces the orb
+  // options closed so the countdown is unobstructed.
+  async function handleMicPointerDown(e: PointerEvent) {
+    if (!audioRecorder || !recordingSupported) return;
+    if (isTranscribing || micBusy) return;
+    // Stop the browser from starting a text-selection drag / context menu.
+    e.preventDefault();
+    holdActive = true;
+    holdElapsed = 0;
+    orbOptionsOpen = false; // hide options while counting/recording
+    holdTimer = setInterval(() => {
+      holdElapsed += HOLD_TICK_MS;
+      if (holdElapsed >= HOLD_TO_RECORD_MS) {
+        if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+        startPushToTalk();
+      }
+    }, HOLD_TICK_MS);
+  }
+
+  async function startPushToTalk() {
+    if (!audioRecorder) return;
+    try {
+      await audioRecorder.startRecording();
+      isRecording = true;
+    } catch (err) {
+      console.error('Failed to start push-to-talk recording:', err);
+      holdActive = false;
+      holdElapsed = 0;
+    }
+  }
+
+  async function handleMicPointerUp() {
+    const wasHolding = holdActive;
+    const elapsed = holdElapsed;
+    holdActive = false;
+    holdElapsed = 0;
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+
+    if (!wasHolding) return;
+    if (isRecording) {
+      // Held past the countdown → release sends the recording.
+      isRecording = false;
+      micBusy = true;
+      isTranscribing = true;
+      try {
+        const wavBlob = await audioRecorder!.stopRecording();
+        const audioUrl = URL.createObjectURL(wavBlob);
+        const audioData = await blobToBase64(wavBlob);
+        const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+        const text = transcript.trim();
+        if (text) await handleSend(audioUrl, audioData, 'wav', false, text);
+      } catch (err) {
+        console.error('Push-to-talk send failed:', err);
+      } finally {
+        isTranscribing = false;
+        micBusy = false;
+      }
+    } else if (elapsed < TAP_THRESHOLD_MS) {
+      // Tap → toggle the orb's sibling options (Type / Add images).
+      orbOptionsOpen = !orbOptionsOpen;
+    }
+    // Released mid-countdown (> TAP_THRESHOLD_MS but < HOLD_TO_RECORD_MS):
+    // cancel silently.
+  }
+
+  function handleMicPointerLeave() {
+    // Pointer left the button while still counting/recording → treat as
+    // release-to-send if recording, otherwise cancel the countdown.
+    if (!holdActive) return;
+    if (isRecording) {
+      handleMicPointerUp();
+    } else {
+      holdActive = false;
+      holdElapsed = 0;
+      if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+    }
+  }
+
+  function handleMicPointerCancel() {
+    holdActive = false;
+    holdElapsed = 0;
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+    if (isRecording) {
+      // Abort an in-flight recording without sending.
+      isRecording = false;
+      micBusy = true;
+      audioRecorder?.stopRecording().finally(() => { micBusy = false; });
     }
   }
 
@@ -2399,18 +2523,28 @@
               </button>
             {:else}
               <button
-                onclick={handleMicClick}
+                onpointerdown={handleMicPointerDown}
+                onpointerup={handleMicPointerUp}
+                onpointerleave={handleMicPointerLeave}
+                onpointercancel={handleMicPointerCancel}
+                onmouseenter={() => { micTooltipVisible = true; }}
+                onmouseleave={() => { micTooltipVisible = false; }}
                 disabled={isTranscribing || !recordingSupported}
                 data-testid="mic-button"
-                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
-                class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : 'Hold to record'}
+                class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
               >
                 {#if isRecording}
                   <Icon name="square" size={16} />
                 {:else if isTranscribing}
                   <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                {:else if holdActive}
+                  <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
                 {:else}
                   <Icon name="mic" size={22} />
+                {/if}
+                {#if micTooltipVisible && !holdActive && !isRecording}
+                  <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
                 {/if}
               </button>
             {/if}
@@ -2420,24 +2554,40 @@
             <div
               class="chat-orb"
               class:recording={isRecording}
+              class:holding={holdActive}
+              class:options-open={orbOptionsOpen}
               role="button"
               tabindex="0"
-              aria-label={isRecording ? 'Stop recording' : 'Voice input'}
+              aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : 'Voice input'}
               data-od-id="chat-orb"
               data-testid="mic-button"
-              onclick={handleMicClick}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleMicClick(); } }}
+              onpointerdown={handleMicPointerDown}
+              onpointerup={handleMicPointerUp}
+              onpointerleave={handleMicPointerLeave}
+              onpointercancel={handleMicPointerCancel}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); orbOptionsOpen = !orbOptionsOpen; } }}
+              onmouseenter={() => { micTooltipVisible = true; }}
+              onmouseleave={() => { micTooltipVisible = false; }}
             >
               {#if isTranscribing}
                 <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
               {:else if isRecording}
                 <Icon name="square" size={16} />
+              {:else if holdActive}
+                <span class="hold-countdown" data-testid="hold-countdown">{holdCountdown}</span>
               {:else}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              {/if}
+              {#if holdActive && !isRecording}
+                <span class="hold-progress" style="inset: {((holdElapsed / HOLD_TO_RECORD_MS) * 100).toFixed(1)}%;" aria-hidden="true"></span>
+              {/if}
+              {#if micTooltipVisible && !holdActive && !isRecording}
+                <span class="mic-tooltip" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
               {/if}
             </div>
             <div
               class="chat-orb-add"
+              class:show={orbOptionsOpen}
               role="button"
               tabindex="0"
               aria-label="Add images"
@@ -2452,6 +2602,7 @@
             </div>
             <div
               class="chat-orb-expand"
+              class:show={orbOptionsOpen}
               role="button"
               tabindex="0"
               aria-label="Type a message"
@@ -2697,6 +2848,102 @@
       0 0 0 1px oklch(72% 0.15 150 / 10%),
       0 0 24px oklch(72% 0.15 150 / 12%),
       0 12px 40px oklch(0% 0 0 / 50%);
+  }
+
+  /* ── Push-to-talk: hold countdown + progress ring on the orb ── */
+  .chat-orb.holding {
+    border-color: oklch(82% 0.14 210 / 50%);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 25%),
+      0 0 48px oklch(82% 0.14 210 / 35%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+    transform: scale(1.06);
+  }
+  .chat-orb .hold-countdown {
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-cyber-cyan);
+    line-height: 1;
+    z-index: 2;
+  }
+  .chat-orb .hold-progress {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid oklch(82% 0.14 210 / 35%);
+    pointer-events: none;
+    transition: inset 0.05s linear;
+    z-index: 1;
+  }
+  /* While holding/recording the sibling option pills stay hidden even if the
+   * pointer is technically over the container. */
+  .chat-orb.holding ~ .chat-orb-add,
+  .chat-orb.holding ~ .chat-orb-expand {
+    opacity: 0 !important;
+    transform: translateY(20px) scale(0.9) !important;
+    pointer-events: none !important;
+  }
+  /* Tap-to-reveal: pin the sibling options open independent of hover. */
+  .chat-orb.options-open ~ .chat-orb-add,
+  .chat-orb.options-open ~ .chat-orb-expand {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .chat-orb-add.show,
+  .chat-orb-expand.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  /* ── Hover tooltip for the mic button (both orb + panel) ── */
+  /* Default: appears to the RIGHT of the button. */
+  .mic-tooltip {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: oklch(14% 0.02 255 / 92%);
+    backdrop-filter: blur(12px) saturate(1.5);
+    -webkit-backdrop-filter: blur(12px) saturate(1.5);
+    border: 1px solid oklch(82% 0.14 210 / 25%);
+    color: var(--color-cyber-text);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 60;
+    box-shadow: 0 8px 24px oklch(0% 0 0 / 50%);
+    animation: micTooltipIn 0.15s ease-out;
+  }
+  .mic-tooltip::after {
+    content: '';
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: oklch(82% 0.14 210 / 25%);
+  }
+  /* On the expanded chat panel the mic button sits flush against the right
+   * edge of the input row, so a right-side tooltip would overflow the panel.
+   * Flip it to the LEFT there. */
+  .mic-tooltip-left {
+    left: auto;
+    right: calc(100% + 10px);
+  }
+  .mic-tooltip-left::after {
+    right: auto;
+    left: 100%;
+    border-right-color: transparent;
+    border-left-color: oklch(82% 0.14 210 / 25%);
+  }
+  @keyframes micTooltipIn {
+    from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+    to { opacity: 1; transform: translateY(-50%) translateX(0); }
   }
 
   .chat-orb:focus-visible,
