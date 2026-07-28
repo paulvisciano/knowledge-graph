@@ -11,7 +11,7 @@
 #   cp .env.example .env   then customize.
 #
 # Prerequisites:
-#   llama-server processes running on host (ports 8080, 8081, 8082)
+#   llama-server processes running on host (ports 8080, 8081)
 #
 # Storage:
 #   PostgreSQL for KV, Vector, and DocStatus stores.
@@ -63,12 +63,14 @@ services:
       EMBEDDING_DIM: "${EMBEDDING_DIM:-1024}"
       EMBEDDING_BINDING_HOST: "${EMBEDDING_BINDING_HOST:-http://host.docker.internal:8081}"
       EMBEDDING_BINDING_API_KEY: "${EMBEDDING_BINDING_API_KEY:-llama-server}"
-      RERANK_BINDING: "${RERANK_BINDING:-jina}"
-      RERANK_MODEL: "${RERANK_MODEL:-bge-reranker-v2-m3-Q4_K_M}"
-      RERANK_BINDING_HOST: "${RERANK_BINDING_HOST:-http://host.docker.internal:8082/v1/rerank}"
-      RERANK_BINDING_API_KEY: "${RERANK_BINDING_API_KEY:-llama-server}"
-      RERANK_BY_DEFAULT: "${RERANK_BY_DEFAULT:-true}"
-      MIN_RERANK_SCORE: "${MIN_RERANK_SCORE:--1}"
+      # Reranker disabled — RERANK_BY_DEFAULT=false in .env. To re-enable,
+      # uncomment these and restore the reranker in scripts/start-llama-servers.sh.
+      # RERANK_BINDING: "${RERANK_BINDING:-jina}"
+      # RERANK_MODEL: "${RERANK_MODEL:-bge-reranker-v2-m3-Q4_K_M}"
+      # RERANK_BINDING_HOST: "${RERANK_BINDING_HOST:-http://host.docker.internal:8082/v1/rerank}"
+      # RERANK_BINDING_API_KEY: "${RERANK_BINDING_API_KEY:-llama-server}"
+      RERANK_BY_DEFAULT: "${RERANK_BY_DEFAULT:-false}"
+      # MIN_RERANK_SCORE: "${MIN_RERANK_SCORE:--1}"
       VLM_PROCESS_ENABLE: "${VLM_PROCESS_ENABLE:-true}"
       VLM_LLM_BINDING: "${VLM_LLM_BINDING:-openai}"
       VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
@@ -192,6 +194,40 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 3
+    networks:
+      - internal
+
+  processor:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: knowledge-graph-processor
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lightrag:
+        condition: service_healthy
+    environment:
+      LIGHTRAG_URL: "http://lightrag:9621"
+      KNOWN_FACES_PATH: "/app/known_faces"
+      VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
+      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
+      VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
+      FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-mtcnn}"
+      FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
+      DATABASE_URL: "postgresql://lightrag:lightrag@postgres:5432/lightrag"
+      MAX_CONCURRENT_JOBS: "${MAX_CONCURRENT_JOBS:-1}"
+      VLM_MAX_CONCURRENT: "${VLM_MAX_CONCURRENT:-1}"
+    volumes:
+      - ./known_faces:/app/known_faces:rw
+      - ./inputs:/app/inputs
+      - face_crops:/app/face_crops
+      - deepface_weights:/root/.deepface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 1536m
+    command: ["python", "-m", "api.worker"]
     networks:
       - internal
 

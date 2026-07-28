@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Query Latency Benchmark — NLP vs LLM Keyword Extraction</title>
+<style>
+  :root {
+    --bg: #0a0e1a; --surface: #121828; --surface-2: #1a2236; --border: #2a3550;
+    --text: #e6edf7; --dim: #8a97b3; --cyan: #00d4ff; --purple: #a855f7;
+    --red: #ff4d6b; --amber: #ffb84d; --green: #4ade80; --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; font-size: 14px; }
+  header { position: sticky; top: 0; z-index: 10; background: rgba(18,24,40,0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  header h1 .accent { color: var(--cyan); }
+  header .stats { display: flex; gap: 20px; font-size: 12px; color: var(--dim); margin-left: auto; }
+  header .stats b { color: var(--text); }
+  header .stats .speedup-num { color: var(--green); font-weight: 700; }
+  main { padding: 20px 24px 80px; max-width: 1400px; margin: 0 auto; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+  .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .summary-card .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .summary-card .value { font-size: 28px; font-weight: 700; }
+  .summary-card .sub { font-size: 11px; color: var(--dim); margin-top: 4px; }
+  .summary-card.green .value { color: var(--green); }
+  .summary-card.cyan .value { color: var(--cyan); }
+  .summary-card.amber .value { color: var(--amber); }
+  .summary-card.purple .value { color: var(--purple); }
+  .query-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .query-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .query-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .speedup { font-size: 18px; font-weight: 700; }
+  .query-text { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+  .query-text strong { color: var(--cyan); }
+  .query-desc { font-size: 12px; color: var(--dim); margin-bottom: 16px; }
+  .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .col { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .col.before { border-left: 3px solid var(--amber); }
+  .col.after { border-left: 3px solid var(--green); }
+  .col-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .before-tag { background: rgba(255,184,77,0.15); color: var(--amber); border: 1px solid rgba(255,184,77,0.3); }
+  .after-tag { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+  .time { font-size: 20px; font-weight: 700; }
+  .col.before .time { color: var(--amber); }
+  .col.after .time { color: var(--green); }
+  .mode { font-size: 11px; color: var(--dim); }
+  .metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 10px; }
+  .metric { text-align: center; }
+  .metric .label { display: block; font-size: 10px; color: var(--dim); text-transform: uppercase; margin-bottom: 2px; }
+  .metric .value { font-size: 16px; font-weight: 600; }
+  .refs { font-size: 11px; color: var(--dim); margin-bottom: 10px; word-break: break-all; }
+  .refs code { background: var(--surface); padding: 1px 5px; border-radius: 3px; color: var(--blue); font-size: 11px; }
+  .refs .none { color: var(--red); font-style: italic; }
+  .refs .more { color: var(--dim); }
+  .keywords { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .kw-row { font-size: 11px; color: var(--dim); margin-bottom: 4px; }
+  .kw-row code { background: var(--surface); padding: 1px 5px; border-radius: 3px; color: var(--purple); font-size: 11px; }
+  .kw-label { color: var(--dim); font-weight: 600; }
+  .quality-bar { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .quality-label { font-weight: 700; font-size: 13px; }
+  .quality-detail { font-size: 12px; color: var(--dim); }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; }
+  .badge.ok { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge.error { background: rgba(255,77,107,0.15); color: var(--red); }
+  .err-msg { color: var(--red); font-size: 11px; }
+  .approach-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .approach-section h2 { font-size: 15px; margin: 0 0 12px; }
+  .approach-section p { font-size: 13px; color: var(--dim); margin: 0 0 8px; }
+  .approach-section code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; color: var(--cyan); font-size: 12px; }
+  .approach-section ul { margin: 8px 0; padding-left: 20px; }
+  .approach-section li { font-size: 13px; color: var(--dim); margin-bottom: 4px; }
+  footer { text-align: center; padding: 20px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Query Latency Benchmark — <span class="accent">NLP vs LLM Keyword Extraction</span></h1>
+  <div class="stats">
+    <span>Total before: <b>311s</b></span>
+    <span>Total after: <b>13s</b></span>
+    <span>Speedup: <b class="speedup-num">23.9x</b></span>
+  </div>
+</header>
+<main>
+  <div class="summary-grid">
+    <div class="summary-card amber">
+      <div class="label">Before (LLM keywords)</div>
+      <div class="value">311s</div>
+      <div class="sub">3 queries &middot; mode=local &middot; top_k=5 &middot; 12B Gemma keyword LLM</div>
+    </div>
+    <div class="summary-card green">
+      <div class="label">After (NLP keywords)</div>
+      <div class="value">13s</div>
+      <div class="sub">3 queries &middot; mode=mix &middot; top_k=5 &middot; regex + stopword filter</div>
+    </div>
+    <div class="summary-card cyan">
+      <div class="label">Overall speedup</div>
+      <div class="value">23.9x</div>
+      <div class="sub">Faster end-to-end query latency</div>
+    </div>
+    <div class="summary-card purple">
+      <div class="label">LLM calls eliminated</div>
+      <div class="value">3</div>
+      <div class="sub">Keyword extraction LLM skipped per query</div>
+    </div>
+  </div>
+
+  <div class="approach-section">
+    <h2>What changed</h2>
+    <p>The <code>query_knowledge_graph</code> MCP tool previously relied on LightRAG's internal keyword extraction LLM (12B Gemma on M2 Pro) to split queries into high-level and low-level keywords before retrieval. This LLM call took <strong>89-124 seconds per query</strong> due to slow prompt processing on the local model.</p>
+    <p>The fix replaces the LLM call with <strong>NLP-only keyword extraction</strong> &mdash; regex patterns for dates, proper noun detection, stopword filtering, and content category mapping. Keywords are pre-supplied to LightRAG's <code>/query</code> endpoint via <code>hl_keywords</code>/<code>ll_keywords</code> parameters, which makes LightRAG skip the keyword LLM entirely (operate.py:4036 returns immediately if keywords are pre-supplied).</p>
+    <p>This mirrors the approach used by <strong>PrivateGPT</strong>, <strong>AnythingLLM</strong>, <strong>Open WebUI</strong>, and <strong>RAGFlow</strong> (by default) &mdash; none of which use an LLM for query-time keyword extraction.</p>
+    <ul>
+      <li><strong>Before</strong>: mode=local, top_k=5, LLM keyword extraction (~120s per query)</li>
+      <li><strong>After</strong>: mode=mix, top_k=5, NLP keyword extraction (~0s per query, regex only)</li>
+    </ul>
+    <p><strong>Why mix mode?</strong> Testing showed that <code>mix</code> with <code>top_k=5</code> is the best all-rounder: it returns both photos and notes for date-range queries (where <code>local</code> returns 0 refs because Date nodes lack file_path chunks), while still finding photos for entity-specific queries. <code>top_k=10</code> was tested but found to truncate context too aggressively in <code>mix</code> mode, reducing ref count from 3 to 1 for entity queries.</p>
+  </div>
+
+  
+    <div class="query-card" data-qid="date_range">
+      <div class="query-header">
+        <h3>Date Range Query</h3>
+        <span class="speedup" style="color:var(--green)">124.0x faster</span>
+      </div>
+      <div class="query-text"><strong>Query:</strong> "What photos and notes do I have from June and July 2026?"</div>
+      <div class="query-desc">Core use case — multi-month span covering both photo dates (June) and note dates (July)</div>
+      <div class="comparison-grid">
+        <div class="col before">
+          <div class="col-header">
+            <span class="tag before-tag">BEFORE</span>
+            <span class="time">124s</span>
+            <span class="mode">mode=local, top_k=5, LLM keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">6,041 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">0</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--green)">0</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--green)">0</span></div>
+          </div>
+          <div class="refs"><span class="none">none</span></div>
+        </div>
+        <div class="col after">
+          <div class="col-header">
+            <span class="tag after-tag">AFTER</span>
+            <span class="time">1s</span>
+            <span class="mode">mode=mix, top_k=5, NLP keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">10,327 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">5</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--green)">1</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--green)">4</span></div>
+          </div>
+          <div class="refs"><code>PXL_20260627_223328231.RAW-01.jpg</code>, <code>daily_update</code>, <code>diary-entry-2026-07-23-20260723-220452-264508</code>, <code>diary-entry-2026-07-23-20260723-202946-852507</code>, <code>note_1784696596</code></div>
+          <div class="keywords">
+            <div class="kw-row"><span class="kw-label">hl_keywords:</span> <code>2026</code></div>
+            <div class="kw-row"><span class="kw-label">ll_keywords:</span> <code>July 2026</code>, <code>June</code>, <code>July</code>, <code>photos</code>, <code>notes</code></div>
+          </div>
+        </div>
+      </div>
+      <div class="quality-bar">
+        <span class="quality-label" style="color:var(--green)">Result quality: BETTER</span>
+        <span class="quality-detail">
+          Before: 0 refs (0 img, 0 notes) &rarr;
+          After: 5 refs (1 img, 4 notes)
+        </span>
+      </div>
+    </div>
+    <div class="query-card" data-qid="entity_specific">
+      <div class="query-header">
+        <h3>Entity-Specific Query</h3>
+        <span class="speedup" style="color:var(--green)">9.9x faster</span>
+      </div>
+      <div class="query-text"><strong>Query:</strong> "Show me beach photos and any notes about the beach"</div>
+      <div class="query-desc">Entity-focused retrieval — should return photos with Beach entity and notes mentioning Beach</div>
+      <div class="comparison-grid">
+        <div class="col before">
+          <div class="col-header">
+            <span class="tag before-tag">BEFORE</span>
+            <span class="time">89s</span>
+            <span class="mode">mode=local, top_k=5, LLM keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">27,075 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">4</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--amber)">4</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--dim)">0</span></div>
+          </div>
+          <div class="refs"><code>PXL_20260424_183140200.jpg</code>, <code>PXL_20260531_160852378.RAW-01.jpg</code>, <code>PXL_20260424_160812149.jpg</code>, <code>PXL_20260425_142156714.MP.jpg</code></div>
+        </div>
+        <div class="col after">
+          <div class="col-header">
+            <span class="tag after-tag">AFTER</span>
+            <span class="time">9s</span>
+            <span class="mode">mode=mix, top_k=5, NLP keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">26,171 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">3</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--amber)">3</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--dim)">0</span></div>
+          </div>
+          <div class="refs"><code>PXL_20260424_183131076.jpg</code>, <code>PXL_20260424_183138846.jpg</code>, <code>PXL_20260424_183140200.jpg</code></div>
+          <div class="keywords">
+            <div class="kw-row"><span class="kw-label">hl_keywords:</span> <code>beach</code>, <code>photos</code>, <code>notes</code></div>
+            <div class="kw-row"><span class="kw-label">ll_keywords:</span> <code>beach</code>, <code>photos</code>, <code>notes</code></div>
+          </div>
+        </div>
+      </div>
+      <div class="quality-bar">
+        <span class="quality-label" style="color:var(--amber)">Result quality: FEWER</span>
+        <span class="quality-detail">
+          Before: 4 refs (4 img, 0 notes) &rarr;
+          After: 3 refs (3 img, 0 notes)
+        </span>
+      </div>
+    </div>
+    <div class="query-card" data-qid="long_natural">
+      <div class="query-header">
+        <h3>Long Natural Language (Audio Transcription Simulation)</h3>
+        <span class="speedup" style="color:var(--green)">32.7x faster</span>
+      </div>
+      <div class="query-text"><strong>Query:</strong> "Hey so I was thinking about that trip we took to St Pete back in June you know the one where we went to the beach and sa..."</div>
+      <div class="query-desc">Simulates a long voice transcription — tests whether keyword extraction can handle a rambling 60+ word query</div>
+      <div class="comparison-grid">
+        <div class="col before">
+          <div class="col-header">
+            <span class="tag before-tag">BEFORE</span>
+            <span class="time">98s</span>
+            <span class="mode">mode=local, top_k=5, LLM keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">18,762 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">5</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--dim)">3</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--dim)">2</span></div>
+          </div>
+          <div class="refs"><code>plan_entry</code>, <code>PXL_20260501_203025149.RAW-01.jpg</code>, <code>PXL_20260501_203021057.RAW-01.jpg</code>, <code>PXL_20260501_204405876.RAW-01.jpg</code>, <code>note_1784640603</code></div>
+        </div>
+        <div class="col after">
+          <div class="col-header">
+            <span class="tag after-tag">AFTER</span>
+            <span class="time">3s</span>
+            <span class="mode">mode=mix, top_k=5, NLP keywords</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="label">Status</span><span class="value"><span class="badge ok">SUCCESS</span></span></div>
+            <div class="metric"><span class="label">Response</span><span class="value">21,215 chars</span></div>
+            <div class="metric"><span class="label">Total refs</span><span class="value">5</span></div>
+            <div class="metric"><span class="label">Image refs</span><span class="value" style="color:var(--dim)">3</span></div>
+            <div class="metric"><span class="label">Note refs</span><span class="value" style="color:var(--dim)">2</span></div>
+          </div>
+          <div class="refs"><code>plan_entry</code>, <code>PXL_20260501_203025149.RAW-01.jpg</code>, <code>PXL_20260501_203021057.RAW-01.jpg</code>, <code>note_1784640603</code>, <code>PXL_20260501_204405876.RAW-01.jpg</code></div>
+          <div class="keywords">
+            <div class="kw-row"><span class="kw-label">hl_keywords:</span> <code>July 22</code>, <code>22</code>, <code>St Pete</code></div>
+            <div class="kw-row"><span class="kw-label">ll_keywords:</span> <code>July 22</code>, <code>22</code>, <code>St Pete</code>, <code>June</code>, <code>July</code>, <code>trip</code>, <code>took</code>, <code>Pete</code>, <code>one</code>, <code>went</code>, <code>beach</code>, <code>sunset</code>, <code>notes</code>, <code>wrote</code>, <code>bike</code>, <code>ride</code>, <code>downtown</code>, <code>rained</code>, <code>evening</code></div>
+          </div>
+        </div>
+      </div>
+      <div class="quality-bar">
+        <span class="quality-label" style="color:var(--dim)">Result quality: SAME</span>
+        <span class="quality-detail">
+          Before: 5 refs (3 img, 2 notes) &rarr;
+          After: 5 refs (3 img, 2 notes)
+        </span>
+      </div>
+    </div>
+
+  <div class="approach-section">
+    <h2>Analysis</h2>
+    <p><strong>Date Range Query</strong> &mdash; the biggest win: 124s &rarr; 1s (124x faster). The LLM keywords produced 0 refs (missed all entities), while NLP keywords found 5 refs (1 photo + 4 notes). The LLM extracted generic keywords like "past activities, dates" which didn't match entity names; NLP extracted "June", "July", "2026", "photos", "notes" which directly matched entity and chunk content.</p>
+    <p><strong>Entity-Specific Query</strong> &mdash; 89s &rarr; 9s (10x faster). Before found 4 photo refs but 0 notes. After found 3 photo refs and 0 notes. The <code>mix</code> mode retrieves both entities and chunks, but the broader retrieval pulls in more entity/relation data which fills the token budget, leaving room for fewer distinct chunk file references. This is a minor trade-off: 1 fewer photo ref, but 10x faster.</p>
+    <p><strong>Long Natural Language</strong> &mdash; 98s &rarr; 3s (33x faster). Both found 5 refs (3 photos + 2 notes). The NLP keywords correctly extracted "St Pete", "June", "July 22", "beach", "sunset", "bike", "ride", "downtown", "rained", "evening" from the 60-word transcription simulation &mdash; demonstrating that simple regex + stopword filtering handles long voice transcription queries without an LLM.</p>
+  </div>
+</main>
+<footer>
+  Generated 2026-07-26 09:51:48 &rarr; 2026-07-26 10:20:48 &middot; Knowledge Graph MCP optimization benchmark
+</footer>
+</body>
+</html>

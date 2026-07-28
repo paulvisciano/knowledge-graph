@@ -61,6 +61,24 @@ export class AudioRecorder {
   private async init(): Promise<void> {
     if (this.initialized) return;
 
+    // Construct the AudioContext BEFORE awaiting getUserMedia. The space-bar
+    // press is the user gesture that authorizes audio playback/recording; once
+    // we await getUserMedia, Chrome considers the gesture consumed and a
+    // context constructed after the await can be created in "suspended" or
+    // even error out ("AudioContext encountered an error from the audio device
+    // or the WebAudio renderer"). Building it here keeps it inside the gesture.
+    //
+    // Pin sampleRate to 48000: macOS CoreAudio's default and the typical mic
+    // hardware rate. Without this, Chrome picks the output device's rate which
+    // can mismatch the input device and push the renderer into the errored
+    // state on the very first recording after a fresh load.
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    this.audioContext = ctx;
+    this._sampleRate = ctx.sampleRate;
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -70,16 +88,6 @@ export class AudioRecorder {
     });
     this.stream = stream;
 
-    const ctx = new AudioContext();
-    this.audioContext = ctx;
-    this._sampleRate = ctx.sampleRate;
-
-    // Per autoplay policy, a fresh AudioContext can start in "suspended" state.
-    // When suspended, the AudioWorkletProcessor.process() is never called, so no
-    // audio chunks are ever produced -> "No audio data recorded". Resume explicitly.
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
     if (ctx.state !== 'running') {
       throw new Error(`AudioContext not running (state: ${ctx.state}). Microphone may be unavailable.`);
     }

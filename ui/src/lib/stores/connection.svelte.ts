@@ -55,7 +55,8 @@ class ConnectionStore {
     ]);
   }
 
-  startPolling(intervalMs: number = 10000) {
+  startPolling(intervalMs: number = 300_000) {
+    this.stopPolling();
     this.pollAll();
     this.intervalId = setInterval(() => this.pollAll(), intervalMs);
   }

@@ -11,15 +11,13 @@ fi
 MODEL_DIR="${MODEL_DIR:-$PROJECT_DIR/models}"
 LLM_PORT="${LLM_PORT:-8080}"
 EMBED_PORT="${EMBED_MODEL_PORT:-8081}"
-RERANK_PORT="${RERANKER_PORT:-8082}"
 WHISPER_PORT="${WHISPER_PORT:-8090}"
 
 LLM_MODEL_PATH="${LLM_MODEL_PATH:-$MODEL_DIR/bonsai-27b/Bonsai-27B-Q1_0.gguf}"
 LLM_MODEL_ALIAS="${LLM_MODEL_ALIAS:-Bonsai-27B-Q1_0}"
 EMBED_MODEL_PATH="${EMBED_MODEL_PATH:-$MODEL_DIR/bge-m3/bge-m3-Q4_K_M.gguf}"
-RERANK_MODEL_PATH="${RERANK_MODEL_PATH:-$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf}"
 MMPROJ_PATH="${MMPROJ_PATH:-$MODEL_DIR/bonsai-27b/Bonsai-27B-mmproj-Q8_0.gguf}"
-WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-large-v3-turbo.bin}"
+WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-base.en.bin}"
 
 # LLM sampler settings — anti-repetition (fixes verbatim phrase-loop degeneration at Q1 quant).
 # DRY sampler targets phrase-level repetition; repeat_penalty is a token-level backstop.
@@ -33,7 +31,7 @@ LLM_XTC_PROBABILITY="${LLM_XTC_PROBABILITY:-0.1}"
 LLM_XTC_THRESHOLD="${LLM_XTC_THRESHOLD:-0.1}"
 # Single slot gets the full context window (set LLM_SLOTS=2 to split for concurrency).
 LLM_SLOTS="${LLM_SLOTS:-1}"
-for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
+for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"
         exit 1
@@ -118,23 +116,31 @@ echo "Starting embedding server on port ${EMBED_PORT}..."
     &>/tmp/llama-server-embed.log &
 PIDS+=($!)
 
-echo "Starting reranker on port ${RERANK_PORT}..."
-"$LLAMA_SERVER" \
-    -m "$RERANK_MODEL_PATH" \
-    --reranking --embedding --pooling rank \
-    -c 8192 -b 8192 -ub 8192 \
-    -cram 0 -ngl 99 \
-    --host 0.0.0.0 --port "$RERANK_PORT" \
-    &>/tmp/llama-server-reranker.log &
-PIDS+=($!)
-
 if [[ -f "$WHISPER_MODEL_PATH" ]]; then
     WHISPER_SERVER="$(which whisper-server 2>/dev/null || echo /opt/homebrew/bin/whisper-server)"
     if [[ -x "$WHISPER_SERVER" ]]; then
+        # Re-running this script must not stack a second whisper-server on the same port.
+        if existing_pid="$(lsof -ti tcp:"$WHISPER_PORT" -sTCP:LISTEN 2>/dev/null)" && [[ -n "$existing_pid" ]]; then
+            echo "Found existing whisper-server (PID $existing_pid) on port ${WHISPER_PORT}; killing it before relaunch."
+            kill "$existing_pid" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+                lsof -ti tcp:"$WHISPER_PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
+                sleep 0.25
+            done
+            if lsof -ti tcp:"$WHISPER_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+                echo "whisper-server (PID $existing_pid) did not exit; sending SIGKILL."
+                kill -9 "$existing_pid" 2>/dev/null || true
+                sleep 0.5
+            fi
+        fi
         echo "Starting whisper transcription server on port ${WHISPER_PORT}..."
+        # Pin language to English. With -l auto the turbo model misclassifies
+        # short English clips as Afrikaans (p = nan), yielding empty transcripts.
+        # The app is English-only; lift this to a per-request param if multilingual
+        # support is ever needed.
         "$WHISPER_SERVER" \
             -m "$WHISPER_MODEL_PATH" \
-            -l auto --convert -t 4 \
+            -l en --convert -t 4 \
             --host 0.0.0.0 --port "$WHISPER_PORT" \
             &>/tmp/whisper-server.log &
         PIDS+=($!)
@@ -148,7 +154,6 @@ echo "Waiting for all endpoints..."
 FAIL=0
 health_check "$LLM_PORT" 90 || FAIL=$((FAIL+1))
 health_check "$EMBED_PORT" 45 || FAIL=$((FAIL+1))
-health_check "$RERANK_PORT" 45 || FAIL=$((FAIL+1))
 if [[ -f "$WHISPER_MODEL_PATH" ]] && [[ -x "${WHISPER_SERVER:-/opt/homebrew/bin/whisper-server}" ]]; then
     health_check "$WHISPER_PORT" 30 || FAIL=$((FAIL+1))
 fi
@@ -161,7 +166,6 @@ echo ""
 echo "═══ llama-servers running (PIDs: ${PIDS[*]}) ═══"
 echo "LLM:        http://localhost:${LLM_PORT}"
 echo "Embeddings: http://localhost:${EMBED_PORT}"
-echo "Reranker:   http://localhost:${RERANK_PORT}"
 echo "Whisper:    http://localhost:${WHISPER_PORT}"
 echo ""
 echo "Press Ctrl+C to stop all servers."

@@ -20,18 +20,9 @@ import {
   LOD_HYSTERESIS,
   RENDER_DISTANCE,
 } from './constants';
-import type { CanvasNode, NodeKind } from './types';
-
-/** Per-kind base colors for non-photo nodes (Phase 1 flat materials). */
-const KIND_COLOR: Record<NodeKind, number> = {
-  photo: 0xffffff,
-  // Warm paper tone so note planes read as "text" and contrast with photos.
-  note: 0xf5e9c8,
-  person: 0x4a9eff,
-  location: 0x39d98a,
-  event: 0xf6c344,
-  concept: 0xb57bff,
-};
+import { getProvider } from './NodeKindProvider';
+import './providers'; // side-effect: registers all providers so getProvider works
+import type { CanvasNode } from './types';
 
 /** Lerp factor for smoothing current opacity toward the per-frame target. */
 const OPACITY_LERP = 0.18;
@@ -54,7 +45,9 @@ export class NodePlane {
   private _fullUrl?: string;
   private _thumbUrl?: string;
   private _fullEvictCb?: () => void;
-  /** Locally-baked text texture for `note` nodes (NOT routed through `textureCache`). */
+  /** Whether LOD thumb→full promotion is enabled (from planeConfig). */
+  private _lodEnabled = false;
+  /** Locally-baked text texture for text-source nodes (NOT routed through `textureCache`). */
   private _noteTexture?: THREE.CanvasTexture;
 
   /**
@@ -63,8 +56,10 @@ export class NodePlane {
    */
   constructor(node: CanvasNode, sharedGeometry: THREE.PlaneGeometry) {
     this._node = node;
+    const provider = getProvider(this._node.kind);
+    const planeConfig = provider?.planeConfig;
     this._material = new THREE.MeshBasicMaterial({
-      color: KIND_COLOR[node.kind],
+      color: planeConfig?.color ?? 0xb57bff,
       transparent: true,
       depthWrite: true,
       side: THREE.DoubleSide,
@@ -74,16 +69,17 @@ export class NodePlane {
     this._mesh.position.set(node.localX, node.localY, node.localZ);
     this._mesh.userData.nodeId = node.id;
 
-    if (node.kind === 'photo' && node.imageUrl) {
+    this._lodEnabled = planeConfig?.lodEnabled ?? false;
+
+    const textureSource = planeConfig?.textureSource ?? 'none';
+    if (textureSource === 'url' && node.imageUrl) {
       this._thumbUrl = node.imageUrl;
       this._fullUrl = node.fullUrl;
       const cached = textureCache.load(node.imageUrl, (t) => this.applyTexture(t));
       if (cached) {
         this.applyTexture(cached);
       }
-    } else if (node.kind === 'note' && node.textContent) {
-      // Notes bake their text into a local CanvasTexture — never routed
-      // through `textureCache` (no URL, no 404). Same text → same texture.
+    } else if (textureSource === 'text' && node.textContent) {
       const tex = this._createTextTexture(node.textContent);
       this._noteTexture = tex;
       this._material.map = tex;
@@ -176,7 +172,7 @@ export class NodePlane {
 
   updateLod(cameraPos: THREE.Vector3, chunkOrigin: THREE.Vector3): void {
     if (this._disposed) return;
-    if (this._node.kind !== 'photo' || !this._thumbUrl) return;
+    if (!this._lodEnabled || !this._thumbUrl) return;
     if (!this._fullUrl) return;
 
     const worldPos = this._mesh.position;

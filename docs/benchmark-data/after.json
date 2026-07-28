@@ -1,0 +1,141 @@
+{
+  "state": "after",
+  "timestamp": "2026-07-26 10:20:48",
+  "description": "After NLP keyword extraction — mix mode, top_k=5 (no LLM keyword extraction)",
+  "config": {
+    "mode": "mix",
+    "top_k": 5,
+    "only_need_context": true,
+    "keywords": "NLP-extracted (regex + stopword filter)"
+  },
+  "results": [
+    {
+      "id": "date_range",
+      "label": "Date Range Query",
+      "query": "What photos and notes do I have from June and July 2026?",
+      "description": "Core use case — multi-month span covering both photo dates (June) and note dates (July)",
+      "mode": "mix",
+      "top_k": 5,
+      "elapsed_seconds": 1,
+      "hl_keywords": [
+        "2026"
+      ],
+      "ll_keywords": [
+        "July 2026",
+        "June",
+        "July",
+        "photos",
+        "notes"
+      ],
+      "response_length": 10327,
+      "total_refs": 5,
+      "image_refs": [
+        "PXL_20260627_223328231.RAW-01.jpg"
+      ],
+      "note_refs": [
+        "daily_update",
+        "diary-entry-2026-07-23-20260723-220452-264508",
+        "diary-entry-2026-07-23-20260723-202946-852507",
+        "note_1784696596"
+      ],
+      "all_ref_paths": [
+        "PXL_20260627_223328231.RAW-01.jpg",
+        "daily_update",
+        "diary-entry-2026-07-23-20260723-220452-264508",
+        "diary-entry-2026-07-23-20260723-202946-852507",
+        "note_1784696596"
+      ],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"diary-entry-2026-07-22-20260722-145036-188422 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-22-20260722-145036-188422\"}\n{\"entity\": \"2026-06-27 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-06-27 at 20:31\"}\n{\"entity\": \"diary-entry-2026-07-23-20260723-202946-852507 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-23-20260723-202946-852507\"}\n{\"entity\": \"PXL_20260628_001642628.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260628_001642628.RAW-01.jpg\"}\n{\"entity\": \"diary-entry-2026-07-23-20260723-220452-264508 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-23-20260723-220452-264508\"}\n{\"entity\": \"2026-07-20 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-20\"}\n{\"entity\": \"diary-entry-2026-07-23-20260723-031445-012937 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-23-20260723-031445-012937\"}\n{\"entity\": \"2026-07-21 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-21\"}\n{\"entity\": \"diary-entry-2026-07-22 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-22\"}\n{\"entity\": \"2026-07-22 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-22\"}\n{\"entity\": \"PXL_20260628_005524365.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260628_005524365.RAW-01.jpg\"}\n{\"entity\": \"PXL_20260627_234507194.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260627_234507194.RAW-01.jpg\"}\n```\n\nKnowledge Graph Data (Relationship):\n\n```json\n{\"entity1\": \"Beach\", \"entity2\": \"diary-entry-2026-07-22-20260722-145036-188422 (Photo)\", \"description\": \"Beach appears in diary-entry-2026-07-22-20260722-145036-188422 (Photo)\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_001642628.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 20:16\"}\n{\"entity1\": \"Knowledge Graph\", \"entity2\": \"diary-entry-2026-07-23-20260723-202946-852507 (Photo)\", \"description\": \"Knowledge Graph appears in diary-entry-2026-07-23-20260723-202946-852507 (Photo)\"}\n{\"entity1\": \"2026-07-20 (Date)\", \"entity2\": \"2026-07-21 (Date)\", \"description\": \"2026-07-20 is adjacent to 2026-07-21\"}\n{\"entity1\": \"Dali Museum\", \"entity2\": \"diary-entry-2026-07-22-20260722-145036-188422 (Photo)\", \"description\": \"Dali Museum appears in diary-entry-2026-07-22-20260722-145036-188422 (Photo)\"}\n{\"entity1\": \"2026-07-21 (Date)\", \"entity2\": \"2026-07-22 (Date)\", \"description\": \"2026-07-21 is adjacent to 2026-07-22\"}\n{\"entity1\": \"Volleyball\", \"entity2\": \"diary-entry-2026-07-23-20260723-202946-852507 (Photo)\", \"description\": \"Volleyball appears in diary-entry-2026-07-23-20260723-202946-852507 (Photo)\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_005524365.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 20:55\"}\n{\"entity1\": \"Knowledge Graph\", \"entity2\": \"diary-entry-2026-07-23-20260723-031445-012937 (Photo)\", \"description\": \"Knowledge Gr",
+      "status": "success"
+    },
+    {
+      "id": "entity_specific",
+      "label": "Entity-Specific Query",
+      "query": "Show me beach photos and any notes about the beach",
+      "description": "Entity-focused retrieval — should return photos with Beach entity and notes mentioning Beach",
+      "mode": "mix",
+      "top_k": 5,
+      "elapsed_seconds": 9,
+      "hl_keywords": [
+        "beach",
+        "photos",
+        "notes"
+      ],
+      "ll_keywords": [
+        "beach",
+        "photos",
+        "notes"
+      ],
+      "response_length": 26171,
+      "total_refs": 3,
+      "image_refs": [
+        "PXL_20260424_183131076.jpg",
+        "PXL_20260424_183138846.jpg",
+        "PXL_20260424_183140200.jpg"
+      ],
+      "note_refs": [],
+      "all_ref_paths": [
+        "PXL_20260424_183131076.jpg",
+        "PXL_20260424_183138846.jpg",
+        "PXL_20260424_183140200.jpg"
+      ],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"Beautiful sunset at the beach with my dog - end to end test note\", \"type\": \"content\", \"description\": \"A user note describing a visual scene involving a sunset, a beach, and a dog.\"}\n{\"entity\": \"Beach\", \"type\": \"location\", \"description\": \"Beach is a coastal environment characterized by its expansive sandy terrain and its proximity to a large body of water, specifically the ocean. It serves as a versatile and multi-purpose space where natural features, such as sand and water, integrate with various man-made elements and infrastructure. The physical composition of the beach includes a transition from grassy areas to the water, featuring light beige, white, or light grey sand. In certain contexts, the beach is specifically identified as a sandy area located between a swimming pool and the ocean.\\n\\nAs a public space, the beach is used for a wide range of community activities and general recreation. These activities include walking, relaxing, and the use of various recreational equipment. Specific sports and events are conducted on the beach, such as beach volleyball and yoga events where participants can view a skyline and waterfront. Additionally, the beach serves as a location for dining, social interaction, and other outdoor activities.\\n\\nThe beach functions as a significant venue for both organized events and general recreation, often accommodating large crowds, particularly in proximity to a beach club. It provides a space where bicycles can be parked and where bike riding is planned, although it is also noted as a location that was not visited during specific bike ride instances. Furthermore, the beach is an environment where environmental factors, such as weather conditions like expected afternoon rain, are relevant to planned activities. Overall, the beach provides a diverse environment that supports a wide range of uses, from recreational sports to general public enjoyment.<SEP>An outdoor coastal area featuring white sand, dunes, and various structures.\"}\n{\"entity\": \"People on Beach\", \"type\": \"person\", \"description\": \"Numerous individuals on the beach engaged in activities such as sitting, walking, and standing.\"}\n{\"entity\": \"Person 3\", \"type\": \"person\", \"description\": \"The entity known as Person 3 encompasses several distinct individuals across various contexts. Because these descriptions involve multiple distinct individuals, they are summarized separately below.\\n\\nOne instance of Person 3 describes a male individual with a bald head, a dark beard, and tan skin. This individual is observed wearing a white t-shirt and is positioned sitting on the edge of a pool. In some contexts, this individual is noted to be in the background right, while in others, the description includes the presence of blue shorts.\\n\\nAnother instance of Person 3 refers to a male individual located in the foreground right of a vehicle. This individual is characterized by tan skin, dark hair, and a short beard or s",
+      "status": "success"
+    },
+    {
+      "id": "long_natural",
+      "label": "Long Natural Language (Audio Transcription Simulation)",
+      "query": "Hey so I was thinking about that trip we took to St Pete back in June you know the one where we went to the beach and saw that crazy sunset and I wanted to compare that with the notes I wrote on July 22nd about the bike ride downtown and whether it rained that evening",
+      "description": "Simulates a long voice transcription — tests whether keyword extraction can handle a rambling 60+ word query",
+      "mode": "mix",
+      "top_k": 5,
+      "elapsed_seconds": 3,
+      "hl_keywords": [
+        "July 22",
+        "22",
+        "St Pete"
+      ],
+      "ll_keywords": [
+        "July 22",
+        "22",
+        "St Pete",
+        "June",
+        "July",
+        "trip",
+        "took",
+        "Pete",
+        "one",
+        "went",
+        "beach",
+        "sunset",
+        "notes",
+        "wrote",
+        "bike",
+        "ride",
+        "downtown",
+        "rained",
+        "evening"
+      ],
+      "response_length": 21215,
+      "total_refs": 5,
+      "image_refs": [
+        "PXL_20260501_203025149.RAW-01.jpg",
+        "PXL_20260501_203021057.RAW-01.jpg",
+        "PXL_20260501_204405876.RAW-01.jpg"
+      ],
+      "note_refs": [
+        "plan_entry",
+        "note_1784640603"
+      ],
+      "all_ref_paths": [
+        "plan_entry",
+        "PXL_20260501_203025149.RAW-01.jpg",
+        "PXL_20260501_203021057.RAW-01.jpg",
+        "note_1784640603",
+        "PXL_20260501_204405876.RAW-01.jpg"
+      ],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"Bike Riding\", \"type\": \"activity\", \"description\": \"A cycling activity performed in downtown St. Pete and toward the beach.\"}\n{\"entity\": \"PXL_20260501_203022587.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260501_203022587.RAW-01.jpg\"}\n{\"entity\": \"Bike Ride\", \"type\": \"activity\", \"description\": \"An activity involving cycling, planned in both downtown St. Pete and towards the beach.\"}\n{\"entity\": \"Saint Pete Beach\", \"type\": \"location\", \"description\": \"Saint Pete Beach is a coastal location situated in the state of Florida, United States. It is characterized by its diverse geographical and environmental features, including its beach environment, various types of vegetation, and various maritime elements.\\n\\nThe area serves as a site for various activities, including outdoor and beach-related activities, and is also characterized by its associated urban development. Additionally, Saint Pete Beach serves as the location for several specific sites, including various abandoned buildings and abandoned sites.\"}\n{\"entity\": \"St. Petersburg\", \"type\": \"location\", \"description\": \"Also known as St. Pete, it is a location where Paul has spent significant time and has many friends.<SEP>A coastal city in Florida, United States, where the urban scene is located.<SEP>A location where Paul is currently located and where rainfall has occurred for several days.<SEP>A location where Paul plans to spend time, also referred to as St. Pete.\"}\n{\"entity\": \"PXL_20260501_202640718.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260501_202640718.RAW-01.jpg\"}\n{\"entity\": \"Rain\", \"type\": \"naturalobject\", \"description\": \"A weather condition expected to occur in a few hours, influencing the plan for the day.<SEP>A weather condition that Paul aims to avoid during beach activities.\"}\n{\"entity\": \"PXL_20260501_203021057.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260501_203021057.RAW-01.jpg\"}\n{\"entity\": \"Paul\", \"type\": \"person\", \"description\": \"An individual who spends time in St. Petersburg, plays beach volleyball, and has a mother residing in Clearwater.<SEP>An individual who is reviewing a knowledge graph project, assisting with household tasks, and located in St. Petersburg.<SEP>An individual who is assisting Zacarias with bike maintenance.<SEP>An individual who has a plan for July 21st involving activities in St. Petersburg.<SEP>An individual who performed activities including biking, smoking, grilling, and coding updates.\"}\n{\"entity\": \"St. Pete\", \"type\": \"location\", \"description\": \"A location where a bike ride is planned to take place.<SEP>: A common name for the location St. Petersburg.\"}\n{\"entity\": \"note_1784640603 (Note)\", \"type\": \"Note\", \"description\": \"Note: note_1784640603\"}\n{\"entity\": \"PXL_20260501_202636846.RAW-01.jpg (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: PXL_20260501_202636846.RAW-01.jpg\"}\n```\n\nKnowledge Graph Data (Relationship):\n\n```json\n{\"entity",
+      "status": "success"
+    }
+  ]
+}

@@ -43,9 +43,18 @@ from api.services import db as db_module
 from api.services import config
 from api.services.job_manager import (
     create_job, get_job, list_jobs, delete_job,
-    persist_uploaded_file, subscribe_events,
-    unsubscribe_events, get_events, update_job_status,
-    enqueue_and_maybe_batch,
+    persist_uploaded_file, get_events, update_job_status,
+)
+# Phase runners and constants live in the shared phases module so both the
+# worker process and these legacy sync endpoints can import them without a
+# circular dependency on the router. The legacy sync endpoints (/process,
+# /process-json, /reprocess) still stream processing directly IN the API
+# process — acceptable because they are not the hot path (the batch /jobs
+# endpoint is, and that now just writes a row and returns). Trade-off: a slow
+# /reprocess can still stall the API's thread pool, but it's rarely called.
+from api.services.phases import (
+    _process_and_stream,
+    KNOWN_FACES_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,7 +68,6 @@ async def _resolve_skip_faces(request_skip_faces: bool) -> bool:
         return True
     return request_skip_faces
 
-KNOWN_FACES_PATH = os.environ.get("KNOWN_FACES_PATH", str(Path(__file__).resolve().parent.parent.parent / "known_faces"))
 INPUT_DIR = Path(os.environ.get("INPUT_DIR", str(Path(__file__).resolve().parent.parent.parent / "inputs")))
 FACES_CACHE_DIR = Path(os.environ.get("FACES_CACHE_DIR", str(Path(__file__).resolve().parent.parent.parent / "face_crops")))
 FACES_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,314 +125,6 @@ async def _validate_and_save_upload(file: UploadFile) -> tuple[str, str]:
             os.unlink(tmp.name)
         raise
     return tmp.name, safe_name
-
-
-async def _emit_exif_entities(
-    file_source: str,
-    exif_data: dict,
-) -> AsyncGenerator[ServerSentEvent, None]:
-    photo_name = f"{file_source} (Photo)"
-    exif_dimensions: list[dict[str, Any]] = []
-
-    date_taken_friendly = exif_data.get("date_taken_friendly")
-    if date_taken_friendly:
-        date_only = date_taken_friendly.split(" at ")[0].split(" ")[0]
-        exif_dimensions.append({"name": f"{date_only} (Date)", "entity_type": "Date", "description": f"Calendar date {date_taken_friendly}", "edge_keyword": "taken_on", "edge_description": f"Photo taken on {date_taken_friendly}"})
-
-    location = exif_data.get("location")
-    if location:
-        loc_str = location if isinstance(location, str) else str(location)
-        if loc_str:
-            exif_dimensions.append({"name": f"{loc_str} (Location)", "entity_type": "Location", "description": f"Location in {loc_str}", "edge_keyword": "taken_at", "edge_description": f"Photo taken at {loc_str}"})
-
-    camera = exif_data.get("camera") or exif_data.get("camera_make") or exif_data.get("camera_model")
-    if camera:
-        exif_dimensions.append({"name": f"{camera} (Camera)", "entity_type": "Camera", "description": f"Camera device: {camera}", "edge_keyword": "taken_with", "edge_description": f"Photo taken with {camera}"})
-
-    yield ServerSentEvent(event="message", data=json.dumps({"event": "injecting_exif_relations", "data": {"file_source": file_source}, "timestamp": time.time()}))
-    yield ServerSentEvent(event="message", data=json.dumps({"event": "photo_node_created", "data": {"entity_name": photo_name, "entity_type": "Photo", "labels": ["Photo"], "source_id": file_source}, "timestamp": time.time()}))
-    for dim in exif_dimensions:
-        yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_node_created", "data": {"entity_name": dim["name"], "entity_type": dim.get("entity_type", "ExifEntity"), "labels": [dim.get("entity_type", "ExifEntity")]}}))
-
-    if exif_dimensions:
-        yield ServerSentEvent(event="message", data=json.dumps({"event": "creating_exif_entities", "data": {"file_source": file_source, "dimensions_count": len(exif_dimensions)}, "timestamp": time.time()}))
-        exif_result = None
-        max_create_attempts = 3
-        for attempt in range(max_create_attempts):
-            try:
-                exif_result = await create_exif_relations(config.lightrag_url(), file_source, photo_name, exif_dimensions)
-                failed_entities = [e for e in exif_result.get("entities_created", []) if e.get("status") == "error"]
-                if not failed_entities:
-                    break
-                logger.warning("[EXIF] attempt %d/%d had %d failed entities for %s, retrying",
-                               attempt + 1, max_create_attempts, len(failed_entities), file_source)
-            except Exception as exc:
-                logger.warning("[EXIF] attempt %d/%d raised for %s: %s",
-                                attempt + 1, max_create_attempts, file_source, exc)
-                exif_result = None
-            if attempt < max_create_attempts - 1:
-                await asyncio.sleep(2.0 * (attempt + 1))
-        if exif_result:
-            for entity in exif_result.get("entities_created", []):
-                if "entity_name" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                    entity["entity_name"] = entity["data"].get("entity_name", "")
-                if "entity_type" not in entity and "data" in entity and isinstance(entity["data"], dict):
-                    entity["entity_type"] = entity["data"].get("entity_type", "")
-            for relation in exif_result.get("relations_created", []):
-                src = relation.get("source") or relation.get("source_entity") or ""
-                tgt = relation.get("target") or relation.get("target_entity") or ""
-                yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_relation_created", "data": {"source": src, "target": tgt, "relation_type": relation.get("keywords", "has_exif")}, "timestamp": time.time()}))
-            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_complete", "data": {"file_source": file_source, "entities": len(exif_result.get("entities_created", [])), "relations": len(exif_result.get("relations_created", []))}, "timestamp": time.time()}))
-        else:
-            logger.error("EXIF entity creation failed for %s after %d attempts", file_source, max_create_attempts)
-            yield ServerSentEvent(event="message", data=json.dumps({"event": "exif_entities_failed", "data": {"error": "max retries exceeded", "exif_dimensions": exif_dimensions}, "timestamp": time.time()}))
-
-
-async def _run_exif_phase(
-    file_path: str,
-    file_source: str,
-    skip_exif: bool,
-    skip_faces: bool,
-    insert: bool,
-    note: str = "",
-):
-    """Phase 1 of the two-phase pipeline: EXIF extraction, face detection,
-    and Photo/Date/Location/Camera entity creation in LightRAG.
-
-    Emits the same SSE events as the original ``_process_and_stream`` up
-    through ``exif_entities_complete`` (or ``pipeline_complete`` when
-    ``insert`` is False). Persists EXIF + ``metadata_text`` to
-    ``photo_metadata`` so phase 2 can resume from DB state.
-
-    Returns the ``metadata_text`` built from EXIF + faces (or None when no
-    EXIF/faces ran or ``insert`` is False). Phase 2 reads it back from the DB
-    by ``file_source`` when the job object is the only state crossing the
-    phase boundary.
-    """
-    content_list: list[dict] | None = None
-    metadata_text: str | None = None
-    exif_data: dict | None = None
-    exif_entities_emitted = False
-
-    async for event in process_image(
-        file_path,
-        known_faces_path=KNOWN_FACES_PATH,
-        skip_exif=skip_exif,
-        skip_faces=skip_faces,
-    ):
-        if event.event == "captions_built":
-            content_list = event.data.get("content_list")
-            metadata_text = event.data.get("metadata_text")
-            exif_data = event.data.get("exif_data")
-
-        if event.event == "exif_complete":
-            exif_data = event.data.get("exif") or event.data.get("exif_data")
-
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps(asdict(event)),
-        )
-
-        # Emit Photo/EXIF node events immediately after EXIF data is available,
-        # before face recognition (which is slow and can OOM the container).
-        if event.event == "exif_complete" and insert and not exif_entities_emitted:
-            exif_entities_emitted = True
-            async for sse_event in _emit_exif_entities(file_source, exif_data):
-                yield sse_event
-
-    if not insert:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source, "status": "no_insert"}, "timestamp": time.time()}),
-        )
-        return
-
-    # Fallback: if EXIF extraction was skipped but captions_built still has exif_data
-    if not exif_entities_emitted and exif_data:
-        async for sse_event in _emit_exif_entities(file_source, exif_data):
-            yield sse_event
-
-    # Mark the phase-1 boundary so the job manager/coordinator and the UI can
-    # distinguish "all EXIF/entities done, waiting for AI wave" from the
-    # transient extracting_metadata/creating_entities stages.
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "exif_phase_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-
-    # Persist EXIF + metadata_text so phase 2 (which may run much later, on a
-    # different task, or after a restart) can reconstruct the phase-1 output
-    # from DB state alone. save_photo_exif is idempotent (UPSERT on file_source).
-    if exif_data is not None:
-        try:
-            from api.services.db import save_photo_exif
-            await save_photo_exif(file_source, exif_data, metadata_text=metadata_text)
-        except Exception:
-            logger.exception("Failed to persist EXIF + metadata_text for %s", file_source)
-
-    return
-
-
-async def _run_ai_phase(
-    file_path: str,
-    file_source: str,
-    metadata_text: str | None,
-    note: str = "",
-    photo_name: str | None = None,
-):
-    """Phase 2 of the two-phase pipeline: VLM description, LightRAG
-    ingestion, and visual-entity linking.
-
-    Reads ``metadata_text`` back from the DB (``photo_metadata``) when the
-    caller passes None — phase 2 may run in a fresh process that only has the
-    Job object, so the bridge state lives in the DB. Emits ``describing_image``
-    through ``pipeline_complete`` events, identical to the original
-    ``_process_and_stream`` phase 3-5.
-    """
-    if metadata_text is None:
-        try:
-            from api.services.db import get_photo_metadata_text
-            metadata_text = await get_photo_metadata_text(file_source)
-        except Exception:
-            logger.exception("Failed to load metadata_text for %s", file_source)
-
-    # Signal the UI that we're about to wait for the VLM semaphore/queue before
-    # the describing_image (active AI run) event fires.
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "queued_for_ai", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "describing_image", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-    try:
-        if note:
-            metadata_text = (f"User note: {note}\n\n" + metadata_text) if metadata_text else f"User note: {note}"
-        vlm_image_path = prepare_vlm_image(file_path)
-        try:
-            upload_result = await upload_image_to_lightrag(
-                config.lightrag_url(), vlm_image_path, filename=file_source, metadata_text=metadata_text,
-            )
-        finally:
-            cleanup_vlm_image(vlm_image_path)
-        if upload_result.get("status") == "error":
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "upload_failed", "data": upload_result, "timestamp": time.time()}),
-            )
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source, "status": "upload_failed"}, "timestamp": time.time()}),
-            )
-            return
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "upload_complete", "data": upload_result, "timestamp": time.time()}),
-        )
-    except Exception as exc:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "upload_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
-        )
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source, "status": "upload_failed"}, "timestamp": time.time()}),
-        )
-        return
-
-    # Phase 4: Wait for LightRAG to finish processing the document
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "lightrag_upload_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "lightrag_processing_waiting", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-    try:
-        final_status = await wait_for_lightrag_processing(config.lightrag_url(), file_source)
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "lightrag_processing_complete", "data": {"file_source": file_source, "status": final_status}, "timestamp": time.time()}),
-        )
-    except TimeoutError as exc:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "lightrag_processing_timeout", "data": {"error": str(exc)}, "timestamp": time.time()}),
-        )
-    except Exception as exc:
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "lightrag_processing_error", "data": {"error": str(exc)}, "timestamp": time.time()}),
-        )
-
-    # Phase 5: Link LLM-extracted visual entities to the photo node
-    # wait_for_lightrag_processing already confirmed our document reached a
-    # terminal state, so visual entities should exist.  The previous code
-    # polled the *global* label count which races with concurrent jobs —
-    # another job creating entities could trigger an early break before our
-    # document's entities exist.  Just proceed to linking directly.
-    if photo_name is None:
-        photo_name = f"{file_source} (Photo)"
-
-    try:
-        visual_result = await link_exif_to_visual_entities(config.lightrag_url(), file_source, photo_name)
-        for link in visual_result.get("visual_links_created", []):
-            if "source" not in link:
-                link["source"] = link.get("source_entity") or link.get("src") or ""
-            if "target" not in link:
-                link["target"] = link.get("target_entity") or link.get("tgt") or photo_name
-            yield ServerSentEvent(
-                event="message",
-                data=json.dumps({"event": "visual_entity_linked", "data": link, "timestamp": time.time()}),
-            )
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "visual_links_complete", "data": visual_result, "timestamp": time.time()}),
-        )
-    except Exception as exc:
-        logger.exception("Visual entity linking failed for %s", file_source)
-        yield ServerSentEvent(
-            event="message",
-            data=json.dumps({"event": "visual_links_failed", "data": {"error": str(exc)}, "timestamp": time.time()}),
-        )
-
-    yield ServerSentEvent(
-        event="message",
-        data=json.dumps({"event": "pipeline_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
-    )
-
-
-async def _process_and_stream(
-    file_path: str,
-    file_source: str,
-    skip_exif: bool,
-    skip_faces: bool,
-    insert: bool,
-    note: str = "",
-):
-    """Legacy single-image pipeline: run phase 1 then phase 2 sequentially.
-
-    Kept for the synchronous single-upload endpoints (``/process``,
-    ``/reprocess``) that stream both phases to one SSE client. The batch
-    coordinator in ``job_manager`` drives the two phases independently via
-    ``_run_exif_phase`` / ``_run_ai_phase``.
-    """
-    metadata_text: str | None = None
-    async for ev in _run_exif_phase(file_path, file_source, skip_exif, skip_faces, insert, note):
-        yield ev
-
-    if not insert:
-        return
-
-    # Phase 1 persisted metadata_text to the DB; phase 2 reads it back so the
-    # two phases share state through the DB rather than an in-memory value
-    # that would be lost on restart. This also keeps phase 2's contract
-    # identical whether it runs chained or standalone.
-    async for ev in _run_ai_phase(file_path, file_source, None, note=note):
-        yield ev
 
 
 @router.post("/process")
@@ -1252,12 +952,11 @@ async def create_image_job(
         skip_faces=skip_faces_bool,
         insert=insert_bool,
         note=note or "",
+        file_type="image",
     )
-    # Enqueue into the two-phase batch coordinator. A single upload with no
-    # other pending jobs runs through phase 1 then phase 2 for this one job;
-    # a burst of uploads coalesces into one batch so all phase-1 (EXIF) work
-    # finishes before any phase-2 (VLM) work starts.
-    await enqueue_and_maybe_batch(job)
+    # The worker process polls the jobs table for status='pending' rows and
+    # claims them via SELECT ... FOR UPDATE SKIP LOCKED — no in-process
+    # enqueue needed. Just return; the worker picks the row up within ~1s.
     return {"job_id": job.id, "status": job.status, "file_source": job.file_source}
 
 
@@ -1293,6 +992,28 @@ async def list_image_jobs(status: Optional[str] = None):
     ]
 
 
+@router.post("/jobs/process-ai-queue")
+async def process_ai_queue():
+    """Manually trigger VLM processing for all jobs sitting at exif_complete.
+
+    Normally the overnight scheduler (running in the worker process) handles
+    this, but this endpoint lets an operator run the AI queue on demand (e.g.
+    before a long upload session or when the scheduled hour was missed).
+
+    The batch itself runs in the worker process; this endpoint just sends a
+    Postgres NOTIFY on the ``worker_control`` channel and returns. The worker
+    LISTENs on that channel and runs ``run_overnight_vlm_batch`` when it
+    receives the signal.
+    """
+    pool = await db_module.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "SELECT pg_notify('worker_control', $1)",
+            json.dumps({"action": "run_overnight_vlm_batch"}),
+        )
+    return {"status": "ok", "processed": None}
+
+
 @router.get("/jobs/{job_id}")
 async def get_image_job(job_id: str):
     job = await get_job(job_id)
@@ -1319,33 +1040,52 @@ async def stream_job_events(job_id: str, after: int = 0):
         raise HTTPException(status_code=404, detail="Job not found")
 
     async def event_stream():
-        queue = subscribe_events(job_id)
+        # Replay past events first, then LISTEN for live ones via Postgres
+        # LISTEN/NOTIFY. The worker process (or legacy sync endpoints) writes
+        # events to job_events and pg_notifies the job_events_{job_id}
+        # channel; this SSE endpoint holds a dedicated asyncpg connection
+        # for the listener (asyncpg listeners need their own connection, not
+        # a pooled acquire() that may be recycled) and bridges the sync
+        # callback into an asyncio.Queue.
+        past_events = await get_events(job_id, after_event_id=after)
+        last_event_id = after
+        for evt in past_events:
+            event_data = evt["event_data"]
+            if isinstance(event_data, str):
+                try:
+                    event_data = json.loads(event_data)
+                except (json.JSONDecodeError, TypeError):
+                    event_data = {"raw": event_data}
+            last_event_id = evt["id"]
+            yield ServerSentEvent(
+                event="message",
+                data=json.dumps({
+                    "event": evt["event_type"],
+                    "data": event_data,
+                    "event_id": evt["id"],
+                    "timestamp": evt["created_at"],
+                }),
+            )
+
+        if job.status in ("complete", "failed", "cancelled"):
+            return
+
+        pool = await db_module.get_pool()
+        conn = await pool.acquire()
+        notify_queue: asyncio.Queue = asyncio.Queue()
+
+        def _on_notify(c, pid, channel, payload):
+            try:
+                notify_queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
+
+        channel = f"job_events_{job_id}"
         try:
-            past_events = await get_events(job_id, after_event_id=after)
-            for evt in past_events:
-                event_data = evt["event_data"]
-                if isinstance(event_data, str):
-                    try:
-                        event_data = json.loads(event_data)
-                    except (json.JSONDecodeError, TypeError):
-                        event_data = {"raw": event_data}
-                yield ServerSentEvent(
-                    event="message",
-                    data=json.dumps({
-                        "event": evt["event_type"],
-                        "data": event_data,
-                        "event_id": evt["id"],
-                        "timestamp": evt["created_at"],
-                    }),
-                )
-
-            if job.status in ("complete", "failed", "cancelled"):
-                unsubscribe_events(job_id)
-                return
-
+            await conn.add_listener(channel, _on_notify)
             while True:
                 try:
-                    evt = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    payload = await asyncio.wait_for(notify_queue.get(), timeout=30.0)
                 except asyncio.TimeoutError:
                     current = await get_job(job_id)
                     if current and current.status in ("complete", "failed", "cancelled"):
@@ -1361,19 +1101,43 @@ async def stream_job_events(job_id: str, after: int = 0):
                     yield ServerSentEvent(event="heartbeat", data="")
                     continue
 
-                yield ServerSentEvent(
-                    event="message",
-                    data=json.dumps({
-                        "event": evt["event_type"],
-                        "data": evt["event_data"] if isinstance(evt["event_data"], dict) else json.loads(evt["event_data"]) if isinstance(evt["event_data"], str) else {"raw": evt["event_data"]},
-                        "timestamp": time.time(),
-                    }),
-                )
+                try:
+                    notif = json.loads(payload)
+                    notif_id = int(notif.get("id", 0))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    notif_id = 0
+
+                # Fetch all event rows newer than what we've already sent so
+                # we never miss an event if multiple arrived between
+                # notifications (the NOTIFY only carries the latest id).
+                after_id = max(last_event_id, notif_id - 1)
+                new_events = await get_events(job_id, after_event_id=after_id)
+                for evt in new_events:
+                    event_data = evt["event_data"]
+                    if isinstance(event_data, str):
+                        try:
+                            event_data = json.loads(event_data)
+                        except (json.JSONDecodeError, TypeError):
+                            event_data = {"raw": event_data}
+                    last_event_id = evt["id"]
+                    yield ServerSentEvent(
+                        event="message",
+                        data=json.dumps({
+                            "event": evt["event_type"],
+                            "data": event_data,
+                            "event_id": evt["id"],
+                            "timestamp": evt["created_at"],
+                        }),
+                    )
 
                 current = await get_job(job_id)
                 if current and current.status in ("complete", "failed", "cancelled"):
                     break
         finally:
-            unsubscribe_events(job_id)
+            try:
+                await conn.remove_listener(channel, _on_notify)
+            except Exception:
+                pass
+            await pool.release(conn)
 
     return EventSourceResponse(event_stream())

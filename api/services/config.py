@@ -142,6 +142,28 @@ def allowed_upload_extensions() -> frozenset[str]:
     )
 
 
+def vlm_batch_start_hour() -> int:
+    """Hour (0-23, local server time) at which the overnight VLM batch fires.
+
+    Phase 2 (VLM description) is deferred after EXIF extraction so images
+    appear in the graph immediately with their EXIF date/location/camera.
+    The VLM batch runs at this hour each day, processing all jobs sitting at
+    ``exif_complete``.  Set to -1 to disable the scheduled trigger (manual
+    only via POST /images/jobs/process-ai-queue).
+    """
+    return _env_int("VLM_BATCH_START_HOUR", 2)
+
+
+def vlm_batch_enabled() -> bool:
+    """Whether the overnight VLM scheduler is active.
+
+    When False, phase 2 runs immediately after phase 1 (legacy behavior).
+    When True (default), phase 2 is deferred to the scheduled hour or
+    manual trigger.
+    """
+    return _env_int("VLM_BATCH_ENABLED", 1) == 1
+
+
 def cors_allowed_origins() -> list[str]:
     """Allowed CORS origins.
 

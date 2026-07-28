@@ -45,7 +45,7 @@ from urllib.request import Request, urlopen
 # scripts/ is a flat directory (no __init__.py); import from a sibling
 # module the way Python places ``scripts`` on sys.path when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from note_sources import is_note_file_source
+from note_sources import is_doc_chunk_source, is_note_file_source
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,7 +54,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_EXIF_SUFFIXES = (" (Date)", " (Camera)", " (Location)", " (Photo)", " (Note)")
+_EXIF_SUFFIXES = (" (Date)", " (Camera)", " (Location)", " (Photo)", " (Note)", " (Document)", " (Chat)", " (Pdf)")
 _GRAPH_FIELD_SEP = "<SEP>"
 _RELATION_KEYWORDS = "appears_in"
 
@@ -63,12 +63,42 @@ def _is_exif_entity(label: str) -> bool:
     return label.endswith(_EXIF_SUFFIXES)
 
 
-def _hub_name_for(file_source: str) -> str:
-    # Notes use a (Note) hub; images use a (Photo) hub.  An entity's file_path
-    # lists its source documents, so the hub type is determined per source.
+_HUB_SUFFIX = {"image": " (Photo)", "note": " (Note)", "chat": " (Chat)", "pdf": " (Pdf)", "document": " (Document)"}
+_ENTITY_TYPE = {"image": "Photo", "note": "Note", "chat": "Chat", "pdf": "Pdf", "document": "Document"}
+_DESC_PREFIX = {"image": "Photo", "note": "Note", "chat": "Chat", "pdf": "Pdf", "document": "Document"}
+
+# Photo filename heuristics — mirrors note_sources.py:_looks_like_photo
+_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".raw", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+
+
+def _looks_like_photo(file_source: str) -> bool:
+    """Return True for filename-shaped photo sources."""
+    lowered = file_source.lower()
+    if lowered.startswith("pxl_"):
+        return True
+    return any(lowered.endswith(ext) for ext in _PHOTO_EXTENSIONS)
+
+
+def _resolve_file_type(file_source: str) -> str:
+    """Determine the document file_type from the file_source string.
+
+    Returns 'image', 'note', 'chat', 'pdf', or 'document' (for chunk IDs).
+    Falls back to 'image' for unknown sources (legacy default — the
+    orphan-repair script historically created (Photo) hubs for anything
+    non-note).
+    """
+    if is_doc_chunk_source(file_source):
+        return "document"
     if is_note_file_source(file_source):
-        return f"{file_source} (Note)"
-    return f"{file_source} (Photo)"
+        return "note"
+    if _looks_like_photo(file_source):
+        return "image"
+    return "image"  # legacy default
+
+
+def _hub_name_for(file_source: str) -> str:
+    ft = _resolve_file_type(file_source)
+    return f"{file_source}{_HUB_SUFFIX[ft]}"
 
 
 def _api_delete(base_url: str, path: str, payload: dict[str, Any]) -> Any:
@@ -156,13 +186,15 @@ def create_relation(base_url: str, source: str, target: str, description: str, k
 
 def create_hub_entity(base_url: str, file_source: str) -> dict[str, Any]:
     hub_name = _hub_name_for(file_source)
-    is_note = is_note_file_source(file_source)
+    ft = _resolve_file_type(file_source)
+    entity_type = _ENTITY_TYPE[ft]
+    description = f"{_DESC_PREFIX[ft]}: {file_source}"
     entity_data: dict[str, Any] = {
-        "description": f"Note: {file_source}" if is_note else f"Photo: {file_source}",
-        "entity_type": "Note" if is_note else "Photo",
+        "description": description,
+        "entity_type": entity_type,
         "source_id": file_source,
     }
-    if is_note:
+    if ft == "note":
         ds = _note_date_strings(file_source)
         if ds:
             entity_data["date_taken_friendly"] = ds[1]
@@ -174,7 +206,7 @@ def create_hub_entity(base_url: str, file_source: str) -> dict[str, Any]:
 
 def find_orphans(base_url: str, labels: list[str]) -> list[dict[str, Any]]:
     orphans: list[dict[str, Any]] = []
-    hub_labels = {l for l in labels if l.endswith(" (Photo)") or l.endswith(" (Note)")}
+    hub_labels = {l for l in labels if l.endswith((" (Photo)", " (Note)", " (Document)", " (Chat)", " (Pdf)"))}
 
     visual_labels = [l for l in labels if not _is_exif_entity(l)]
 
@@ -239,7 +271,7 @@ def repair_orphans(base_url: str, orphans: list[dict[str, Any]], dry_run: bool) 
         for hub_name in orphan.get("missing_hubs", []):
             if hub_name in hubs_created:
                 continue
-            suffix = " (Note)" if hub_name.endswith(" (Note)") else " (Photo)"
+            suffix = next(s for s in _HUB_SUFFIX.values() if hub_name.endswith(s))
             file_source = hub_name[:-len(suffix)]
             if dry_run:
                 logger.info("  [DRY RUN] Would create hub node: '%s'", hub_name)
@@ -305,7 +337,7 @@ def cleanup_isolated_hubs(base_url: str, labels: list[str], dry_run: bool) -> tu
     # never ingested (or was deleted) — no entities will ever link to it.
     deleted = 0
     failed = 0
-    hub_labels = [l for l in labels if l.endswith(" (Photo)") or l.endswith(" (Note)")]
+    hub_labels = [l for l in labels if l.endswith((" (Photo)", " (Note)", " (Document)", " (Chat)", " (Pdf)"))]
 
     try:
         docs = _get_documents(base_url)
@@ -318,7 +350,8 @@ def cleanup_isolated_hubs(base_url: str, labels: list[str], dry_run: bool) -> tu
     logger.info("Checking %d hub node(s) for isolation", len(hub_labels))
 
     for hub in hub_labels:
-        file_source = hub[: -len(" (Photo)")] if hub.endswith(" (Photo)") else hub[: -len(" (Note)")]
+        suffix = next(s for s in _HUB_SUFFIX.values() if hub.endswith(s))
+        file_source = hub[:-len(suffix)]
         try:
             subgraph = get_node_subgraph(base_url, hub)
         except Exception as exc:

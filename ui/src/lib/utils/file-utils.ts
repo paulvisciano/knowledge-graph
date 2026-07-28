@@ -7,7 +7,7 @@ export const SUPPORTED_TEXT_TYPES = new Set([
   'text/html', 'text/xml', 'application/xml', 'text/yaml', 'text/x-log',
 ]);
 
-export const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — matches backend limit
 export const MAX_ATTACHMENTS = 20;
 
 export interface Attachment {
@@ -47,14 +47,13 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
 }
 
 async function fileToImageAttachment(file: File, mimeType: string): Promise<Attachment> {
-  const dataUrl = await readFileAsDataUrl(file);
   const thumbnailUrl = URL.createObjectURL(file);
 
   return {
     id: crypto.randomUUID(),
     file,
     mimeType,
-    dataUrl,
+    dataUrl: '',
     thumbnailUrl,
     name: file.name,
     size: file.size,

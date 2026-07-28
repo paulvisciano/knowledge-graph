@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 _LIGHTRAG_API_URL = os.getenv("LIGHTRAG_API_URL", "http://localhost:9621")
 _LIGHTRAG_API_KEY = os.getenv("LIGHTRAG_API_KEY", "")
 _MCP_PORT = int(os.getenv("MEMORY_SEARCH_MCP_PORT", "9653"))
-_IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "600"))
+_IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "0"))
 
 logger = logging.getLogger("knowledge_graph_mcp")
 
@@ -590,7 +590,11 @@ async def query_knowledge_graph(
         if query_date and response:
             response = _filter_response_by_date(response, query_date)
 
-        if query_date and response and "No knowledge graph data found" not in response:
+        # LightRAG already extracts entities/relationships from the full VLM
+        # description at ingestion time. Re-sending raw descriptions at query
+        # time is redundant — the structured graph data already captures people,
+        # places, and activities. Set IMG_DESC_MAX_CHARS > 0 to re-enable.
+        if _IMG_DESC_MAX_CHARS > 0 and query_date and response and "No knowledge graph data found" not in response:
             photo_names = _extract_photo_names(response)
             if photo_names:
                 image_descs = await _fetch_image_descriptions(photo_names)

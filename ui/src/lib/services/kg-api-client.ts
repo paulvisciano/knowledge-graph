@@ -87,6 +87,10 @@ export class KgApiClient {
     return this.request(API.kg.jobStatus(jobId));
   }
 
+  async processAIQueue(): Promise<{ status: string; processed: number }> {
+    return this.request(API.kg.processAIQueue, { method: 'POST' });
+  }
+
   streamJobEvents(
     jobId: string,
     after: number = 0

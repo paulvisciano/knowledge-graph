@@ -12,12 +12,22 @@
 
   let { children }: { children: import('svelte').Snippet } = $props();
 
+  let pollingStarted = false;
   $effect(() => {
+    let cancelled = false;
     connectionStore
       .connectMcp()
       .catch((e) => console.error('MCP connect failed:', e))
-      .finally(() => connectionStore.startPolling());
-    return () => connectionStore.stopPolling();
+      .finally(() => {
+        if (cancelled || pollingStarted) return;
+        pollingStarted = true;
+        connectionStore.startPolling();
+      });
+    return () => {
+      cancelled = true;
+      pollingStarted = false;
+      connectionStore.stopPolling();
+    };
   });
 
   $effect(() => {

@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import health, images, settings, sync, graph
 from api.services import config
 from api.services import db as db_module
-from api.services.job_manager import resume_pending_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,9 +17,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Knowledge Graph API starting up")
     await db_module.init_db()
-    resumed = await resume_pending_jobs()
-    if resumed:
-        logger.info("Resumed %d pending/interrupted jobs", len(resumed))
+    # The worker process (api.worker) owns all image processing: it polls the
+    # jobs table, runs the two-phase pipeline, and runs the overnight VLM
+    # batch scheduler. The API process only serves HTTP, so no
+    # resume_pending_jobs / scheduler task is created here.
     yield
     await db_module.close_db()
     logger.info("Knowledge Graph API shutting down")

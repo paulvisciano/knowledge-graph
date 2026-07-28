@@ -25,7 +25,7 @@
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient, type JobInfo } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
-  import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, type Attachment } from '$lib/utils/file-utils';
+  import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, MAX_FILE_SIZE, type Attachment } from '$lib/utils/file-utils';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
 
   interface Conversation {
@@ -486,20 +486,70 @@
 
   /** Process image files picked from the graph page directly through the KG
    *  EXIF pipeline. Does NOT add them to chat attachments, does NOT send them
-   *  to the LLM. */
+   *  to the LLM. Uploads all jobs in parallel, then connects SSE with
+   *  capped concurrency to avoid exhausting the browser connection pool. */
   async function handleGraphImageFiles(fileList: FileList | null) {
     if (!fileList) return;
     const files = Array.from(fileList);
+
+    const attachments: Attachment[] = [];
     for (const file of files) {
-      try {
-        const att = await fileToAttachment(file);
-        if (!isImageType(att.mimeType)) continue;
-        await processSingleImage(att, '');
-      } catch (err) {
-        console.warn(`Graph image processing failed for ${file.name}:`, err);
+      if (file.size > MAX_FILE_SIZE) {
+        console.warn(`${file.name} exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`);
+        continue;
       }
+      const mimeType = file.type || 'image/jpeg';
+      if (!isImageType(mimeType)) continue;
+      attachments.push({
+        id: crypto.randomUUID(),
+        file,
+        mimeType,
+        dataUrl: '',
+        thumbnailUrl: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size,
+      });
     }
+
+    await submitImageBatch(attachments);
     if (imageFileInput) imageFileInput.value = '';
+  }
+
+  /** Upload a batch of image attachments as jobs, add photo nodes to the
+   *  graph immediately, then connect SSE streams with capped concurrency. */
+  const MAX_CONCURRENT_SSE = 3;
+
+  async function submitImageBatch(attachments: Attachment[]) {
+    const results = await Promise.allSettled(
+      attachments.map((att) => kgApiClient.createJob(att.file, { insert: true, note: '' }).then((job) => ({ att, job })))
+    );
+
+    const toTrack: { jobId: string; photoNodeId: string; att: Attachment }[] = [];
+    for (const r of results) {
+      if (r.status !== 'fulfilled') continue;
+      const { att, job } = r.value;
+      const photoNodeId = `${att.name} (Photo)`;
+      imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
+      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
+      if (att.thumbnailUrl ?? att.dataUrl) {
+        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
+      }
+      toTrack.push({ jobId: job.job_id, photoNodeId, att });
+    }
+
+    let activeSSE = 0;
+    const queue = [...toTrack];
+    const next = (): void => {
+      while (activeSSE < MAX_CONCURRENT_SSE && queue.length > 0) {
+        const item = queue.shift()!;
+        activeSSE++;
+        consumeJobEvents(item.jobId, item.photoNodeId, item.att).finally(() => {
+          activeSSE--;
+          next();
+        });
+      }
+    };
+    next();
   }
 
   function openDocumentPicker() {
@@ -1186,7 +1236,7 @@
       if (att.thumbnailUrl ?? att.dataUrl) {
         graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
       }
-      await consumeJobEvents(job.job_id, photoNodeId, att);
+      consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.warn(`KG image processing failed for ${att.name}:`, err);
@@ -1375,9 +1425,8 @@
 
   /** Poll a batch of jobs for status updates with limited concurrency.
    *  When a job transitions to 'processing', opens a single SSE stream for it.
-   *  Caps concurrent SSE connections to avoid exhausting the browser's HTTP
-   *  connection pool (browsers allow ~6 per origin). */
-  const MAX_CONCURRENT_SSE = 3;
+    *  Caps concurrent SSE connections to avoid exhausting the browser's HTTP
+    *  connection pool (browsers allow ~6 per origin). */
 
   async function pollJobBatch(jobs: JobInfo[]) {
     const activeSSE = new Set<string>();
@@ -1386,10 +1435,11 @@
     while (true) {
       await new Promise((r) => setTimeout(r, pollIntervalMs));
 
-      // Remove jobs that have left the store (user dismissed them).
       const liveJobs = jobs.filter((j) => {
         const photoNodeId = `${j.file_source} (Photo)`;
-        return !!imageProcessingStore.statuses[photoNodeId];
+        const status = imageProcessingStore.statuses[photoNodeId];
+        if (!status) return false;
+        return status.stage !== 'complete' && status.stage !== 'error';
       });
       if (liveJobs.length === 0) return;
       jobs = liveJobs;

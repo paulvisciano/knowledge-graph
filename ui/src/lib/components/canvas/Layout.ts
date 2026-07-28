@@ -20,8 +20,13 @@
 
 import type { KGNode, KGEdge } from '$lib/constants';
 import { API } from '$lib/constants';
-import type { CanvasNode, NodeKind } from './renderer/types';
+import type { BuildCtx, CanvasNode, NodeKind } from './renderer/types';
 import { CHUNK_SIZE, TIME_BUCKET_SPACING } from './renderer/constants';
+// Side-effect import: registers all providers (note/docChunk/photo/person/
+// location/event) in registration order. MUST come before any use of
+// `classifyKind`/`getProvider` so the registry is populated.
+import './renderer/providers';
+import { classifyKind as classifyKindRegistry, getProvider } from './renderer/NodeKindProvider';
 
 const KG_API_BASE = '/api/kg';
 
@@ -76,6 +81,16 @@ export function isNoteFileSource(s: string): boolean {
   return false;
 }
 
+/** Recognize a LightRAG document-chunk `source_id`. Chunk IDs look like
+ *  `doc-{32 hex}-chunk-{NNN}` (from lightrag/utils_pipeline.py). They are
+ *  internal chunk identifiers, NOT image filenames — a spurious (Photo)
+ *  hub with a chunk source_id must not route to the photo image path. */
+export function isDocChunkFileSource(s: string): boolean {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  if (s.includes('<SEP>')) return false;
+  return /^doc-[a-f0-9]{32}-chunk-\d{3}$/.test(s);
+}
+
 /**
  * True if the node represents a Note entity (diary entry, chat note, plan
  * entry, daily update, personal-context update, …). Matches any of:
@@ -110,7 +125,7 @@ export function isNoteNode(node: {
 }
 
 /** True if the node represents a Photo/Image entity. */
-function isPhotoNode(node: {
+export function isPhotoNode(node: {
   labels?: string[];
   properties?: Record<string, unknown>;
   id?: string;
@@ -136,7 +151,7 @@ function isStalePhotoNode(node: {
 }
 
 /** True if the node represents a Person entity. */
-function isPersonNode(node: {
+export function isPersonNode(node: {
   labels?: string[];
   properties?: Record<string, unknown>;
 }): boolean {
@@ -146,7 +161,7 @@ function isPersonNode(node: {
 }
 
 /** True if the node represents a Location entity. */
-function isLocationNode(node: {
+export function isLocationNode(node: {
   labels?: string[];
   properties?: Record<string, unknown>;
 }): boolean {
@@ -156,7 +171,7 @@ function isLocationNode(node: {
 }
 
 /** True if the node represents an Event entity. */
-function isEventNode(node: {
+export function isEventNode(node: {
   labels?: string[];
   properties?: Record<string, unknown>;
 }): boolean {
@@ -167,19 +182,14 @@ function isEventNode(node: {
 
 /**
  * Classify a `KGNode` into one of the renderer's visual categories.
- * Order matters: note → photo → person → location → event → concept.
- *
- * `note` is checked BEFORE `photo` so a spurious `(Photo)` hub whose
- * `source_id` is actually a note file_source is classified as `note` and
- * never routed to the photo image URL path (which 404s).
+ * Delegates to the provider registry (`renderer/NodeKindProvider.ts`),
+ * which iterates providers in registration order (note → docChunk → photo →
+ * person → location → event), falling back to `'concept'`. The note-first
+ * ordering is preserved so a spurious `(Photo)` hub with a note/chunk
+ * `source_id` reclassifies before the photo check matches.
  */
 export function classifyKind(node: KGNode): NodeKind {
-  if (isNoteNode(node)) return 'note';
-  if (isPhotoNode(node)) return 'photo';
-  if (isPersonNode(node)) return 'person';
-  if (isLocationNode(node)) return 'location';
-  if (isEventNode(node)) return 'event';
-  return 'concept';
+  return classifyKindRegistry(node);
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +657,7 @@ export function buildCanvasLayout(
   selectedNodeId?: string | null,
   noteContents: Record<string, string> = {},
 ): CanvasNode[] {
+  const ctx: BuildCtx = { photoImages, noteContents };
   const timePlan = buildTimePlan(nodes, edges);
   const clusters = buildClusterAssignment(nodes, edges);
   const depthPlan = buildDepthPlan(nodes, edges, selectedNodeId);
@@ -656,19 +667,20 @@ export function buildCanvasLayout(
   // into a compact vertical stack. Each band occupies one chunk-Y row.
   const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
 
-  // Group renderable nodes (photos AND notes) by their time bucket (cellZ)
-  // so we can spread each layer across the screen. Without this, all nodes in
-  // a bucket share cellX=0 (when nothing is focused) and collapse into a
-  // narrow column. Notes share the photo timeline (the backend sets
-  // `date_taken_friendly`/`created_at` on them, read by `parseNodeDate`).
-  // Stale-photo filtering only applies to `photo` kind — notes don't need a
-  // `source_id` to render text, so a note with no source_id is kept.
+  // Group renderable nodes (photos, notes, and doc-chunks) by their time
+  // bucket (cellZ) so we can spread each layer across the screen. Without
+  // this, all nodes in a bucket share cellX=0 (when nothing is focused) and
+  // collapse into a narrow column. Notes and doc-chunks share the photo
+  // timeline (the backend sets `date_taken_friendly`/`created_at` on them,
+  // read by `parseNodeDate`). Renderability is delegated to each provider's
+  // `shouldRender` — e.g. the docChunk provider hides image-description
+  // chunks, and the photo provider hides stale `manual_creation` photos.
   const photosByBucket = new Map<number, KGNode[]>();
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const kind = classifyKind(node);
-    if (kind !== 'photo' && kind !== 'note') continue;
-    if (kind === 'photo' && isStalePhotoNode(node)) continue;
+    const provider = getProvider(kind);
+    if (!provider || !provider.shouldRender(node, ctx)) continue;
     const z = timePlan.cellZOf.get(node.id) ?? i;
     const arr = photosByBucket.get(z);
     if (arr) arr.push(node);
@@ -706,8 +718,8 @@ export function buildCanvasLayout(
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const kind = classifyKind(node);
-    if (kind !== 'photo' && kind !== 'note') continue;
-    if (kind === 'photo' && isStalePhotoNode(node)) continue;
+    const provider = getProvider(kind);
+    if (!provider || !provider.shouldRender(node, ctx)) continue;
     const depth = depthPlan.depthOf.get(node.id) ?? 0;
     const grid = gridPosOf.get(node.id) ?? { x: 0, y: 0 };
     // Relationship depth is a minor parallax offset layered on top of the
@@ -764,32 +776,10 @@ export function buildCanvasLayout(
     let imageUrl: string | undefined;
     let fullUrl: string | undefined;
     let textContent: string | undefined;
-    if (kind === 'note') {
-      // Notes render text via a local CanvasTexture — no image URL, no
-      // TextureCache call (routing them through the URL cache is what caused
-      // the 404s on spurious `(Photo)` hubs with a note source_id).
-      // Prefer the full note text fetched from the processed LightRAG
-      // document (same source as the Ingest tab); fall back to the short
-      // description label while the async fetch is in-flight.
-      const np = node.properties ?? {};
-      const text =
-        noteContents[node.id] ??
-        (np.description as string | undefined) ??
-        (np.summary as string | undefined) ??
-        (np.title as string | undefined) ??
-        node.id;
-      textContent = typeof text === 'string' ? text : node.id;
-    } else {
-      const cached = photoImages[node.id];
-      if (cached) {
-        imageUrl = cached;
-      } else {
-        const fname = photoFilename(node);
-        if (fname) imageUrl = `${KG_API_BASE}${API.kg.photoImageThumb(fname, 512)}`;
-      }
-      const fname = photoFilename(node);
-      if (fname) fullUrl = `${KG_API_BASE}${API.kg.photoImageFull(fname)}`;
-    }
+    const fields = getProvider(kind)?.buildCanvasFields(node, ctx) ?? {};
+    imageUrl = fields.imageUrl;
+    fullUrl = fields.fullUrl;
+    textContent = fields.textContent;
 
     out[i] = {
       id: node.id,

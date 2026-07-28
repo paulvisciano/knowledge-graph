@@ -1,0 +1,84 @@
+{
+  "state": "before",
+  "timestamp": "2026-07-26 09:51:48",
+  "description": "Before NLP keyword extraction — LLM-based keyword extraction (mode=local, top_k=5, only_need_context=True, no pre-supplied keywords)",
+  "config": {
+    "mode": "local",
+    "top_k": 5,
+    "only_need_context": true,
+    "keywords": "LLM-extracted (LightRAG keyword LLM)"
+  },
+  "results": [
+    {
+      "id": "date_range",
+      "label": "Date Range Query",
+      "query": "What photos and notes do I have from June and July 2026?",
+      "description": "Core use case — multi-month span covering both photo dates (June) and note dates (July)",
+      "mode": "local",
+      "top_k": 5,
+      "elapsed_seconds": 124,
+      "response_length": 6041,
+      "total_refs": 0,
+      "image_refs": [],
+      "note_refs": [],
+      "all_ref_paths": [],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"2026-07-20 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-20\"}\n{\"entity\": \"2026-07-21 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-21\"}\n{\"entity\": \"2026-07-22 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-07-22\"}\n{\"entity\": \"2026-06-27 (Date)\", \"type\": \"Date\", \"description\": \"Calendar date 2026-06-27 at 20:31\"}\n{\"entity\": \"diary-entry-2026-07-23-20260723-202946-852507 (Photo)\", \"type\": \"Photo\", \"description\": \"Photo: diary-entry-2026-07-23-20260723-202946-852507\"}\n```\n\nKnowledge Graph Data (Relationship):\n\n```json\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"Google Pixel 10 Pro XL\", \"description\": \"Photo taken on 2026-06-27 at 20:31, also taken_with Google Pixel 10 Pro XL\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"Saint Petersburg, Florida, US\", \"description\": \"Photo taken on 2026-06-27 at 20:31, also taken_at Saint Petersburg, Florida, US\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_211217476.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 17:12\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_212824098.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 17:28\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260627_234507194.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 19:45\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_005524365.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 20:55\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_005522804.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 20:55\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_205458135.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 16:54\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_013329325.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 21:33\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_190746743.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 15:07\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_212821742.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 17:28\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_001642628.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 20:16\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_190759960.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 15:07\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_013332134.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-27 at 21:33\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"Gulfport, Florida, US (Location)\", \"description\": \"Photo taken on 2026-06-28 at 16:54, also taken_at Gulfport, Florida, US (Location)\"}\n{\"entity1\": \"2026-06-27 (Date)\", \"entity2\": \"PXL_20260628_205459923.RAW-01.jpg (Photo)\", \"description\": \"Photo taken on 2026-06-28 at 16:54\"}\n{\"entity1\": \"2",
+      "status": "success"
+    },
+    {
+      "id": "entity_specific",
+      "label": "Entity-Specific Query",
+      "query": "Show me beach photos and any notes about the beach",
+      "description": "Entity-focused retrieval — should return photos with Beach entity and notes mentioning Beach",
+      "mode": "local",
+      "top_k": 5,
+      "elapsed_seconds": 89,
+      "response_length": 27075,
+      "total_refs": 4,
+      "image_refs": [
+        "PXL_20260424_183140200.jpg",
+        "PXL_20260531_160852378.RAW-01.jpg",
+        "PXL_20260424_160812149.jpg",
+        "PXL_20260425_142156714.MP.jpg"
+      ],
+      "note_refs": [],
+      "all_ref_paths": [
+        "PXL_20260424_183140200.jpg",
+        "PXL_20260531_160852378.RAW-01.jpg",
+        "PXL_20260424_160812149.jpg",
+        "PXL_20260425_142156714.MP.jpg"
+      ],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"Beach\", \"type\": \"location\", \"description\": \"Beach is a coastal environment characterized by its expansive sandy terrain and its proximity to a large body of water, specifically the ocean. It serves as a versatile and multi-purpose space where natural features, such as sand and water, integrate with various man-made elements and infrastructure. The physical composition of the beach includes a transition from grassy areas to the water, featuring light beige, white, or light grey sand. In certain contexts, the beach is specifically identified as a sandy area located between a swimming pool and the ocean.\\n\\nAs a public space, the beach is used for a wide range of community activities and general recreation. These activities include walking, relaxing, and the use of various recreational equipment. Specific sports and events are conducted on the beach, such as beach volleyball and yoga events where participants can view a skyline and waterfront. Additionally, the beach serves as a location for dining, social interaction, and other outdoor activities.\\n\\nThe beach functions as a significant venue for both organized events and general recreation, often accommodating large crowds, particularly in proximity to a beach club. It provides a space where bicycles can be parked and where bike riding is planned, although it is also noted as a location that was not visited during specific bike ride instances. Furthermore, the beach is an environment where environmental factors, such as weather conditions like expected afternoon rain, are relevant to planned activities. Overall, the beach provides a diverse environment that supports a wide range of uses, from recreational sports to general public enjoyment.<SEP>An outdoor coastal area featuring white sand, dunes, and various structures.\"}\n{\"entity\": \"Person 2\", \"type\": \"person\", \"description\": \"Person 2 refers to a set of individuals whose characteristics and positions vary across different contexts, suggesting that the name may refer to multiple distinct individuals or a single individual described across various visual contexts. Because of these variations, the entities associated with Person 2 can be categorized into several distinct groups.\\n\\nOne group of descriptions identifies a male individual with dark hair and a dark beard. This individual is associated with a tan skin tone and is located in the background right of the image. In other contexts, this individual is described as being positioned in the center/background near a grill, where he is seen wearing a grey t-shirt and shorts. Another individual in this category is identified as a male with dark hair and a beard who is characterized by a smiling expression. This individual is located in the middle-left background and is observed performing a \\\"shaka\\\" hand gesture. Additionally, a male individual is identified in the center-left who shares these characteristics of dark hair and a dark beard, and i",
+      "status": "success"
+    },
+    {
+      "id": "long_natural",
+      "label": "Long Natural Language (Audio Transcription Simulation)",
+      "query": "Hey so I was thinking about that trip we took to St Pete back in June you know the one where we went to the beach and saw that crazy sunset and I wanted to compare that with the notes I wrote on July 22nd about the bike ride downtown and whether it rained that evening",
+      "description": "Simulates a long voice transcription — tests whether keyword extraction can handle a rambling 60+ word query",
+      "mode": "local",
+      "top_k": 5,
+      "elapsed_seconds": 98,
+      "response_length": 18762,
+      "total_refs": 5,
+      "image_refs": [
+        "PXL_20260501_203025149.RAW-01.jpg",
+        "PXL_20260501_203021057.RAW-01.jpg",
+        "PXL_20260501_204405876.RAW-01.jpg"
+      ],
+      "note_refs": [
+        "plan_entry",
+        "note_1784640603"
+      ],
+      "all_ref_paths": [
+        "plan_entry",
+        "PXL_20260501_203025149.RAW-01.jpg",
+        "PXL_20260501_203021057.RAW-01.jpg",
+        "PXL_20260501_204405876.RAW-01.jpg",
+        "note_1784640603"
+      ],
+      "response_preview": "\nKnowledge Graph Data (Entity):\n\n```json\n{\"entity\": \"Bike Riding\", \"type\": \"activity\", \"description\": \"A cycling activity performed in downtown St. Pete and toward the beach.\"}\n{\"entity\": \"Bike Ride\", \"type\": \"activity\", \"description\": \"An activity involving cycling, planned in both downtown St. Pete and towards the beach.\"}\n{\"entity\": \"Saint Pete Beach\", \"type\": \"location\", \"description\": \"Saint Pete Beach is a coastal location situated in the state of Florida, United States. It is characterized by its diverse geographical and environmental features, including its beach environment, various types of vegetation, and various maritime elements.\\n\\nThe area serves as a site for various activities, including outdoor and beach-related activities, and is also characterized by its associated urban development. Additionally, Saint Pete Beach serves as the location for several specific sites, including various abandoned buildings and abandoned sites.\"}\n{\"entity\": \"St. Petersburg\", \"type\": \"location\", \"description\": \"Also known as St. Pete, it is a location where Paul has spent significant time and has many friends.<SEP>A coastal city in Florida, United States, where the urban scene is located.<SEP>A location where Paul is currently located and where rainfall has occurred for several days.<SEP>A location where Paul plans to spend time, also referred to as St. Pete.\"}\n{\"entity\": \"St. Pete\", \"type\": \"location\", \"description\": \"A location where a bike ride is planned to take place.<SEP>: A common name for the location St. Petersburg.\"}\n```\n\nKnowledge Graph Data (Relationship):\n\n```json\n{\"entity1\": \"Beach\", \"entity2\": \"Bike Ride\", \"description\": \"A bike ride towards the beach is planned before rain occurs.\"}\n{\"entity1\": \"Beach\", \"entity2\": \"Bike Riding\", \"description\": \"Bike riding is performed toward the beach.\"}\n{\"entity1\": \"Sky\", \"entity2\": \"St. Petersburg\", \"description\": \"The sky is positioned above the urban scene in St. Petersburg.\"}\n{\"entity1\": \"St. Petersburg\", \"entity2\": \"Vegetation\", \"description\": \"Vegetation is located within the St. Petersburg area.\"}\n{\"entity1\": \"Saint Pete Beach\", \"entity2\": \"Wooden Table\", \"description\": \"The wooden table is located within the Saint Pete Beach area.\"}\n{\"entity1\": \"St. Petersburg\", \"entity2\": \"Trees\", \"description\": \"Trees are distributed throughout the scene in St. Petersburg.\"}\n{\"entity1\": \"PXL_20260501_202636846.RAW-01.jpg (Photo)\", \"entity2\": \"Saint Pete Beach\", \"description\": \"Saint Pete Beach appears in PXL_20260501_202636846.RAW-01.jpg\"}\n{\"entity1\": \"PXL_20260501_203025149.RAW-01.jpg (Photo)\", \"entity2\": \"Saint Pete Beach\", \"description\": \"Saint Pete Beach appears in PXL_20260501_203025149.RAW-01.jpg\"}\n{\"entity1\": \"PXL_20260501_203021057.RAW-01.jpg (Photo)\", \"entity2\": \"Saint Pete Beach\", \"description\": \"Saint Pete Beach appears in PXL_20260501_203021057.RAW-01.jpg\"}\n{\"entity1\": \"Paul\", \"entity2\": \"St. Petersburg\", \"description\": \"Paul spends a lot of time in St. Petersburg and plays beach volleyball the",
+      "status": "success"
+    }
+  ]
+}

@@ -107,4 +107,24 @@ def is_note_file_source(file_source: str) -> bool:
     return False
 
 
-__all__ = ("NOTE_LABEL_PREFIXES", "is_note_file_source")
+_RE_DOC_CHUNK = re.compile(r"^doc-[a-f0-9]{32}-chunk-\d{3}$")
+
+
+def is_doc_chunk_source(file_source: str) -> bool:
+    """Return True if ``file_source`` is a LightRAG document-chunk ID.
+
+    Chunk IDs have the shape ``doc-{32 hex chars}-chunk-{NNN}`` (e.g.
+    ``doc-a1e468b48b942cc5d675221767a6a061-chunk-000``), produced by
+    ``lightrag/utils_pipeline.py:build_chunks_dict_from_chunking_result``.
+    They identify a text chunk, not an image file, so a hub whose
+    ``source_id`` is a chunk ID must NOT be treated as a Photo — the UI
+    would request ``/api/kg/images/photo/{chunk_id}`` and 404.
+    """
+    if not file_source:
+        return False
+    if "<SEP>" in file_source:
+        return False
+    return bool(_RE_DOC_CHUNK.match(file_source))
+
+
+__all__ = ("NOTE_LABEL_PREFIXES", "is_note_file_source", "is_doc_chunk_source")

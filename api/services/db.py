@@ -47,10 +47,16 @@ async def init_db() -> None:
                 insert BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
                 updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
-                note TEXT NOT NULL DEFAULT ''
+                note TEXT NOT NULL DEFAULT '',
+                file_type TEXT NOT NULL DEFAULT 'image'
             );
 
+            -- Idempotent backfill of the file_type column onto pre-existing
+            -- rows. The table historically only held image jobs, so the
+            -- default 'image' is correct for legacy rows; notes bypass the
+            -- jobs table entirely (POST /notes goes straight to LightRAG).
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'image';
 
             CREATE TABLE IF NOT EXISTS job_events (
                 id BIGSERIAL PRIMARY KEY,
@@ -63,6 +69,10 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
             CREATE INDEX IF NOT EXISTS idx_job_events_created_at ON job_events(job_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+            -- Partial index for the worker's pending-job poll query
+            -- (SELECT ... WHERE status='pending' FOR UPDATE SKIP LOCKED) so
+            -- the claim scan stays cheap as the jobs table grows.
+            CREATE INDEX IF NOT EXISTS idx_jobs_status_pending ON jobs(status) WHERE status = 'pending';
 
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
@@ -308,6 +318,52 @@ async def get_photo_dates_for_sources(
             entry["height"] = int(row["image_height"])
         if entry:
             out[row["file_source"]] = entry
+    return out
+
+
+async def get_file_types_for_sources(
+    file_sources: list[str],
+) -> dict[str, str]:
+    """Resolve a batch of file_sources to their document file_type.
+
+    Checks the `jobs` table first (file_type column), then falls back to
+    `photo_metadata` (any row there is an 'image'). Returns {} for
+    file_sources with no known type — the caller treats unknown as
+    'unknown' and the UI defaults to a safe renderer.
+
+    Mirrors `get_photo_dates_for_sources` in shape and batching.
+    """
+    if not file_sources:
+        return {}
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # A file_source may have multiple job rows (re-uploads/retries);
+        # take the most recent one per file_source via DISTINCT ON.
+        job_rows = await conn.fetch(
+            """SELECT DISTINCT ON (file_source) file_source, file_type
+                 FROM jobs
+                WHERE file_source = ANY($1)
+                ORDER BY file_source, created_at DESC""",
+            file_sources,
+        )
+        # Any file_source present in photo_metadata but not in jobs is an
+        # image (legacy uploads that predate the jobs table, or photos
+        # whose job row was pruned).
+        photo_rows = await conn.fetch(
+            """SELECT file_source FROM photo_metadata
+                WHERE file_source = ANY($1)""",
+            file_sources,
+        )
+
+    out: dict[str, str] = {}
+    for row in job_rows:
+        ft = row["file_type"]
+        if ft:
+            out[row["file_source"]] = ft
+    for row in photo_rows:
+        src = row["file_source"]
+        # jobs is authoritative; don't override a known non-image type
+        out.setdefault(src, "image")
     return out
 
 

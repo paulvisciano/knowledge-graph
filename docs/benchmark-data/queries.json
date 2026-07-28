@@ -1,0 +1,22 @@
+{
+  "test_queries": [
+    {
+      "id": "date_range",
+      "label": "Date Range Query",
+      "query": "What photos and notes do I have from June and July 2026?",
+      "description": "Core use case — multi-month span covering both photo dates (June) and note dates (July)"
+    },
+    {
+      "id": "entity_specific",
+      "label": "Entity-Specific Query",
+      "query": "Show me beach photos and any notes about the beach",
+      "description": "Entity-focused retrieval — should return photos with Beach entity and notes mentioning Beach"
+    },
+    {
+      "id": "long_natural",
+      "label": "Long Natural Language (Audio Transcription Simulation)",
+      "query": "Hey so I was thinking about that trip we took to St Pete back in June you know the one where we went to the beach and saw that crazy sunset and I wanted to compare that with the notes I wrote on July 22nd about the bike ride downtown and whether it rained that evening",
+      "description": "Simulates a long voice transcription — tests whether keyword extraction can handle a rambling 60+ word query"
+    }
+  ]
+}

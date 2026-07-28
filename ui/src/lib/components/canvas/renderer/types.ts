@@ -8,14 +8,34 @@
  */
 import type { KGNode } from '$lib/constants';
 
+/** The 6 built-in kinds. Extensible via the provider registry — new
+ *  document types (chat, pdf, …) register their own kind strings. */
+type BuiltinKind = 'photo' | 'note' | 'person' | 'location' | 'event' | 'concept';
+/** Open union: built-in kinds get autocomplete; the `& {}` brand keeps
+ *  TS from collapsing to `string` so provider-registered kinds are
+ *  assignable without a union edit. */
+export type NodeKind = BuiltinKind | (string & {});
+
 /**
- * High-level visual category of a canvas node.
- *
- * `note` covers text-only nodes (diary entries, chat notes, plan entries,
- * daily updates, personal-context updates) that render as readable text
- * planes baked into a `CanvasTexture` instead of a photo image.
+ * Per-kind renderer config consumed by `NodePlane`. Replaces the
+ * hard-coded `KIND_COLOR` map and `kind === 'photo'`/`'note'` branches.
  */
-export type NodeKind = 'photo' | 'note' | 'person' | 'location' | 'event' | 'concept';
+export interface PlaneConfig {
+  /** Base material color for non-textured planes (hex, e.g. 0xf5e9c8). */
+  readonly color: number;
+  /** How the plane gets its texture: 'url' = textureCache (photo),
+   *  'text' = local CanvasTexture (note/chat/pdf), 'none' = flat color. */
+  readonly textureSource: 'url' | 'text' | 'none';
+  /** Whether LOD thumb→full promotion applies (photo only). */
+  readonly lodEnabled: boolean;
+}
+
+/** Async-resolved content maps passed to `buildCanvasFields`. Mirrors
+ *  the `$state` maps in `graph.svelte.ts` (photoImages, noteContents). */
+export interface BuildCtx {
+  readonly photoImages: Record<string, string>;
+  readonly noteContents: Record<string, string>;
+}
 
 /**
  * A node projected into canvas space. Mirrors `KGNode` identity but adds the

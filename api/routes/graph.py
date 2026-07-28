@@ -33,6 +33,9 @@ def _is_photo_node(node: dict[str, Any]) -> bool:
     return nid.endswith(" (Photo)") or nid.endswith(" (Image)")
 
 
+_HUB_SUFFIXES = (" (Photo)", " (Image)", " (Note)", " (Document)", " (Chat)", " (Pdf)")
+
+
 def _file_source_from_node(node: dict[str, Any]) -> str | None:
     props = node.get("properties") or {}
     for key in ("source_id", "file_path", "file_source"):
@@ -40,7 +43,7 @@ def _file_source_from_node(node: dict[str, Any]) -> str | None:
         if isinstance(val, str) and val and val != "manual_creation":
             return val
     nid = str(node.get("id") or "")
-    for suffix in (" (Photo)", " (Image)"):
+    for suffix in _HUB_SUFFIXES:
         if nid.endswith(suffix):
             return nid[: -len(suffix)]
     return None
@@ -100,6 +103,24 @@ async def get_graph(
                 if exif:
                     props = dict(node.get("properties") or {})
                     props.update(exif)
+                    node["properties"] = props
+
+    all_sources: list[str] = []
+    for node in nodes:
+        src = _file_source_from_node(node)
+        if src:
+            all_sources.append(src)
+    if all_sources:
+        file_types = await db_module.get_file_types_for_sources(all_sources)
+        if file_types:
+            for node in nodes:
+                src = _file_source_from_node(node)
+                if not src:
+                    continue
+                ft = file_types.get(src)
+                if ft:
+                    props = dict(node.get("properties") or {})
+                    props["file_type"] = ft
                     node["properties"] = props
 
     return payload

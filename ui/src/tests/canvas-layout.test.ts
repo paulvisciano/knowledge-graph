@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildCanvasLayout, classifyKind, isNoteFileSource, isNoteNode } from '$lib/components/canvas/Layout';
+import { buildCanvasLayout, classifyKind, isNoteFileSource, isNoteNode, isDocChunkFileSource } from '$lib/components/canvas/Layout';
+import { docChunkProvider } from '$lib/components/canvas/renderer/providers/docChunk';
+import { noteProvider } from '$lib/components/canvas/renderer/providers/note';
 import { TIME_BUCKET_SPACING } from '$lib/components/canvas/renderer/constants';
 import type { KGNode, KGEdge } from '$lib/constants';
 
@@ -23,6 +25,9 @@ const location = (id: string) => makeNode(id, 'Location', { name: id });
 const event = (id: string) => makeNode(id, 'Event', { name: id });
 const note = (id: string, extra: Record<string, unknown> = {}) =>
   makeNode(id, 'Note', { source_id: `note_${id}`, description: `body of ${id}`, ...extra });
+
+const docChunk = (id: string, extra: Record<string, unknown> = {}) =>
+  makeNode(id, 'Document', { source_id: `doc-${id.padStart(32, '0')}-chunk-000`, ...extra });
 
 describe('classifyKind', () => {
   it('classifies photos by label and entity_type', () => {
@@ -98,6 +103,44 @@ describe('isNoteFileSource', () => {
   });
 });
 
+describe('isDocChunkFileSource', () => {
+  it('recognizes chunk IDs', () => {
+    expect(isDocChunkFileSource('doc-a1e468b48b942cc5d675221767a6a061-chunk-000')).toBe(true);
+    expect(isDocChunkFileSource('doc-ffffffffffffffffffffffffffffffff-chunk-999')).toBe(true);
+    expect(isDocChunkFileSource('doc-00000000000000000000000000000000-chunk-001')).toBe(true);
+  });
+
+  it('rejects non-chunks (photos, notes, compound)', () => {
+    expect(isDocChunkFileSource('PXL_20260727_123456.jpg')).toBe(false);
+    expect(isDocChunkFileSource('note_1700000000')).toBe(false);
+    expect(isDocChunkFileSource('diary-entry-2026-07-22')).toBe(false);
+    expect(isDocChunkFileSource('a<SEP>b')).toBe(false);
+    expect(isDocChunkFileSource('personal_context_update<SEP>daily_update')).toBe(false);
+  });
+
+  it('rejects empty and undefined', () => {
+    expect(isDocChunkFileSource('')).toBe(false);
+  });
+});
+
+describe('classifyKind: doc-chunk nodes', () => {
+  it('classifies a Document node with chunk source_id as document', () => {
+    expect(classifyKind(docChunk('a1e468b48b942cc5d675221767a6a061'))).toBe('document');
+  });
+
+  it('classifies a spurious (Photo) hub with a chunk source_id as document (ordering invariant)', () => {
+    expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000' }))).toBe('document');
+  });
+
+  it('classifies a Document node with explicit entity_type', () => {
+    expect(classifyKind(makeNode('doc', 'Document', { source_id: 'doc-abc1234567890123456789012345678901-chunk-001' }))).toBe('document');
+  });
+
+  it('classifies by (Document) label suffix', () => {
+    expect(classifyKind({ id: 'x', labels: ['x (Document)'], properties: { entity_type: 'Photo', source_id: 'something' } })).toBe('document');
+  });
+});
+
 describe('isNoteNode', () => {
   it('matches entity_type Note', () => {
     expect(isNoteNode(note('n1'))).toBe(true);
@@ -125,6 +168,30 @@ describe('isNoteNode', () => {
   });
   it('false for a real photo', () => {
     expect(isNoteNode(photo('p1'))).toBe(false);
+  });
+});
+
+describe('docChunk provider shouldRender', () => {
+  it('hides all chunk nodes for now (only photos and conversations render)', () => {
+    expect(docChunkProvider.shouldRender(
+      makeNode('c', 'Document', { source_id: 'doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-chunk-000', file_type: 'image' }),
+      { photoImages: {}, noteContents: {} },
+    )).toBe(false);
+    expect(docChunkProvider.shouldRender(
+      makeNode('c', 'Document', { source_id: 'doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-chunk-000' }),
+      { photoImages: {}, noteContents: {} },
+    )).toBe(false);
+  });
+});
+
+describe('ordering invariant: note and docChunk classify before photo', () => {
+  it('classifies note and docChunk before photo (ordering invariant)', () => {
+    // A spurious (Photo) hub with a note source_id classifies as note, not photo
+    expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'note_1700000000' }))).toBe('note');
+    // A spurious (Photo) hub with a chunk source_id classifies as document, not photo
+    expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000' }))).toBe('document');
+    // A real photo still classifies as photo
+    expect(classifyKind(photo('p1'))).toBe('photo');
   });
 });
 
@@ -251,54 +318,36 @@ describe('buildCanvasLayout', () => {
     expect(node.kind).toBe('photo');
   });
 
-  it('renders note nodes as planes with textContent and no image URLs', () => {
+  it('does not render note nodes as planes (only photos and conversations for now)', () => {
     const n = note('n1', { description: 'hello world', date_taken_friendly: '2024-01-01' });
     const out = buildCanvasLayout([n], [], {}, {});
-    expect(out.map((x) => x.id)).toEqual(['n1']);
-    const node = out.find((x) => x.id === 'n1')!;
-    expect(node.kind).toBe('note');
-    expect(node.textContent).toBe('hello world');
-    expect(node.imageUrl).toBeUndefined();
-    expect(node.fullUrl).toBeUndefined();
-    // Text-friendly portrait aspect (~1 : 1.4) when no image dims present.
-    expect(node.height).toBeGreaterThanOrEqual(60);
-    expect(node.height).toBeLessThan(120);
-    expect(node.width).toBe(Math.round(node.height / 1.4));
+    expect(out).toHaveLength(0);
   });
 
-  it('note textContent falls back through summary → title → id', () => {
+  it('note textContent falls back through summary → title → id (when rendering is enabled)', () => {
     const a = makeNode('a', 'Note', { source_id: 'note_a', summary: 'S' });
     const b = makeNode('b', 'Note', { source_id: 'note_b', title: 'T' });
     const c = makeNode('c', 'Note', { source_id: 'note_c' });
-    const out = buildCanvasLayout([a, b, c], [], {}, {});
-    const byId = new Map(out.map((x) => [x.id, x]));
-    expect(byId.get('a')!.textContent).toBe('S');
-    expect(byId.get('b')!.textContent).toBe('T');
-    expect(byId.get('c')!.textContent).toBe('c');
+    expect(noteProvider.buildCanvasFields(a, { photoImages: {}, noteContents: {} }).textContent).toBe('S');
+    expect(noteProvider.buildCanvasFields(b, { photoImages: {}, noteContents: {} }).textContent).toBe('T');
+    expect(noteProvider.buildCanvasFields(c, { photoImages: {}, noteContents: {} }).textContent).toBe('c');
   });
 
-  it('a spurious (Photo) hub with a note source_id renders as a note plane, not a photo', () => {
+  it('a spurious (Photo) hub with a note source_id does not render as a photo (no 404)', () => {
     const spurious: KGNode = {
       id: 'diary-entry-2026-07-22-xyz (Photo)',
       labels: ['Photo'],
       properties: { entity_type: 'Photo', source_id: 'diary-entry-2026-07-22-xyz', description: 'D' },
     };
     const out = buildCanvasLayout([spurious], [], {}, {});
-    expect(out).toHaveLength(1);
-    expect(out[0].kind).toBe('note');
-    expect(out[0].textContent).toBe('D');
-    // The defensive guard: no photo image URL is ever built for it.
-    expect(out[0].imageUrl).toBeUndefined();
-    expect(out[0].fullUrl).toBeUndefined();
+    expect(out).toHaveLength(0);
   });
 
-  it('renders photos and notes together in the same time bucket grid', () => {
+  it('renders only photos (notes are hidden for now)', () => {
     const p = photo('p1', { date_taken_friendly: '2024-01-01' });
     const n = note('n1', { date_taken_friendly: '2024-01-01' });
     const out = buildCanvasLayout([p, n], [], {}, {});
-    expect(out.map((x) => x.id).sort()).toEqual(['n1', 'p1']);
-    const kinds = new Set(out.map((x) => x.kind));
-    expect(kinds.has('photo')).toBe(true);
-    expect(kinds.has('note')).toBe(true);
+    expect(out.map((x) => x.id)).toEqual(['p1']);
+    expect(out.every((x) => x.kind === 'photo')).toBe(true);
   });
 });

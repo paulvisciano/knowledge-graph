@@ -36,6 +36,8 @@
   let searchQuery = $state('');
   let error = $state('');
   let reprocessingIds: string[] = $state([]);
+  let aiQueueLoading = $state(false);
+  let aiQueueResult = $state<{ processed: number } | null>(null);
 
   // When the user types a filter, fetch a large page so the client-side
   // predicate can match against every document, not just the current 20-row
@@ -252,6 +254,24 @@
     page = p;
     loadDocs();
   }
+
+  async function handleProcessAIQueue() {
+    if (aiQueueLoading) return;
+    aiQueueLoading = true;
+    aiQueueResult = null;
+    error = '';
+    try {
+      const res = await kgApiClient.processAIQueue();
+      aiQueueResult = { processed: res.processed };
+      if (res.processed === 0) {
+        error = 'No images waiting for AI processing.';
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to process AI queue';
+    } finally {
+      aiQueueLoading = false;
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col gap-3 overflow-hidden">
@@ -271,6 +291,28 @@
     <div class="flex items-baseline gap-1.5">
       <span class="text-lg font-semibold tabular-nums text-cyber-cyan">{graphStore.nodes.length}</span>
       <span class="text-xs text-cyber-text-dim">Nodes</span>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      {#if aiQueueResult && aiQueueResult.processed > 0}
+        <span class="text-xs text-emerald-400">Processed {aiQueueResult.processed} image(s)</span>
+      {/if}
+      <button
+        onclick={handleProcessAIQueue}
+        disabled={aiQueueLoading}
+        class="group relative inline-flex items-center gap-2 rounded-lg border border-fuchsia-400/40 bg-fuchsia-400/5 px-3 py-1.5 text-xs font-medium text-fuchsia-400 transition-all duration-300
+          hover:border-fuchsia-400 hover:bg-fuchsia-400/10
+          disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {#if aiQueueLoading}
+          <span class="animate-pulse-glow inline-block h-2 w-2 rounded-full bg-fuchsia-400"></span>
+          <span>Processing AI Queue…</span>
+        {:else}
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v8" /><path d="m4.93 10.93 1.41 1.41" /><path d="M2 18h2" /><path d="M20 18h2" /><path d="m17.66 12.34 1.41-1.41" /><path d="m22 22-2-2" /><path d="m2 22 2-2" /><path d="M16 18a4 4 0 0 0-8 0" /><circle cx="12" cy="6" r="4" />
+          </svg>
+          <span>Process AI Queue</span>
+        {/if}
+      </button>
     </div>
   </div>
 

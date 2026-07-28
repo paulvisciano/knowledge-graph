@@ -142,6 +142,14 @@ def _get_vlm_semaphore() -> asyncio.Semaphore:
     return _vlm_semaphore
 
 
+# Caps concurrent LightRAG poll threads inside wait_for_lightrag_processing.
+# Each poll issues blocking urllib calls (15-60s holds, retried up to 300s) via
+# asyncio.to_thread; without a cap, N concurrent jobs fan out N poll threads
+# and saturate the shared default ThreadPoolExecutor. Capping at 4 keeps poll
+# pressure bounded while still letting a handful of jobs make progress.
+_poll_semaphore = asyncio.Semaphore(4)
+
+
 async def _create_entity_verified(
     base_url: str,
     entity_name: str,
@@ -1036,12 +1044,27 @@ async def describe_image_with_vlm(
         "Analyze this image in detail for a knowledge graph. "
         "Identify every visible element using specific proper nouns where possible "
         "(e.g., brand names, model numbers, landmark names, specific locations). "
-        "Describe spatial relationships (foreground, background, left, right, above, below). "
         "Transcribe any visible text verbatim — exact spelling, numbers, and labels. "
         "Note colors, materials, and quantities. "
-        "Describe people with physical attributes (hair color, approximate age, clothing, expression). "
-        "Identify the scene type (indoor, outdoor, event, activity). "
         f"{'Context: ' + context if context else ''}"
+        "\n\n"
+        "Format your response with EXACTLY these sections in this order, each as a bold header "
+        "on its own line followed by bullet points. Do NOT output the section headers as "
+        "standalone entities — they are structure only. If a section has no content, write "
+        "\"None\" on one bullet:\n"
+        "**People**: One bullet per distinct person. For each: hair (color, length, style), "
+        "approximate age, facial hair, glasses, clothing (color, material, brand if visible), "
+        "expression, and position in frame (foreground/background, left/right).\n"
+        "**Objects**: One bullet per distinct object. For each: name (use the specific proper "
+        "noun — brand, model, material — not the generic category), color, quantity, and "
+        "position in frame.\n"
+        "**Text**: One bullet per visible text string, transcribed verbatim with its location.\n"
+        "**Colors & Materials**: One bullet per dominant color/material in the scene.\n"
+        "**Scene Type**: One bullet stating indoor/outdoor, the setting, and the activity.\n"
+        "**Spatial Relationships**: One bullet per key spatial relationship "
+        "(foreground/background, left/right, above/below) between named elements.\n"
+        "Be exhaustive — every visible element should appear in exactly one section. "
+        "Prefer specific proper nouns over generic descriptions."
     )
 
     payload = {
@@ -1055,8 +1078,8 @@ async def describe_image_with_vlm(
                 ],
             }
         ],
-        "max_tokens": 1024,
-        "temperature": 0.3,
+        "max_tokens": 2048,
+        "temperature": 0.1,
     }
 
     headers = {"Content-Type": "application/json"}
@@ -1869,7 +1892,7 @@ async def wait_for_lightrag_processing(
     lightrag_url: str,
     file_source: str,
     *,
-    poll_interval: float = 3.0,
+    poll_interval: float = 10.0,
     timeout: float = 300.0,
 ) -> str:
     """Poll LightRAG until *this* document reaches a terminal state.
@@ -1916,7 +1939,8 @@ async def wait_for_lightrag_processing(
             )
 
         try:
-            docs = await asyncio.to_thread(_fetch_documents)
+            async with _poll_semaphore:
+                docs = await asyncio.to_thread(_fetch_documents)
             if isinstance(docs, list):
                 doc_list = docs
             elif isinstance(docs.get("statuses"), dict):
@@ -1947,7 +1971,8 @@ async def wait_for_lightrag_processing(
             logger.warning("[LightRAG Wait] Document list fetch failed: %s", exc)
 
         try:
-            pipeline_status = await asyncio.to_thread(_fetch_pipeline_status)
+            async with _poll_semaphore:
+                pipeline_status = await asyncio.to_thread(_fetch_pipeline_status)
             busy = pipeline_status.get("busy", False)
             logger.info(
                 "[LightRAG Wait] Pipeline busy=%s, elapsed=%.1fs, file=%s",
