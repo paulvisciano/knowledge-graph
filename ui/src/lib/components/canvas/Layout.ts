@@ -210,10 +210,10 @@ function parseNodeDate(node: KGNode): Date | null {
   const raw =
     p.date_taken_friendly ??
     p.datetime_original ??
-    p.created_at ??
-    p.timestamp ??
     p.date_taken ??
-    p.datetime;
+    p.datetime ??
+    p.created_at ??
+    p.timestamp;
   if (raw === undefined || raw === null) return null;
   if (typeof raw === 'number') {
     // Unix seconds or ms — heuristic: ms if > 1e12, else seconds.
