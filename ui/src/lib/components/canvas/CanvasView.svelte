@@ -464,7 +464,7 @@
   .date-indicator-wrap {
     position: absolute;
     right: 16px;
-    bottom: 16px;
+    top: 16px;
     z-index: 20;
   }
 
@@ -541,7 +541,7 @@
   .timeline-dropdown {
     position: absolute;
     right: 0;
-    bottom: calc(100% + 10px);
+    top: calc(100% + 10px);
     padding: 10px 12px 10px 10px;
     background: oklch(14% 0.015 255 / 72%);
     backdrop-filter: blur(28px) saturate(1.5);
@@ -553,12 +553,12 @@
     min-width: 150px;
     max-height: min(56vh, 420px);
     pointer-events: auto;
-    transform-origin: bottom right;
+    transform-origin: top right;
     animation: timeline-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   @keyframes timeline-pop {
-    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    from { opacity: 0; transform: translateY(-8px) scale(0.96); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 
