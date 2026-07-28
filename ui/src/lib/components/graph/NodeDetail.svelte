@@ -5,6 +5,7 @@
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   const ACCENT_COLORS = ['#00d4ff', '#a855f7', '#00ff88', '#ff8c00'];
+  const KG_API_PROXY_BASE = '/api/kg';
 
   function formatCreatedAt(value: unknown): string {
     if (value === null || value === undefined || value === '') return '—';
@@ -59,7 +60,7 @@
     return { persons, locations, dates, others };
   });
 
-  // Resolve image content URL for image nodes (also handles reset on node change)
+  // Resolve image content URL for image/photo nodes (also handles reset on node change)
   $effect(() => {
     const currentNode = node;
     const currentNodeId = node?.id;
@@ -67,19 +68,48 @@
     neighborPhotoErrors = new Set();
     neighborImageUrls = new Map();
     neighborImageErrors = new Set();
-    // Reset label editing state when the selected node changes
     labelEditing = false;
     labelValue = '';
     labelError = null;
     labelSubmitting = false;
     clearLabelSuccess();
 
-    if (!currentNode || !isImageNode(currentNode)) {
+    if (!currentNode || !(isImageNode(currentNode) || isPhotoNode(currentNode))) {
       imagePreviewUrl = null;
       imagePreviewLoading = false;
       imagePreviewError = false;
       return;
     }
+
+    // Photo nodes use the KG thumbnail API (same as the canvas); Image nodes
+    // use the LightRAG document content API.
+    if (isPhotoNode(currentNode)) {
+      const fileSource = getFileSourceFromPhoto(currentNode);
+      if (!fileSource) {
+        imagePreviewUrl = null;
+        imagePreviewLoading = false;
+        imagePreviewError = false;
+        return;
+      }
+      imagePreviewLoading = true;
+      imagePreviewError = false;
+      imagePreviewUrl = null;
+      const url = `${KG_API_PROXY_BASE}${API.kg.photoImageFull(fileSource)}`;
+      const img = new Image();
+      img.onload = () => {
+        if (node?.id !== currentNodeId) return;
+        imagePreviewUrl = url;
+        imagePreviewLoading = false;
+      };
+      img.onerror = () => {
+        if (node?.id !== currentNodeId) return;
+        imagePreviewError = true;
+        imagePreviewLoading = false;
+      };
+      img.src = url;
+      return;
+    }
+
     const filePath = currentNode.properties?.file_path as string | undefined;
     if (!filePath) {
       imagePreviewUrl = null;
@@ -105,9 +135,18 @@
   // Resolve image thumbnails for neighbor image nodes
   $effect(() => {
     const imageNeighbors = (neighbors?.nodes ?? []).filter(
-      (n) => isImageNode(n) && !neighborImageErrors.has(n.id)
+      (n) => (isImageNode(n) || isPhotoNode(n)) && !neighborImageErrors.has(n.id)
     );
     for (const n of imageNeighbors) {
+      if (isPhotoNode(n)) {
+        const fileSource = getFileSourceFromPhoto(n);
+        if (!fileSource) continue;
+        const url = `${KG_API_PROXY_BASE}${API.kg.photoImageThumb(fileSource, 256)}`;
+        const updated = new Map(neighborImageUrls);
+        updated.set(n.id, url);
+        neighborImageUrls = updated;
+        continue;
+      }
       const filePath = n.properties?.file_path as string | undefined;
       if (!filePath) continue;
       lightragClient.resolveImageContentUrl(filePath).then((url) => {
@@ -248,8 +287,6 @@
   function resolvePersonPhotoUrl(n: KGNode): string {
     return getPersonFaceCropUrl(n) ?? getPersonPhotoUrl(n);
   }
-
-  const KG_API_PROXY_BASE = '/api/kg';
 
   // --- Face labeling state ---
   let labelEditing = $state(false);
@@ -408,7 +445,7 @@
 
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
       <!-- Image preview for image nodes -->
-      {#if isImageNode(node)}
+      {#if isImageNode(node) || isPhotoNode(node)}
         <section>
           {#if imagePreviewLoading}
             <div class="w-full h-48 rounded-lg bg-cyber-surface-2 animate-pulse overflow-hidden relative">
@@ -540,7 +577,7 @@
         </h3>
         {#snippet entityRow(n: KGNode)}
           {@const isPerson = isPersonNode(n)}
-          {@const isImage = isImageNode(n)}
+          {@const isImage = isImageNode(n) || isPhotoNode(n)}
           <button
             type="button"
             class="flex items-center gap-2 px-2 py-1 w-full rounded-md hover:bg-cyber-surface-2/50 transition-colors group text-left cursor-pointer"
