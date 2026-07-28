@@ -478,12 +478,6 @@
     }
   }
 
-  /** Pick images directly on the graph page — runs them through the KG EXIF
-   *  pipeline only (no chat message, no LLM). */
-  function openGraphImagePicker() {
-    imageFileInput?.click();
-  }
-
   /** Process image files picked from the graph page directly through the KG
    *  EXIF pipeline. Does NOT add them to chat attachments, does NOT send them
    *  to the LLM. Uploads all jobs in parallel, then connects SSE with
@@ -1860,21 +1854,6 @@
       <CanvasView onqueryAbout={handleQueryAbout} />
     </div>
 
-    <!-- Floating "Add Image" button — picks images and runs them through
-         the EXIF pipeline directly (no chat/LLM). -->
-    <button
-      type="button"
-      onclick={openGraphImagePicker}
-      class="add-image-fab"
-      data-testid="add-image-button"
-      title="Add images to graph"
-      aria-label="Add images to graph"
-    >
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16M4 12h16" />
-      </svg>
-    </button>
-
     <!-- Inline chat overlay (game-style, bottom-right) -->
     <div class="chat-inline-overlay" data-testid="chat-inline-overlay">
       <!-- Image input: graph page "Add Image" button → EXIF pipeline only -->
@@ -2374,67 +2353,119 @@
 
         <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
 
-        {#if messages.length > 0}
-          <div class="mb-1 flex justify-center">
-            <button
-              onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
-              class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
-              title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-              aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-              data-testid="chat-toggle"
+        {#if chatExpanded}
+          {#if messages.length > 0}
+            <div class="mb-1 flex justify-center">
+              <button
+                onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+                class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
+                title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+                data-testid="chat-toggle"
+              >
+                <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
+                  <Icon name="chevron-down" size={16} />
+                </span>
+                {chatExpanded ? 'Collapse' : 'Expand'}
+              </button>
+            </div>
+          {/if}
+
+          <div class="chat-inline-input-row mx-auto flex h-12 w-[36rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+            <textarea
+              bind:this={panelTextareaEl}
+              bind:value={panelChatInput}
+              oninput={autoResizePanel}
+              onkeydown={handlePanelKeydown}
+              placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
+              rows="1"
+              data-testid="chat-input"
+              class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+              disabled={isActiveConversationStreaming}
+            ></textarea>
+            <AttachmentMenu
+              fluid
+              disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
+              onPickDocument={openDocumentPicker}
+            />
+            {#if isActiveConversationStreaming}
+              <button
+                onclick={cancelStreaming}
+                class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
+                title="Stop generating"
+                data-testid="stop-button"
+              >
+                <Icon name="square" size={14} />
+              </button>
+            {:else}
+              <button
+                onclick={handleMicClick}
+                disabled={isTranscribing || !recordingSupported}
+                data-testid="mic-button"
+                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
+                class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+              >
+                {#if isRecording}
+                  <Icon name="square" size={16} />
+                {:else if isTranscribing}
+                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                {:else}
+                  <Icon name="mic" size={22} />
+                {/if}
+              </button>
+            {/if}
+            </div>
+        {:else}
+          <div class="chat-collapsed-orb" data-testid="chat-collapsed-orb">
+            <div
+              class="chat-orb"
+              class:recording={isRecording}
+              role="button"
+              tabindex="0"
+              aria-label={isRecording ? 'Stop recording' : 'Voice input'}
+              data-od-id="chat-orb"
+              data-testid="mic-button"
+              onclick={handleMicClick}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleMicClick(); } }}
             >
-              <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
-                <Icon name="chevron-down" size={16} />
-              </span>
-              {chatExpanded ? 'Collapse' : 'Expand'}
-            </button>
+              {#if isTranscribing}
+                <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+              {:else if isRecording}
+                <Icon name="square" size={16} />
+              {:else}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              {/if}
+            </div>
+            <div
+              class="chat-orb-add"
+              role="button"
+              tabindex="0"
+              aria-label="Add images"
+              data-od-id="chat-orb-add"
+              onclick={() => { chatExpanded = true; tick().then(() => imageFileInput?.click()); }}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => imageFileInput?.click()); } }}
+            >
+              <div class="coa-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </div>
+              <span>Add images</span>
+            </div>
+            <div
+              class="chat-orb-expand"
+              role="button"
+              tabindex="0"
+              aria-label="Type a message"
+              data-od-id="chat-orb-expand"
+              onclick={() => { chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); }}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); } }}
+            >
+              <div class="coe-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              </div>
+              <span>Type a message</span>
+            </div>
           </div>
         {/if}
-
-        <div class="chat-inline-input-row mx-auto flex h-12 w-[36rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
-          <textarea
-            bind:this={panelTextareaEl}
-            bind:value={panelChatInput}
-            oninput={autoResizePanel}
-            onkeydown={handlePanelKeydown}
-            placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
-            rows="1"
-            data-testid="chat-input"
-            class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
-            disabled={isActiveConversationStreaming}
-          ></textarea>
-          <AttachmentMenu
-            fluid
-            disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-            onPickDocument={openDocumentPicker}
-          />
-          {#if isActiveConversationStreaming}
-            <button
-              onclick={cancelStreaming}
-              class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
-              title="Stop generating"
-              data-testid="stop-button"
-            >
-              <Icon name="square" size={14} />
-            </button>
-          {:else}
-            <button
-              onclick={handleMicClick}
-              disabled={isTranscribing || !recordingSupported}
-              data-testid="mic-button"
-              title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop recording' : 'Voice input'}
-              class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
-            >
-              {#if isRecording}
-                <Icon name="square" size={16} />
-              {:else if isTranscribing}
-                <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-              {:else}
-                <Icon name="mic" size={22} />
-              {/if}
-            </button>
-          {/if}
-          </div>
       {/if}
     </div>
 
@@ -2461,28 +2492,6 @@
 </div>
 
 <style>
-  .add-image-fab {
-    position: absolute;
-    bottom: 1rem;
-    right: 1rem;
-    z-index: 25;
-    display: flex;
-    height: 2.75rem;
-    width: 2.75rem;
-    align-items: center;
-    justify-content: center;
-    border-radius: 9999px;
-    border: 1px solid var(--color-cyber-cyan, #22d3ee);
-    background: rgba(16, 24, 39, 0.8);
-    color: var(--color-cyber-cyan, #22d3ee);
-    backdrop-filter: blur(8px);
-    transition: background-color 200ms, color 200ms, transform 200ms;
-  }
-  .add-image-fab:hover {
-    background: rgba(34, 211, 238, 0.15);
-    transform: scale(1.05);
-  }
-
   .chat-inline-overlay {
     position: absolute;
     left: 50%;
@@ -2502,6 +2511,200 @@
 
   .chat-inline-overlay > * {
     pointer-events: auto;
+  }
+
+  /* ── Collapsed chat orb ── */
+  .chat-collapsed-orb {
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: 0;
+    pointer-events: auto;
+  }
+
+  .chat-orb {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: oklch(18% 0.02 255 / 85%);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border: 1px solid oklch(82% 0.14 210 / 25%);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 12%),
+      0 0 32px oklch(82% 0.14 210 / 20%),
+      0 0 64px oklch(82% 0.14 210 / 8%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--color-cyber-cyan);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .chat-orb svg {
+    width: 26px;
+    height: 26px;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .chat-orb::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 1px solid oklch(82% 0.14 210 / 0%);
+    transition: border-color 0.4s, inset 0.4s;
+    pointer-events: none;
+  }
+  .chat-collapsed-orb:hover .chat-orb,
+  .chat-orb:hover {
+    color: var(--color-cyber-cyan);
+    border-color: oklch(82% 0.14 210 / 40%);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 20%),
+      0 0 48px oklch(82% 0.14 210 / 30%),
+      0 0 96px oklch(82% 0.14 210 / 12%),
+      0 16px 48px oklch(0% 0 0 / 60%);
+    transform: scale(1.08);
+  }
+  .chat-orb::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid oklch(82% 0.14 210 / 0%);
+    animation: orbPulse 3s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes orbPulse {
+    0%, 100% { border-color: oklch(82% 0.14 210 / 0%); inset: 0; }
+    50% { border-color: oklch(82% 0.14 210 / 15%); inset: -6px; }
+  }
+  .chat-orb.recording {
+    color: oklch(62% 0.20 18);
+    border-color: oklch(62% 0.20 18 / 40%);
+    background: oklch(20% 0.02 18 / 80%);
+    box-shadow:
+      0 0 0 1px oklch(62% 0.20 18 / 15%),
+      0 0 32px oklch(62% 0.20 18 / 24%),
+      0 0 64px oklch(62% 0.20 18 / 10%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+  }
+  .chat-orb.recording::before {
+    border-color: oklch(62% 0.20 18 / 30%);
+    animation: orbRecording 1s ease-in-out infinite;
+  }
+  @keyframes orbRecording {
+    0%, 100% { border-color: oklch(62% 0.20 18 / 20%); inset: 0; }
+    50% { border-color: oklch(62% 0.20 18 / 8%); inset: -12px; }
+  }
+
+  .chat-orb-expand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 8px 8px;
+    border-radius: 100px;
+    background: oklch(16% 0.015 255 / 80%);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border: 1px solid oklch(50% 0.03 255 / 12%);
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 6%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+    cursor: pointer;
+    color: var(--color-cyber-text);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+    margin-bottom: 10px;
+    pointer-events: none;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.05s;
+  }
+  .chat-orb-expand .coe-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: oklch(82% 0.14 210 / 12%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-cyber-cyan);
+    flex-shrink: 0;
+  }
+  .chat-orb-expand .coe-icon svg { width: 16px; height: 16px; }
+  .chat-collapsed-orb:hover .chat-orb-expand {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .chat-orb-expand:hover {
+    border-color: oklch(82% 0.14 210 / 25%);
+    box-shadow:
+      0 0 0 1px oklch(82% 0.14 210 / 10%),
+      0 0 24px oklch(82% 0.14 210 / 12%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+  }
+
+  .chat-orb-add {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 8px 8px;
+    border-radius: 100px;
+    background: oklch(16% 0.02 150 / 80%);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border: 1px solid oklch(50% 0.03 255 / 12%);
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 6%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+    cursor: pointer;
+    color: var(--color-cyber-text);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+    margin-bottom: 10px;
+    pointer-events: none;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.1s;
+  }
+  .chat-orb-add .coa-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: oklch(72% 0.15 150 / 12%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: oklch(72% 0.15 150);
+    flex-shrink: 0;
+  }
+  .chat-orb-add .coa-icon svg { width: 16px; height: 16px; }
+  .chat-collapsed-orb:hover .chat-orb-add {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  .chat-orb-add:hover {
+    border-color: oklch(72% 0.15 150 / 25%);
+    box-shadow:
+      0 0 0 1px oklch(72% 0.15 150 / 10%),
+      0 0 24px oklch(72% 0.15 150 / 12%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+  }
+
+  .chat-orb:focus-visible,
+  .chat-orb-expand:focus-visible,
+  .chat-orb-add:focus-visible {
+    outline: 2px solid var(--color-cyber-cyan);
+    outline-offset: 2px;
+    border-radius: inherit;
   }
 
   .chat-inline-messages {
