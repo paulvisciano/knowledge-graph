@@ -80,10 +80,8 @@
         continue;
       }
 
-      const worldPos = sceneManager.getPlaneWorldPosition(nodeId);
-      if (!worldPos) continue; // chunk not mounted / outside render distance
-      const screen = sceneManager.projectToScreen(worldPos);
-      if (!screen) continue; // behind camera
+      const screen = sceneManager.projectPlaneCorner(nodeId);
+      if (!screen) continue;
 
       next.push({
         nodeId,
@@ -111,15 +109,12 @@
 <div class="processing-overlay-layer" aria-hidden="true">
   {#each overlays as entry (entry.nodeId)}
     <div
-      class="processing-badge"
+      class="processing-dot"
       class:flashing={entry.flashing}
       class:is-error={entry.stage === 'error'}
-      style="--badge-color: {entry.color}; transform: translate({entry.x}px, {entry.y}px);"
+      style="--dot-color: {entry.color}; transform: translate({entry.x}px, {entry.y}px);"
       title={entry.stageLabel}
-    >
-      <span class="processing-ring"></span>
-      <span class="processing-core"></span>
-    </div>
+    ></div>
   {/each}
 </div>
 
@@ -132,83 +127,43 @@
     z-index: 5;
   }
 
-  .processing-badge {
+  .processing-dot {
     position: absolute;
     top: 0;
     left: 0;
-    width: 24px;
-    height: 24px;
-    margin: -12px 0 0 -12px;
-    display: grid;
-    place-items: center;
+    width: 8px;
+    height: 8px;
+    margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    background: var(--dot-color);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--dot-color) 70%, transparent);
+    opacity: 0.85;
     pointer-events: none;
     will-change: transform;
     transition: transform 0.12s linear;
+    animation: processing-pulse 2s ease-in-out infinite;
   }
 
-  .processing-ring {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 2px solid var(--badge-color);
-    background: color-mix(in oklch, var(--badge-color) 18%, transparent);
-    box-shadow:
-      0 0 12px color-mix(in oklch, var(--badge-color) 60%, transparent),
-      0 0 0 1px color-mix(in oklch, var(--badge-color) 30%, transparent);
-    animation: processing-pulse 1.5s ease-in-out infinite;
+  .processing-dot.flashing {
+    animation: processing-flash 0.6s ease-out 1;
   }
 
-  .processing-core {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--badge-color);
-    box-shadow: 0 0 8px var(--badge-color);
-    animation: processing-pulse 1.5s ease-in-out infinite;
-  }
-
-  .processing-badge.flashing .processing-ring {
-    animation: none;
-    opacity: 1;
-  }
-
-  .processing-badge.flashing .processing-core {
-    animation: processing-flash 0.5s ease-out 1;
-  }
-
-  .processing-badge.flashing.is-error .processing-core {
-    animation: processing-flash-error 0.5s ease-out 1;
+  .processing-dot.flashing.is-error {
+    animation: processing-flash-error 0.6s ease-out 1;
   }
 
   @keyframes processing-pulse {
-    0%,
-    100% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 1;
-    }
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.9; }
   }
 
   @keyframes processing-flash {
-    0% {
-      transform: scale(1);
-      opacity: 1;
-    }
-    100% {
-      transform: scale(1.8);
-      opacity: 0;
-    }
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(2.2); opacity: 0; }
   }
 
   @keyframes processing-flash-error {
-    0% {
-      transform: scale(1);
-      opacity: 1;
-    }
-    100% {
-      transform: scale(1.4);
-      opacity: 0;
-    }
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.6); opacity: 0; }
   }
 </style>

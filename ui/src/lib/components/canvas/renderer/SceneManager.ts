@@ -199,6 +199,24 @@ export class SceneManager {
   }
 
   /**
+   * Projects the top-right corner of a photo plane to screen coordinates.
+   * Returns `null` when the node isn't mounted or is behind the camera.
+   */
+  projectPlaneCorner(nodeId: string): { x: number; y: number } | null {
+    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
+    if (!plane) return null;
+    const node = plane.node;
+    const worldPos = new THREE.Vector3();
+    plane.mesh.getWorldPosition(worldPos);
+    // The plane geometry is 1×1 scaled by (width, height), so the top-right
+    // corner is offset by (+w/2, +h/2) in local space. The plane mesh has no
+    // rotation, so local +X is right and local +Y is up.
+    worldPos.x += node.width / 2 - node.width * 0.05;
+    worldPos.y -= node.height / 2 - node.height * 0.05;
+    return this.projectToScreen(worldPos);
+  }
+
+  /**
    * (Re)builds the layout from canvas nodes and forwards to `ChunkManager`.
    *
    * @param nodes - all canvas nodes.
