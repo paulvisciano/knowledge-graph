@@ -270,10 +270,6 @@ export class NodePlane {
     }
   }
 
-  /** Bake a glass-blue conversation card texture matching the prototype's
-   *  `.graph-node.chat` visual: accent-blue kicker, bright title, muted foot,
-   *  dark glass background. Draws from `node.properties` (title + createdAt)
-   *  so the preview is built without eagerly loading messages. */
   private _createConversationTexture(hovered: boolean): THREE.CanvasTexture {
     const aspect = this._node.width > 0 && this._node.height > 0
       ? this._node.width / this._node.height
@@ -297,35 +293,51 @@ export class NodePlane {
         })
       : '';
 
-    const accent = '#13dcf6';
-    const fg = '#dbdee1';
-    const muted = '#87909c';
-    const faint = '#6a727d';
+    // Prototype CSS vars (oklch → sRGB hex).
+    const accent = '#13dcf6';     // --accent oklch(82% 0.14 210)
+    const fg = '#dbdee1';         // --fg oklch(90% 0.005 250)
+    const muted = '#87909c';       // --muted oklch(65% 0.02 255)
+    const faint = '#6a727d';       // --faint oklch(55% 0.02 255)
+    // --bg oklch(6% 0.02 260) ≈ #000103; card bg oklch(12% 0.02 250 / 78%)
+    const cardBg = '#0c1018';
+    // Normal border: 1px oklch(50% 0.03 210 / 14%) — neutral blue-gray, NOT accent
+    const borderNormal = 'rgba(91,124,170,0.14)';
+    // Outer 1px ring: oklch(82% 0.14 210 / 8%) — accent at 8%
+    const ringNormal = 'rgba(19,220,246,0.08)';
+
     const padX = 16;
     const maxTextWidth = canvasW - padX * 2;
     const radius = 14;
+    const scale = canvasH / 420;
 
-    ctx.fillStyle = hovered ? '#243049' : '#1e2a42';
-    ctx.beginPath();
-    ctx.moveTo(radius, 0);
-    ctx.arcTo(canvasW, 0, canvasW, radius, radius);
-    ctx.arcTo(canvasW, canvasH, canvasW - radius, canvasH, radius);
-    ctx.arcTo(0, canvasH, 0, canvasH - radius, radius);
-    ctx.arcTo(0, 0, radius, 0, radius);
-    ctx.closePath();
+    ctx.fillStyle = cardBg;
+    this._roundRect(ctx, 0, 0, canvasW, canvasH, radius);
     ctx.fill();
 
+    ctx.strokeStyle = ringNormal;
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, 0.5, 0.5, canvasW - 1, canvasH - 1, radius - 0.5);
+    ctx.stroke();
+
+    ctx.strokeStyle = borderNormal;
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
+    ctx.stroke();
+
     if (hovered) {
-      ctx.shadowColor = accent;
-      ctx.shadowBlur = 32;
+      ctx.save();
+      ctx.shadowColor = 'rgba(19,220,246,0.32)';
+      ctx.shadowBlur = Math.round(32 * scale);
       ctx.strokeStyle = accent;
       ctx.lineWidth = 2;
-    } else {
-      ctx.strokeStyle = 'rgba(19,220,246,0.14)';
-      ctx.lineWidth = 1;
+      this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
+      ctx.stroke();
+      ctx.shadowBlur = Math.round(80 * scale);
+      ctx.shadowColor = 'rgba(19,220,246,0.12)';
+      this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.stroke();
-    ctx.shadowBlur = 0;
 
     const topGrad = ctx.createLinearGradient(0, 0, canvasW, 0);
     topGrad.addColorStop(0, 'rgba(19,220,246,0)');
@@ -336,9 +348,10 @@ export class NodePlane {
     ctx.fillRect(0, 0, canvasW, 3);
     ctx.globalAlpha = 1;
 
-    const kickerFont = Math.max(14, Math.round(canvasH / 38));
-    const kickerY = 14;
+    const kickerFont = Math.max(11, Math.round(11 * scale));
+    const kickerY = Math.round(14 * scale);
     const dotR = 3;
+    // Glow dot
     ctx.fillStyle = accent;
     ctx.shadowColor = accent;
     ctx.shadowBlur = 8;
@@ -346,45 +359,78 @@ export class NodePlane {
     ctx.arc(padX + dotR, kickerY + kickerFont * 0.5, dotR, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-
-    ctx.font = `600 ${kickerFont}px ui-monospace, "SF Mono", Menlo, monospace`;
+    // Kicker text
+    const monoFamily = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace';
+    ctx.font = `600 ${kickerFont}px ${monoFamily}`;
     ctx.fillStyle = accent;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
+    this._setLetterSpacing(ctx, `${Math.round(0.24 * kickerFont)}px`);
     ctx.fillText('CONVERSATION', padX + dotR * 2 + 6, kickerY);
+    this._setLetterSpacing(ctx, '0px');
 
-    const queryFont = Math.max(18, Math.round(canvasH / 24));
-    ctx.font = `700 ${queryFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+    const queryFont = Math.max(14, Math.round(14 * scale));
+    const sansFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    ctx.font = `700 ${queryFont}px ${sansFamily}`;
     ctx.fillStyle = fg;
-    const queryY = kickerY + kickerFont + 6;
+    const queryY = kickerY + kickerFont + Math.round(6 * scale);
     const queryLineHeight = Math.round(queryFont * 1.28);
+    this._setLetterSpacing(ctx, `${Math.round(-0.005 * queryFont)}px`);
     this._drawWrapped(ctx, title, padX, queryY, maxTextWidth, queryLineHeight, 2);
+    this._setLetterSpacing(ctx, '0px');
 
-    const footFont = Math.max(9, Math.round(canvasH / 48));
-    const footY = canvasH - 12 - footFont;
-    ctx.strokeStyle = 'rgba(88,100,116,0.08)';
+    const footFont = Math.max(9, Math.round(9 * scale));
+    const footH = Math.round((8 + 9 + 12) * scale); // padding-top + font + padding-bottom
+    const footY = canvasH - footH;
+    // Hairline: oklch(50% 0.03 255 / 8%) ≈ rgba(106,114,125,0.08)
+    ctx.strokeStyle = 'rgba(106,114,125,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(padX, footY - 8);
-    ctx.lineTo(canvasW - padX, footY - 8);
+    ctx.moveTo(padX, footY);
+    ctx.lineTo(canvasW - padX, footY);
     ctx.stroke();
 
-    ctx.font = `700 ${footFont}px ui-monospace, "SF Mono", Menlo, monospace`;
+    const footTextY = footY + Math.round(8 * scale);
+    // "Chat" — left, accent, 700
+    ctx.font = `700 ${footFont}px ${monoFamily}`;
     ctx.fillStyle = accent;
-    ctx.fillText('CHAT', padX, footY);
-
-    ctx.font = `${footFont}px ui-monospace, "SF Mono", Menlo, monospace`;
-    ctx.fillStyle = faint;
+    this._setLetterSpacing(ctx, `${Math.round(0.16 * footFont)}px`);
+    ctx.fillText('CHAT', padX, footTextY);
+    // Date — right, faint, regular
     if (dateLabel) {
-      const footRight = dateLabel.toUpperCase();
-      const rightWidth = ctx.measureText(footRight).width;
-      ctx.fillText(footRight, canvasW - padX - rightWidth, footY);
+      ctx.font = `${footFont}px ${monoFamily}`;
+      ctx.fillStyle = faint;
+      const rightText = dateLabel.toUpperCase();
+      const rightWidth = ctx.measureText(rightText).width;
+      ctx.fillText(rightText, canvasW - padX - rightWidth, footTextY);
     }
+    this._setLetterSpacing(ctx, '0px');
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
     return texture;
+  }
+
+  /** Rounded-rect path helper (does not fill/stroke). */
+  private _roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number,
+  ): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /** Letter-spacing helper — guarded for older browsers without `ctx.letterSpacing`. */
+  private _setLetterSpacing(ctx: CanvasRenderingContext2D, value: string): void {
+    if ('letterSpacing' in ctx) {
+      (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = value;
+    }
   }
 
   /** Word-wrap helper for the conversation card. Draws up to `maxLines` lines,

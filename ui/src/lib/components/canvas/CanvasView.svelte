@@ -20,9 +20,11 @@
   let loaded = $state(false);
 
   let {
-    onqueryAbout = (_node: KGNode) => {}
+    onqueryAbout = (_node: KGNode) => {},
+    onselectconversation = (_id: string) => {}
   }: {
     onqueryAbout?: (node: KGNode) => void;
+    onselectconversation?: (id: string) => void;
   } = $props();
 
   let containerEl: HTMLDivElement | undefined = $state();
@@ -70,6 +72,13 @@
     sm.onSelectNode = (nodeId) => {
       if (nodeId) {
         const cn = sm.getCanvasNode(nodeId);
+        const kg = graphStore.nodes.find((n) => n.id === nodeId);
+        const isConversation = cn?.kind === 'conversation'
+          || kg?.properties?.entity_type === 'Conversation';
+        if (isConversation) {
+          onselectconversation(nodeId);
+          return;
+        }
         selectedNodeId = nodeId;
         selectedCanvasNode = cn ?? null;
       } else {

@@ -114,157 +114,6 @@
   let panelTextareaEl: HTMLTextAreaElement | undefined = $state();
   let messagesContainer: HTMLDivElement | undefined = $state();
 
-  // Continuous scroll buffer — lets the user scroll up from the active
-  // conversation into previous conversations without manually switching.
-  // `olderConversationIds` is ordered oldest-loaded-first, newest-loaded-last
-  // (i.e. the conversation immediately above the active one is the last
-  // element). `olderConversationMessages` caches loaded messages per id.
-  let olderConversationIds = $state<string[]>([]);
-  let olderConversationMessages = $state<Record<string, ChatMessage[]>>({});
-  let isLoadingOlder = $state(false);
-  let hasNoMoreOlder = $state(false);
-  // Suppresses the next scroll event so programmatic scroll-position
-  // restoration after loading an older conversation doesn't re-trigger
-  // the load handler in a loop.
-  let suppressScrollLoad = false;
-
-  // --- Scroll-to-load-previous state ---
-  // When the user scrolls to the top, a sticky indicator appears telling
-  // them to keep scrolling up. A wheel/scroll-up gesture at scrollTop===0
-  // triggers loading the previous conversation.
-  let nearTop = $state(false);
-  let atTop = $state(false);
-  // Whether there are older conversations available to load.
-  let hasOlderAvailable = $derived(!hasNoMoreOlder && (() => {
-    const activeIdx = conversations.findIndex((c) => c.id === activeConversationId);
-    if (activeIdx === -1) return false;
-    let frontierIdx = activeIdx;
-    if (olderConversationIds.length > 0) {
-      const frontierId = olderConversationIds[olderConversationIds.length - 1];
-      frontierIdx = conversations.findIndex((c) => c.id === frontierId);
-    }
-    return frontierIdx >= 0 && frontierIdx + 1 < conversations.length;
-  })());
-
-  function resetScrollBuffer() {
-    olderConversationIds = [];
-    olderConversationMessages = {};
-    hasNoMoreOlder = false;
-    nearTop = false;
-    atTop = false;
-  }
-
-  /**
-   * Find the next older conversation (one position older than the oldest
-   * currently loaded in the buffer, or one position older than the active
-   * conversation if the buffer is empty) and load its messages, prepending
-   * to the buffer while preserving the user's scroll position so the view
-   * appears to extend upward seamlessly.
-   */
-  async function loadOlderConversation() {
-    if (isLoadingOlder || hasNoMoreOlder || !activeConversationId) return;
-
-    // `conversations` is newest-first. Find the active conversation's index,
-    // then walk toward older conversations. The "frontier" is the oldest
-    // conversation we've already loaded into the buffer (or the active one
-    // if the buffer is empty). The next older conversation is at index+1.
-    const activeIdx = conversations.findIndex((c) => c.id === activeConversationId);
-    if (activeIdx === -1) return;
-
-    let frontierId = activeConversationId;
-    if (olderConversationIds.length > 0) {
-      frontierId = olderConversationIds[olderConversationIds.length - 1];
-    }
-    const frontierIdx = conversations.findIndex((c) => c.id === frontierId);
-    if (frontierIdx === -1) {
-      hasNoMoreOlder = true;
-      return;
-    }
-    const nextIdx = frontierIdx + 1;
-    if (nextIdx >= conversations.length) {
-      hasNoMoreOlder = true;
-      return;
-    }
-    const nextConv = conversations[nextIdx];
-    if (!nextConv) {
-      hasNoMoreOlder = true;
-      return;
-    }
-
-    isLoadingOlder = true;
-    try {
-      let loaded = nextConv.messages;
-      if (loaded.length === 0) {
-        loaded = await syncClient.loadConversation(nextConv.id);
-        nextConv.messages = loaded;
-      }
-      const prevScrollHeight = messagesContainer?.scrollHeight ?? 0;
-      const prevScrollTop = messagesContainer?.scrollTop ?? 0;
-
-      suppressScrollLoad = true;
-      olderConversationIds = [...olderConversationIds, nextConv.id];
-      olderConversationMessages = {
-        ...olderConversationMessages,
-        [nextConv.id]: loaded,
-      };
-
-      await tick();
-      if (messagesContainer) {
-        const delta = messagesContainer.scrollHeight - prevScrollHeight;
-        messagesContainer.scrollTop = prevScrollTop + delta;
-      }
-      requestAnimationFrame(() => {
-        if (messagesContainer) {
-          const delta = messagesContainer.scrollHeight - prevScrollHeight;
-          messagesContainer.scrollTop = prevScrollTop + delta;
-        }
-        requestAnimationFrame(() => {
-          suppressScrollLoad = false;
-          isLoadingOlder = false;
-        });
-      });
-    } catch {
-      isLoadingOlder = false;
-      suppressScrollLoad = false;
-    }
-  }
-
-  function handleMessagesScroll() {
-    if (suppressScrollLoad) {
-      suppressScrollLoad = false;
-      return;
-    }
-    if (!messagesContainer) return;
-    atTop = messagesContainer.scrollTop === 0;
-    nearTop = messagesContainer.scrollTop < 80;
-    if (
-      messagesContainer.scrollTop < 120 &&
-      !isLoadingOlder &&
-      !hasNoMoreOlder &&
-      hasOlderAvailable
-    ) {
-      loadOlderConversation();
-    }
-  }
-
-  // Wheel handler — catches the case where the user is already at scrollTop===0
-  // (or the content fits the viewport so scrollTop is always 0) and scrolls up
-  // with the mouse wheel. In that scenario the browser never fires a `scroll`
-  // event because the position doesn't change, so `handleMessagesScroll` alone
-  // would never trigger `loadOlderConversation`.
-  function handleMessagesWheel(e: WheelEvent) {
-    if (suppressScrollLoad || !messagesContainer) return;
-    // Only interested in scroll-up gestures (negative deltaY).
-    if (e.deltaY >= 0) return;
-    // Already at the top (or content too short to scroll).
-    if (messagesContainer.scrollTop > 0) return;
-    if (!isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable) {
-      atTop = true;
-      nearTop = true;
-      loadOlderConversation();
-    }
-  }
-
   // The active conversation object, for the divider label above the active
   // messages. Kept as a derived so the divider re-renders when the active
   // conversation changes or its title updates.
@@ -272,8 +121,7 @@
     conversations.find((c) => c.id === activeConversationId) ?? null
   );
   let showActiveDivider = $derived(
-    !!activeConvForDivider &&
-    (olderConversationIds.length > 0 || messages.length > 0)
+    !!activeConvForDivider && messages.length > 0
   );
 
   let thinkingContent = $state('');
@@ -732,7 +580,6 @@
     conversations.unshift(conv);
     activeConversationId = id;
     messages = [];
-    resetScrollBuffer();
     syncClient.saveConversation(conv);
     return id;
   }
@@ -798,7 +645,6 @@
     }
 
     activeConversationId = id;
-    resetScrollBuffer();
     const conv = conversations.find((c) => c.id === id);
     if (conv) {
       if (conv.messages.length === 0) {
@@ -1616,38 +1462,11 @@
   async function deleteConversation(id: string) {
     cancelStreaming();
     conversations = conversations.filter((c) => c.id !== id);
-    // Remove the deleted conversation from the scroll-up buffer too,
-    // otherwise its messages keep rendering below the (now-hidden) divider
-    // because `{#each olderConversationIds}` + `olderConversationMessages`
-    // are not gated on `conversations` containing the id.
-    if (olderConversationIds.includes(id)) {
-      olderConversationIds = olderConversationIds.filter((cid) => cid !== id);
-      const { [id]: _removed, ...rest } = olderConversationMessages;
-      olderConversationMessages = rest;
-    }
     syncClient.deleteConversation(id);
     if (activeConversationId === id) {
-      const next = conversations[0];
-      if (next) {
-        activeConversationId = next.id;
-        resetScrollBuffer();
-        if (next.messages.length === 0) {
-          const loaded = await syncClient.loadConversation(next.id);
-          if (loaded.length > 0) {
-            next.messages = loaded;
-            messages = [...loaded];
-          } else {
-            messages = [...next.messages];
-          }
-        } else {
-          messages = [...next.messages];
-        }
-      } else {
-        activeConversationId = '';
-        messages = [];
-        chatExpanded = false;
-        resetScrollBuffer();
-      }
+      activeConversationId = '';
+      messages = [];
+      chatExpanded = false;
     }
   }
 
@@ -1776,6 +1595,10 @@
     handleSend(undefined, undefined, undefined, true);
   }
 
+  function handleSelectConversation(id: string) {
+    switchConversation(id);
+  }
+
   async function fetchModels() {
     try {
       const res = await fetch(API.llama.models);
@@ -1884,7 +1707,6 @@
     fetchModels();
     syncClient.init().then(() => {
       conversations = [...syncClient.conversations];
-      resetScrollBuffer();
       if (conversations.length > 0 && !activeConversationId) {
         activeConversationId = conversations[0].id;
         const conv = conversations[0];
@@ -1903,13 +1725,6 @@
         conversations = [...updated];
       });
     });
-  });
-
-  $effect(() => {
-    if (messagesContainer && messages.length > 0) {
-      nearTop = messagesContainer.scrollTop < 80;
-      atTop = messagesContainer.scrollTop === 0;
-    }
   });
 
   $effect(() => {
@@ -1975,7 +1790,7 @@
   {/if}
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
-      <CanvasView onqueryAbout={handleQueryAbout} />
+      <CanvasView onqueryAbout={handleQueryAbout} onselectconversation={handleSelectConversation} />
     </div>
 
     <!-- Inline chat overlay (game-style, bottom-right) -->
@@ -2018,29 +1833,7 @@
           bind:this={messagesContainer}
           class="chat-inline-messages"
           data-testid="messages-container"
-          onscroll={handleMessagesScroll}
-          onwheel={handleMessagesWheel}
         >
-          {#if nearTop && !isLoadingOlder && !hasNoMoreOlder && hasOlderAvailable}
-            <div class="chat-scroll-hint" data-testid="scroll-load-hint">
-              <Icon name="chevron-down" size={14} color="var(--color-cyber-cyan)" />
-              <span>Keep scrolling up for previous conversation</span>
-            </div>
-          {/if}
-          {#if isLoadingOlder}
-            <div class="chat-scroll-hint chat-scroll-hint-loading" data-testid="scroll-load-hint">
-              <div class="chat-pull-spinner" data-testid="pull-loading">
-                <Icon name="refresh-cw" size={14} color="var(--color-cyber-cyan)" />
-              </div>
-              <span>Loading previous conversation…</span>
-            </div>
-          {/if}
-          {#if hasNoMoreOlder && nearTop}
-            <div class="chat-scroll-hint chat-scroll-hint-done" data-testid="scroll-load-hint">
-              <span>No older conversations</span>
-            </div>
-          {/if}
-
           {#snippet messageRow(msg: ChatMessage)}
             <div class="group mb-4" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
@@ -2364,50 +2157,6 @@
             </div>
           {/snippet}
 
-          {#each olderConversationIds as convId (convId)}
-            {@const conv = conversations.find((c) => c.id === convId)}
-            {@const convMsgs = olderConversationMessages[convId] ?? []}
-            {#if conv}
-              <div class="chat-conversation-divider" data-testid="conversation-divider" data-conversation-id={convId}>
-                <span class="chat-conversation-divider-line"></span>
-                <span class="chat-conversation-divider-label">
-                  <span class="chat-conversation-divider-date">{formatConversationDate(conv.createdAt)}</span>
-                  <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
-                  <button
-                    type="button"
-                    class="chat-conversation-divider-btn"
-                    title="Export conversation"
-                    aria-label="Export conversation"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      exportConversationToJsonl(convId);
-                    }}
-                  >
-                    <Icon name="download" size={13} color="var(--color-cyber-cyan)" />
-                  </button>
-                  <button
-                    type="button"
-                    class="chat-conversation-divider-btn chat-conversation-divider-delete"
-                    title="Delete conversation"
-                    aria-label="Delete conversation"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      if (confirm('Delete this conversation? This cannot be undone.')) {
-                        deleteConversation(convId);
-                      }
-                    }}
-                  >
-                    <Icon name="trash-2" size={13} color="var(--color-cyber-cyan)" />
-                  </button>
-                </span>
-                <span class="chat-conversation-divider-line"></span>
-              </div>
-              {#each convMsgs as msg (msg.id)}
-                {@render messageRow(msg)}
-              {/each}
-            {/if}
-          {/each}
-
           {#if configStore.systemPrompt.trim()}
             <details class="group mb-4 rounded-lg border border-cyber-border/60 bg-cyber-surface-2/40">
               <summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-cyber-text-dim transition-colors hover:bg-cyber-surface-2/60">
@@ -2495,7 +2244,7 @@
             </div>
           {/if}
 
-          <div class="chat-inline-input-row mx-auto flex h-12 w-[36rem] items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+          <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
             <textarea
               bind:this={panelTextareaEl}
               bind:value={panelChatInput}
@@ -2549,76 +2298,80 @@
               </button>
             {/if}
             </div>
-        {:else}
-          <div class="chat-collapsed-orb" data-testid="chat-collapsed-orb">
-            <div
-              class="chat-orb"
-              class:recording={isRecording}
-              class:holding={holdActive}
-              class:options-open={orbOptionsOpen}
-              role="button"
-              tabindex="0"
-              aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : 'Voice input'}
-              data-od-id="chat-orb"
-              data-testid="mic-button"
-              onpointerdown={handleMicPointerDown}
-              onpointerup={handleMicPointerUp}
-              onpointerleave={handleMicPointerLeave}
-              onpointercancel={handleMicPointerCancel}
-              onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); orbOptionsOpen = !orbOptionsOpen; } }}
-              onmouseenter={() => { micTooltipVisible = true; }}
-              onmouseleave={() => { micTooltipVisible = false; }}
-            >
-              {#if isTranscribing}
-                <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-              {:else if isRecording}
-                <Icon name="square" size={16} />
-              {:else if holdActive}
-                <span class="hold-countdown" data-testid="hold-countdown">{holdCountdown}</span>
-              {:else}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-              {/if}
-              {#if holdActive && !isRecording}
-                <span class="hold-progress" style="inset: {((holdElapsed / HOLD_TO_RECORD_MS) * 100).toFixed(1)}%;" aria-hidden="true"></span>
-              {/if}
-              {#if micTooltipVisible && !holdActive && !isRecording}
-                <span class="mic-tooltip" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
-              {/if}
-            </div>
-            <div
-              class="chat-orb-add"
-              class:show={orbOptionsOpen}
-              role="button"
-              tabindex="0"
-              aria-label="Add images"
-              data-od-id="chat-orb-add"
-              onclick={() => { chatExpanded = true; tick().then(() => imageFileInput?.click()); }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => imageFileInput?.click()); } }}
-            >
-              <div class="coa-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              </div>
-              <span>Add images</span>
-            </div>
-            <div
-              class="chat-orb-expand"
-              class:show={orbOptionsOpen}
-              role="button"
-              tabindex="0"
-              aria-label="Type a message"
-              data-od-id="chat-orb-expand"
-              onclick={() => { chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); } }}
-            >
-              <div class="coe-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-              </div>
-              <span>Type a message</span>
-            </div>
-          </div>
         {/if}
       {/if}
     </div>
+
+    {#if !chatExpanded}
+      <div class="chat-collapsed-orb-host" data-testid="chat-collapsed-orb">
+        <div class="chat-collapsed-orb">
+          <div
+            class="chat-orb"
+            class:recording={isRecording}
+            class:holding={holdActive}
+            class:options-open={orbOptionsOpen}
+            role="button"
+            tabindex="0"
+            aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : 'Voice input'}
+            data-od-id="chat-orb"
+            data-testid="mic-button"
+            onpointerdown={handleMicPointerDown}
+            onpointerup={handleMicPointerUp}
+            onpointerleave={handleMicPointerLeave}
+            onpointercancel={handleMicPointerCancel}
+            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); orbOptionsOpen = !orbOptionsOpen; } }}
+            onmouseenter={() => { micTooltipVisible = true; }}
+            onmouseleave={() => { micTooltipVisible = false; }}
+          >
+            {#if isTranscribing}
+              <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+            {:else if isRecording}
+              <Icon name="square" size={16} />
+            {:else if holdActive}
+              <span class="hold-countdown" data-testid="hold-countdown">{holdCountdown}</span>
+            {:else}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            {/if}
+            {#if holdActive && !isRecording}
+              <span class="hold-progress" style="inset: {((holdElapsed / HOLD_TO_RECORD_MS) * 100).toFixed(1)}%;" aria-hidden="true"></span>
+            {/if}
+            {#if micTooltipVisible && !holdActive && !isRecording}
+              <span class="mic-tooltip" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
+            {/if}
+          </div>
+          <div
+            class="chat-orb-add"
+            class:show={orbOptionsOpen}
+            role="button"
+            tabindex="0"
+            aria-label="Add images"
+            data-od-id="chat-orb-add"
+            onclick={() => { chatExpanded = true; tick().then(() => imageFileInput?.click()); }}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => imageFileInput?.click()); } }}
+          >
+            <div class="coa-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </div>
+            <span>Add images</span>
+          </div>
+          <div
+            class="chat-orb-expand"
+            class:show={orbOptionsOpen}
+            role="button"
+            tabindex="0"
+            aria-label="Type a message"
+            data-od-id="chat-orb-expand"
+            onclick={() => { chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); }}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); } }}
+          >
+            <div class="coe-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <span>Type a message</span>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- Node detail overlay -->
     {#if $selectedNodeId}
@@ -2645,18 +2398,16 @@
 <style>
   .chat-inline-overlay {
     position: absolute;
-    left: 50%;
+    right: 0;
+    top: 0;
     bottom: 0;
-    transform: translateX(-50%);
     z-index: 30;
     display: flex;
-    width: 100%;
-    max-width: 44rem;
+    width: 24rem;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
+    padding: 1rem;
     padding-bottom: 1rem;
-    padding-left: 1rem;
-    padding-right: 1rem;
     pointer-events: none;
   }
 
@@ -2665,6 +2416,15 @@
   }
 
   /* ── Collapsed chat orb ── */
+  .chat-collapsed-orb-host {
+    position: absolute;
+    left: 50%;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 30;
+    pointer-events: auto;
+  }
+
   .chat-collapsed-orb {
     display: flex;
     flex-direction: column-reverse;
@@ -2957,14 +2717,10 @@
   .chat-inline-messages {
     width: 100%;
     max-width: 42rem;
-    max-height: 60dvh;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    /* Prevent the browser's scroll anchoring from adjusting scrollTop
-     * when older conversations are prepended — we handle restoration
-     * manually in loadOlderConversation() via tick() + scrollTop delta. */
     overflow-anchor: none;
-    /* Prevent scroll chaining so pull-to-refresh gesture isn't hijacked
-     * by the parent when the container is at scrollTop=0. */
     overscroll-behavior-y: contain;
     padding: 8px 12px;
     display: flex;
@@ -2984,72 +2740,6 @@
   .chat-inline-messages::-webkit-scrollbar-thumb {
     background: rgba(0, 212, 255, 0.25);
     border-radius: 3px;
-  }
-
-  .chat-scroll-hint {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 6px 12px;
-    flex-shrink: 0;
-    background: linear-gradient(
-      to bottom,
-      rgba(0, 212, 255, 0.08) 0%,
-      transparent 100%
-    );
-    color: var(--color-cyber-cyan);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    opacity: 0.7;
-    white-space: nowrap;
-    animation: chat-hint-fade-in 0.2s ease-out;
-  }
-
-  .chat-scroll-hint svg {
-    transform: rotate(180deg);
-    opacity: 0.6;
-    animation: chat-hint-bounce 1.5s ease-in-out infinite;
-  }
-
-  .chat-scroll-hint-loading svg {
-    transform: none;
-    opacity: 1;
-    animation: none;
-  }
-
-  .chat-scroll-hint-loading {
-    opacity: 0.9;
-  }
-
-  .chat-scroll-hint-done {
-    opacity: 0.35;
-  }
-
-  @keyframes chat-hint-fade-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 0.7; transform: translateY(0); }
-  }
-
-  @keyframes chat-hint-bounce {
-    0%, 100% { transform: rotate(180deg) translateY(0); }
-    50% { transform: rotate(180deg) translateY(-3px); }
-  }
-
-  .chat-pull-spinner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: chat-pull-spin 0.8s linear infinite;
-  }
-
-  @keyframes chat-pull-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
   }
 
   .chat-inline-header {
@@ -3205,8 +2895,10 @@
     .chat-inline-overlay {
       left: 8px;
       right: 8px;
+      top: auto;
       bottom: calc(64px + env(safe-area-inset-bottom, 0px));
       transform: none;
+      width: auto;
       max-width: 100%;
     }
 

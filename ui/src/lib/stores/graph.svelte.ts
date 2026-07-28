@@ -83,9 +83,9 @@ class GraphStore {
         updatedAt: c.updatedAt,
       },
     }));
-    const convIds = new Set(convNodes.map((n) => n.id));
-    // Drop existing conversation nodes, keep everything else (photos, …).
-    const kept = this.nodes.filter((n) => n.properties?.entity_type !== 'Conversation' || !convIds.has(n.id));
+    // Drop ALL existing conversation nodes (including ones no longer in the
+    // sync list — i.e. deleted), then add the fresh set from syncClient.
+    const kept = this.nodes.filter((n) => n.properties?.entity_type !== 'Conversation');
     this.nodes = [...kept, ...convNodes];
   }
 
