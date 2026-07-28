@@ -13,8 +13,8 @@ function photoFilename(node: KGNode): string | null {
     (p.file_path as string | undefined) ??
     (p.filename as string | undefined) ??
     (p.file_source as string | undefined);
-  if (typeof f === 'string' && f.length > 0) return f;
-  return null;
+  if (typeof f !== 'string' || f.length === 0) return null;
+  return f;
 }
 
 function isStalePhoto(node: KGNode): boolean {

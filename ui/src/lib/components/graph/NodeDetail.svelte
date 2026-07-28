@@ -201,8 +201,17 @@
 
   function isPhotoNode(n: KGNode): boolean {
     const et = n.properties?.entity_type;
-    if (typeof et === 'string') return et.toLowerCase() === 'photo';
-    return n.id.toLowerCase().includes('(photo)');
+    if (typeof et === 'string' && et.toLowerCase() === 'photo') {
+      const sid = n.properties?.source_id ?? n.properties?.file_path;
+      if (typeof sid === 'string' && sid.includes('<SEP>')) return false;
+      return true;
+    }
+    if (n.id.toLowerCase().includes('(photo)')) {
+      const sid = n.properties?.source_id ?? n.properties?.file_path;
+      if (typeof sid === 'string' && sid.includes('<SEP>')) return false;
+      return true;
+    }
+    return false;
   }
 
   let reprocessing = $state(false);
@@ -210,9 +219,9 @@
 
   function getFileSourceFromPhoto(n: KGNode): string | null {
     const src = n.properties?.source_id as string | undefined;
-    if (src) return src;
+    if (src) return src.includes('<SEP>') ? null : src;
     const filePath = n.properties?.file_path as string | undefined;
-    if (filePath) return filePath;
+    if (filePath) return filePath.includes('<SEP>') ? null : filePath;
     const match = n.id.match(/^(.+)\s*\(Photo\)$/i);
     return match ? match[1].trim() : null;
   }

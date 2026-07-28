@@ -18,10 +18,9 @@ export const docChunkProvider: NodeKindProvider = {
   shouldRender(): boolean {
     return false;
   },
-  buildCanvasFields(node: KGNode, ctx: BuildCtx): Partial<CanvasNode> {
+  buildCanvasFields(node: KGNode, _ctx: BuildCtx): Partial<CanvasNode> {
     const np = node.properties ?? {};
     const text =
-      ctx.noteContents[node.id] ??
       (np.description as string | undefined) ??
       (np.summary as string | undefined) ??
       (np.title as string | undefined) ??

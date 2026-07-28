@@ -49,6 +49,8 @@ export class NodePlane {
   private _lodEnabled = false;
   /** Locally-baked text texture for text-source nodes (NOT routed through `textureCache`). */
   private _noteTexture?: THREE.CanvasTexture;
+  private _hoverTexture?: THREE.CanvasTexture;
+  private _hovered = false;
 
   /**
    * @param node - the canvas node to render.
@@ -80,10 +82,19 @@ export class NodePlane {
         this.applyTexture(cached);
       }
     } else if (textureSource === 'text' && node.textContent) {
-      const tex = this._createTextTexture(node.textContent);
+      const isConv = this._node.kind === 'conversation';
+      const tex = isConv
+        ? this._createConversationTexture(false)
+        : this._createTextTexture(node.textContent);
       this._noteTexture = tex;
       this._material.map = tex;
+      // A colored material tint MULTIPLIES the texture (color * map.rgb).
+      // Reset to white so the baked texture renders at full brightness.
+      this._material.color.set(0xffffff);
       this._material.needsUpdate = true;
+      if (isConv) {
+        this._hoverTexture = this._createConversationTexture(true);
+      }
     }
   }
 
@@ -95,6 +106,15 @@ export class NodePlane {
   /** The canvas node this plane renders. */
   get node(): CanvasNode {
     return this._node;
+  }
+
+  setHovered(hovered: boolean): void {
+    if (this._hovered === hovered) return;
+    this._hovered = hovered;
+    if (this._hoverTexture && this._noteTexture) {
+      this._material.map = hovered ? this._hoverTexture : this._noteTexture;
+      this._material.needsUpdate = true;
+    }
   }
 
   /**
@@ -244,6 +264,181 @@ export class NodePlane {
       this._noteTexture.dispose();
       this._noteTexture = undefined;
     }
+    if (this._hoverTexture) {
+      this._hoverTexture.dispose();
+      this._hoverTexture = undefined;
+    }
+  }
+
+  /** Bake a glass-blue conversation card texture matching the prototype's
+   *  `.graph-node.chat` visual: accent-blue kicker, bright title, muted foot,
+   *  dark glass background. Draws from `node.properties` (title + createdAt)
+   *  so the preview is built without eagerly loading messages. */
+  private _createConversationTexture(hovered: boolean): THREE.CanvasTexture {
+    const aspect = this._node.width > 0 && this._node.height > 0
+      ? this._node.width / this._node.height
+      : 1 / 1.4;
+    const canvasH = 512;
+    const canvasW = Math.max(128, Math.round(canvasH * aspect));
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    const p = this._node.properties ?? {};
+    const title = (p.name as string) ?? (p.title as string) ?? this._node.id;
+    const createdAt = typeof p.createdAt === 'number' ? p.createdAt : null;
+    const dateLabel = createdAt !== null
+      ? new Date(createdAt > 1e12 ? createdAt : createdAt * 1000).toLocaleDateString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric',
+        })
+      : '';
+
+    const accent = '#13dcf6';
+    const fg = '#dbdee1';
+    const muted = '#87909c';
+    const faint = '#6a727d';
+    const padX = 16;
+    const maxTextWidth = canvasW - padX * 2;
+    const radius = 14;
+
+    ctx.fillStyle = hovered ? '#243049' : '#1e2a42';
+    ctx.beginPath();
+    ctx.moveTo(radius, 0);
+    ctx.arcTo(canvasW, 0, canvasW, radius, radius);
+    ctx.arcTo(canvasW, canvasH, canvasW - radius, canvasH, radius);
+    ctx.arcTo(0, canvasH, 0, canvasH - radius, radius);
+    ctx.arcTo(0, 0, radius, 0, radius);
+    ctx.closePath();
+    ctx.fill();
+
+    if (hovered) {
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 32;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+    } else {
+      ctx.strokeStyle = 'rgba(19,220,246,0.14)';
+      ctx.lineWidth = 1;
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    const topGrad = ctx.createLinearGradient(0, 0, canvasW, 0);
+    topGrad.addColorStop(0, 'rgba(19,220,246,0)');
+    topGrad.addColorStop(0.5, accent);
+    topGrad.addColorStop(1, 'rgba(19,220,246,0)');
+    ctx.fillStyle = topGrad;
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(0, 0, canvasW, 3);
+    ctx.globalAlpha = 1;
+
+    const kickerFont = Math.max(14, Math.round(canvasH / 38));
+    const kickerY = 14;
+    const dotR = 3;
+    ctx.fillStyle = accent;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(padX + dotR, kickerY + kickerFont * 0.5, dotR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.font = `600 ${kickerFont}px ui-monospace, "SF Mono", Menlo, monospace`;
+    ctx.fillStyle = accent;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillText('CONVERSATION', padX + dotR * 2 + 6, kickerY);
+
+    const queryFont = Math.max(18, Math.round(canvasH / 24));
+    ctx.font = `700 ${queryFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+    ctx.fillStyle = fg;
+    const queryY = kickerY + kickerFont + 6;
+    const queryLineHeight = Math.round(queryFont * 1.28);
+    this._drawWrapped(ctx, title, padX, queryY, maxTextWidth, queryLineHeight, 2);
+
+    const footFont = Math.max(9, Math.round(canvasH / 48));
+    const footY = canvasH - 12 - footFont;
+    ctx.strokeStyle = 'rgba(88,100,116,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padX, footY - 8);
+    ctx.lineTo(canvasW - padX, footY - 8);
+    ctx.stroke();
+
+    ctx.font = `700 ${footFont}px ui-monospace, "SF Mono", Menlo, monospace`;
+    ctx.fillStyle = accent;
+    ctx.fillText('CHAT', padX, footY);
+
+    ctx.font = `${footFont}px ui-monospace, "SF Mono", Menlo, monospace`;
+    ctx.fillStyle = faint;
+    if (dateLabel) {
+      const footRight = dateLabel.toUpperCase();
+      const rightWidth = ctx.measureText(footRight).width;
+      ctx.fillText(footRight, canvasW - padX - rightWidth, footY);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  /** Word-wrap helper for the conversation card. Draws up to `maxLines` lines,
+   *  ellipsis-truncating the final line if it overflows. */
+  private _drawWrapped(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+    maxLines: number,
+  ): void {
+    const words = text.split(/\s+/).filter(Boolean);
+    let line = '';
+    let yy = y;
+    let lineIdx = 0;
+    for (let i = 0; i < words.length; i++) {
+      const candidate = line ? `${line} ${words[i]}` : words[i];
+      if (ctx.measureText(candidate).width <= maxWidth) {
+        line = candidate;
+        continue;
+      }
+      if (lineIdx === maxLines - 1) {
+        // Last allowed line — ellipsis-truncate.
+        let last = line ? `${line} ${words[i]}` : words[i];
+        while (last && ctx.measureText(last + '…').width > maxWidth && last.length > 0) {
+          last = last.slice(0, -1);
+        }
+        ctx.fillText(last + '…', x, yy);
+        return;
+      }
+      if (line) {
+        ctx.fillText(line, x, yy);
+        yy += lineHeight;
+        lineIdx++;
+        line = words[i];
+      } else {
+        // Single word too long — hard break.
+        let chunk = words[i];
+        while (chunk && ctx.measureText(chunk).width > maxWidth) {
+          let cut = chunk.length - 1;
+          while (cut > 0 && ctx.measureText(chunk.slice(0, cut)).width > maxWidth) cut--;
+          if (cut <= 0) return;
+          ctx.fillText(chunk.slice(0, cut), x, yy);
+          yy += lineHeight;
+          lineIdx++;
+          if (lineIdx >= maxLines) return;
+          chunk = chunk.slice(cut);
+        }
+        line = chunk;
+      }
+    }
+    if (line) ctx.fillText(line, x, yy);
   }
 
   /**

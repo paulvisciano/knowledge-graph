@@ -529,7 +529,13 @@ export class SceneManager {
     const hit = this.raycast(e);
     const id = hit ?? null;
     if (id !== this._hoveredNodeId) {
+      if (this._hoveredNodeId !== null) {
+        this._chunkManager.findPlaneByNodeId(this._hoveredNodeId)?.setHovered(false);
+      }
       this._hoveredNodeId = id;
+      if (id !== null) {
+        this._chunkManager.findPlaneByNodeId(id)?.setHovered(true);
+      }
       this.updateCursor();
     }
     this.onHoverNode?.(id);

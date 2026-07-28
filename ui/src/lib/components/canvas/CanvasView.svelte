@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { KGNode } from '$lib/constants';
   import { graphStore } from '$lib/stores/graph.svelte';
+  import { syncClient } from '$lib/services/sync-client.svelte';
   import { LightragClient } from '$lib/services/lightrag-client';
   import { textureCache } from '$lib/services/TextureCache';
   import { SceneManager } from './renderer/SceneManager';
@@ -40,7 +42,7 @@
   let tooltipX = $state(0);
   let tooltipY = $state(0);
 
-  let timeIndex: TimeIndex | null = null;
+  let timeIndex = $state<TimeIndex | null>(null);
   let dateLabel = $state<string | null>(null);
   let timelineOpen = $state(false);
   let currentBucketIdx = $state(-1);
@@ -131,7 +133,6 @@
       graphStore.photoImages,
       graphStore.personImages,
       undefined,
-      graphStore.noteContents,
     );
     timeIndex = buildTimeIndex(graphStore.nodes, graphStore.edges);
     sceneManager.setNodes(nodes);
@@ -160,10 +161,18 @@
     tooltipY = e.clientY - rect.top;
   }
 
-  /** Initial graph fetch — mirrors GraphView's popular-labels fallback. */
+  /** Initial graph fetch — mirrors GraphView's popular-labels fallback.
+   *  Also seeds `graphStore` with one node per `syncClient.conversations`
+   *  entry (chat-conversation nodes) so the canvas shows conversations even
+   *  when LightRAG has no photos. */
   async function loadGraph(): Promise<void> {
     loadError = null;
     try {
+      try {
+        await syncClient.init();
+      } catch {
+        // Sync backend optional — continue without conversations.
+      }
       let label: string | undefined;
       try {
         const popular = await client.getPopularLabels(1);
@@ -173,6 +182,7 @@
         label = labels?.[0];
       }
       await graphStore.loadGraph(label);
+      graphStore.loadConversations();
     } catch (e) {
       loadError = e instanceof Error ? e.message : 'Failed to load graph';
     } finally {
@@ -230,7 +240,6 @@
     void graphStore.nodes;
     void graphStore.edges;
     void graphStore.photoImages;
-    void graphStore.noteContents;
 
     if (!mounted) return;
     if (!firstLayoutApplied) {
@@ -245,6 +254,18 @@
       return;
     }
     scheduleRebuild();
+  });
+
+  // Separately track syncClient.conversations and re-merge conversation nodes
+  // whenever the sync list changes (new conversation saved / existing one
+  // deleted). `untrack` wraps the merge so the write to `graphStore.nodes`
+  // inside `loadConversations` does NOT create a transitive reactive loop
+  // with the graphStore.nodes effect above (Svelte 5 would otherwise detect
+  // the cycle and tear down both effects, freezing `loaded`'s DOM update).
+  $effect(() => {
+    void syncClient.conversations;
+    if (!mounted) return;
+    untrack(() => graphStore.loadConversations());
   });
 
   let isEmpty = $derived(graphStore.nodes.length === 0);

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { graphStore } from '$lib/stores/graph.svelte';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
-  import { API, type KGNode } from '$lib/constants';
+  import { API, type KGNode, type ChatMessage } from '$lib/constants';
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient } from '$lib/services/kg-api-client';
+  import { syncClient } from '$lib/services/sync-client.svelte';
   import type { CanvasNode } from './renderer/types';
   import { classifyKind } from './Layout';
   import { marked } from 'marked';
@@ -124,6 +125,57 @@
   let deleting = $state(false);
   let personPhotoErrors = $state(new Set<string>());
   let activeTab = $state<'details' | 'insights' | 'connections'>('details');
+
+  let convMessages = $state<ChatMessage[]>([]);
+  let convLoading = $state(false);
+  let convDeleting = $state(false);
+
+  function isConversation(n: CanvasNode | null): boolean {
+    return n?.kind === 'conversation';
+  }
+
+  function conversationSlug(title: string): string {
+    return (title || 'untitled')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'untitled';
+  }
+
+  function formatConversationDate(ms: number | undefined): string {
+    if (!ms) return '';
+    const d = new Date(ms > 1e12 ? ms : ms * 1000);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function conversationLinkedImages(messages: ChatMessage[]): string[] {
+    const urls: string[] = [];
+    for (const m of messages) {
+      if (m.imageUrls) for (const u of m.imageUrls) urls.push(u);
+    }
+    return urls;
+  }
+
+  async function handleDeleteConversation(id: string) {
+    if (convDeleting) return;
+    convDeleting = true;
+    try {
+      await syncClient.deleteConversation(id);
+      graphStore.loadConversations();
+      handleClose();
+    } catch (err) {
+      console.error('[NodeOverlay] Delete conversation failed:', err);
+    } finally {
+      convDeleting = false;
+    }
+  }
 
   async function fetchExifForNode(nodeId: string, fileSource: string) {
     if (exifCache.has(nodeId)) {
@@ -582,6 +634,24 @@
     }
   });
 
+  $effect(() => {
+    const id = node?.id;
+    if (!id || !isConversation(node)) {
+      convMessages = [];
+      convLoading = false;
+      return;
+    }
+    let cancelled = false;
+    convLoading = true;
+    convMessages = [];
+    syncClient.loadConversation(id).then((msgs) => {
+      if (cancelled) return;
+      convMessages = msgs;
+      convLoading = false;
+    });
+    return () => { cancelled = true; };
+  });
+
   function openFullscreen(url: string) {
     fullscreenUrl = url;
   }
@@ -661,7 +731,14 @@
   {@const isError = status?.stage === 'error'}
   {@const descText = fetchedDocContent ?? descriptionContent ?? null}
   {@const isNote = node.kind === 'note'}
+  {@const isConv = isConversation(node)}
   {@const noteBody = fetchedDocContent ?? descriptionContent ?? node.textContent ?? ''}
+  {@const convTitle = (kgNode?.properties?.name as string) ?? (node?.properties?.name as string) ?? node?.id ?? 'Conversation'}
+  {@const convCreatedAt = (kgNode?.properties?.createdAt as number) ?? (node?.properties?.createdAt as number) ?? undefined}
+  {@const convDateLabel = formatConversationDate(convCreatedAt)}
+  {@const convSlug = conversationSlug(convTitle)}
+  {@const convTurns = convMessages.filter((m) => m.role === 'user' || m.role === 'assistant').length}
+  {@const convLinkedImages = conversationLinkedImages(convMessages)}
 
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div class="spatial-scene" data-od-id="overlay-app" onclick={handleClose} role="presentation">
@@ -669,7 +746,15 @@
 
       <header class="topbar" data-od-id="topbar">
         <div class="topbar-left">
-          {#if isProcessing || isComplete || isError}
+          {#if isConv}
+            <div class="status-pill is-chat" data-od-id="chat-kind-pill">
+              <span class="status-dot"></span>
+              <span>Conversation</span>
+            </div>
+            <span class="filename" data-od-id="chat-filename" title={`conversation-${convSlug}.json`}>
+              conversation-{convSlug}.json
+            </span>
+          {:else if isProcessing || isComplete || isError}
             <div class="status-pill {isProcessing ? 'is-processing' : isComplete ? 'is-complete' : 'is-error'}" data-od-id="status-pill">
               {#if isProcessing}
                 <span class="status-dot is-processing" aria-hidden="true"></span>
@@ -682,10 +767,14 @@
                 <span>{status?.error ?? 'Failed'}</span>
               {/if}
             </div>
+            <span class="filename" data-od-id="filename" title={fileName}>
+              {#if dateLabel}{dateLabel}{:else}{fileName}{/if}
+            </span>
+          {:else}
+            <span class="filename" data-od-id="filename" title={fileName}>
+              {#if dateLabel}{dateLabel}{:else}{fileName}{/if}
+            </span>
           {/if}
-          <span class="filename" data-od-id="filename" title={fileName}>
-            {#if dateLabel}{dateLabel}{:else}{fileName}{/if}
-          </span>
         </div>
         <button class="close-btn" data-od-id="close-btn" aria-label="Close details (Esc)" onclick={handleClose}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -693,7 +782,59 @@
       </header>
 
       <div class="image-stage" data-od-id="main-stage">
-        {#if isNote}
+        {#if isConv}
+          <div class="chat-view" data-od-id="chat-view">
+            <div class="chat-view-header" data-od-id="chat-view-header">
+              <div class="chat-view-kicker" data-od-id="chat-conv-kicker">
+                Conversation{#if convTurns > 0} · {convTurns} {convTurns === 1 ? 'turn' : 'turns'}{/if}
+              </div>
+              {#if convDateLabel}
+                <div class="chat-view-date" data-od-id="chat-conv-date">{convDateLabel}</div>
+              {/if}
+            </div>
+
+            <div class="chat-view-thread" data-od-id="chat-conv-thread">
+              {#if convLoading}
+                <div class="note-loading" data-od-id="chat-loading">
+                  <span class="spinner"></span> Loading conversation…
+                </div>
+              {:else if convMessages.length === 0}
+                <div class="note-empty">No messages in this conversation.</div>
+              {:else}
+                {#each convMessages as m, i}
+                  {#if m.role === 'user' || m.role === 'assistant'}
+                    <div class="cv-msg {m.role === 'user' ? 'cv-user' : 'cv-assistant'}" style="animation-delay:{i * 0.06}s">
+                      <div class="cv-msg-label">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                      {#if m.role === 'assistant'}
+                        {@html renderMarkdown(m.content)}
+                      {:else}
+                        <div class="cv-msg-text">{m.content}</div>
+                      {/if}
+                    </div>
+                  {/if}
+                {/each}
+              {/if}
+            </div>
+
+            {#if convLinkedImages.length > 0}
+              <div class="chat-view-linked" data-od-id="chat-view-linked">
+                <span class="chat-view-linked-label">Linked photos</span>
+                <div class="chat-view-thumbs" data-od-id="chat-conv-thumbs">
+                  {#each convLinkedImages as src}
+                    <img {src} alt="" />
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <div class="action-area" data-od-id="chat-action-area">
+              <button class="btn-delete" data-od-id="btn-delete-chat" disabled={convDeleting} onclick={() => handleDeleteConversation(node.id)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Delete Conversation
+              </button>
+            </div>
+          </div>
+        {:else if isNote}
           <div class="note-reader" data-od-id="note-reader">
             {#if noteBody}
               <div class="note-content" data-od-id="note-content">
@@ -1987,5 +2128,111 @@
     .image-stage, .description-panel, .data-row, .action-area, .sidebar {
       transform: none !important;
     }
+    .chat-view-thread { max-height: 60vh; }
   }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Chat conversation view — message bubbles in a thread
+     ════════════════════════════════════════════════════════════════════ */
+  .chat-view { max-width: 680px; width: 100%; transform: translateZ(10px); }
+  .chat-view-header {
+    padding: 1.5vh 0 2vh;
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: 1vh;
+    transform: translateZ(10px);
+  }
+  .chat-view-kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .chat-view-date {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .chat-view-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 1.5vh 0 2vh;
+    max-height: 52vh;
+    overflow-y: auto;
+    scrollbar-color: var(--accent-dim) transparent;
+  }
+  .chat-view-thread::-webkit-scrollbar { width: 3px; }
+  .chat-view-thread::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+  .cv-msg {
+    max-width: 82%;
+    padding: 14px 18px;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.55;
+    animation: cvFloatIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .cv-msg.cv-user {
+    align-self: flex-end;
+    background: oklch(82% 0.14 210 / 12%);
+    border: 1px solid oklch(82% 0.14 210 / 18%);
+    color: var(--fg);
+    border-bottom-right-radius: 4px;
+    font-weight: 600;
+  }
+  .cv-msg.cv-assistant {
+    align-self: flex-start;
+    background: var(--glass);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--hairline);
+    color: oklch(82% 0.008 250);
+    border-bottom-left-radius: 4px;
+  }
+  .cv-msg-text { white-space: pre-wrap; word-break: break-word; }
+  .cv-msg-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    opacity: 0.6;
+  }
+  .cv-msg.cv-user .cv-msg-label { color: var(--accent); }
+  .cv-msg.cv-assistant .cv-msg-label { color: var(--accent-purple); }
+  @keyframes cvFloatIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .chat-view-linked {
+    padding: 1vh 0 1.5vh;
+    border-top: 1px solid var(--hairline);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .chat-view-linked-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    flex-shrink: 0;
+  }
+  .chat-view-thumbs {
+    display: flex;
+    gap: 6px;
+  }
+  .chat-view-thumbs img {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid var(--hairline);
+  }
+  .status-pill.is-chat { color: var(--accent); }
 </style>

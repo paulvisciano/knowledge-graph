@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCanvasLayout, classifyKind, isNoteFileSource, isNoteNode, isDocChunkFileSource } from '$lib/components/canvas/Layout';
+import { buildCanvasLayout, classifyKind, isNoteFileSource, isNoteNode, isDocChunkFileSource, isPhotoNode } from '$lib/components/canvas/Layout';
 import { docChunkProvider } from '$lib/components/canvas/renderer/providers/docChunk';
 import { noteProvider } from '$lib/components/canvas/renderer/providers/note';
 import { TIME_BUCKET_SPACING } from '$lib/components/canvas/renderer/constants';
@@ -175,11 +175,11 @@ describe('docChunk provider shouldRender', () => {
   it('hides all chunk nodes for now (only photos and conversations render)', () => {
     expect(docChunkProvider.shouldRender(
       makeNode('c', 'Document', { source_id: 'doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-chunk-000', file_type: 'image' }),
-      { photoImages: {}, noteContents: {} },
+      { photoImages: {} },
     )).toBe(false);
     expect(docChunkProvider.shouldRender(
       makeNode('c', 'Document', { source_id: 'doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-chunk-000' }),
-      { photoImages: {}, noteContents: {} },
+      { photoImages: {} },
     )).toBe(false);
   });
 });
@@ -192,6 +192,29 @@ describe('ordering invariant: note and docChunk classify before photo', () => {
     expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000' }))).toBe('document');
     // A real photo still classifies as photo
     expect(classifyKind(photo('p1'))).toBe('photo');
+  });
+});
+
+describe('isPhotoNode: compound <SEP> source_id rejection', () => {
+  it('rejects a (Photo) hub with a compound <SEP> source_id', () => {
+    expect(isPhotoNode(makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000<SEP>doc-cbfe267cdb2e0975d32c3e2a7e8e47b7-chunk-000' }))).toBe(false);
+  });
+  it('rejects a (Photo) hub with compound <SEP> in file_path', () => {
+    expect(isPhotoNode({ id: 'x (Photo)', labels: ['Photo'], properties: { file_path: 'a<SEP>b' } })).toBe(false);
+  });
+  it('still accepts a real photo with a single source_id', () => {
+    expect(isPhotoNode(photo('p1'))).toBe(true);
+  });
+  it('still accepts a (Photo) hub with no source_id/file_path', () => {
+    expect(isPhotoNode({ id: 'x (Photo)', labels: ['Photo'], properties: {} })).toBe(true);
+  });
+  it('classifies compound <SEP> hub as concept (falls through provider chain)', () => {
+    expect(classifyKind(makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000<SEP>doc-cbfe267cdb2e0975d32c3e2a7e8e47b7-chunk-000' }))).toBe('concept');
+  });
+  it('does not render a compound <SEP> hub as a photo plane', () => {
+    const hub = makeNode('hub', 'Photo', { source_id: 'doc-a1e468b48b942cc5d675221767a6a061-chunk-000<SEP>doc-cbfe267cdb2e0975d32c3e2a7e8e47b7-chunk-000' });
+    const out = buildCanvasLayout([hub], [], {}, {});
+    expect(out.find((n) => n.id === 'hub' && n.kind === 'photo')).toBeUndefined();
   });
 });
 
@@ -328,9 +351,9 @@ describe('buildCanvasLayout', () => {
     const a = makeNode('a', 'Note', { source_id: 'note_a', summary: 'S' });
     const b = makeNode('b', 'Note', { source_id: 'note_b', title: 'T' });
     const c = makeNode('c', 'Note', { source_id: 'note_c' });
-    expect(noteProvider.buildCanvasFields(a, { photoImages: {}, noteContents: {} }).textContent).toBe('S');
-    expect(noteProvider.buildCanvasFields(b, { photoImages: {}, noteContents: {} }).textContent).toBe('T');
-    expect(noteProvider.buildCanvasFields(c, { photoImages: {}, noteContents: {} }).textContent).toBe('c');
+    expect(noteProvider.buildCanvasFields(a, { photoImages: {} }).textContent).toBe('S');
+    expect(noteProvider.buildCanvasFields(b, { photoImages: {} }).textContent).toBe('T');
+    expect(noteProvider.buildCanvasFields(c, { photoImages: {} }).textContent).toBe('c');
   });
 
   it('a spurious (Photo) hub with a note source_id does not render as a photo (no 404)', () => {

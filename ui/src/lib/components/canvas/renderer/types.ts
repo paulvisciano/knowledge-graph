@@ -31,10 +31,9 @@ export interface PlaneConfig {
 }
 
 /** Async-resolved content maps passed to `buildCanvasFields`. Mirrors
- *  the `$state` maps in `graph.svelte.ts` (photoImages, noteContents). */
+ *  the `$state` maps in `graph.svelte.ts` (photoImages). */
 export interface BuildCtx {
   readonly photoImages: Record<string, string>;
-  readonly noteContents: Record<string, string>;
 }
 
 /**

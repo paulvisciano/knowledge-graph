@@ -124,12 +124,19 @@ export function isNoteNode(node: {
   return false;
 }
 
-/** True if the node represents a Photo/Image entity. */
+/** True if the node represents a Photo/Image entity.
+ *
+ *  Excludes LightRAG multi-source hubs whose `source_id` joins several
+ *  chunks with `<SEP>` (e.g. `doc-X-chunk-000<SEP>doc-Y-chunk-000`). Those
+ *  compound IDs are not image filenames, so routing them to the photo image
+ *  endpoint 404s. They fall through `classifyKind` to `concept` instead. */
 export function isPhotoNode(node: {
   labels?: string[];
   properties?: Record<string, unknown>;
   id?: string;
 }): boolean {
+  const sourceId = node.properties?.source_id ?? node.properties?.file_path;
+  if (typeof sourceId === 'string' && sourceId.includes('<SEP>')) return false;
   return (
     !!node.labels?.some((l) => /^(Photo|Image)$/i.test(l)) ||
     (node.properties?.entity_type as string) === 'Photo' ||
@@ -223,6 +230,7 @@ function parseNodeDate(node: KGNode): Date | null {
     p.date_taken ??
     p.datetime ??
     p.created_at ??
+    p.createdAt ??
     p.timestamp;
   if (raw === undefined || raw === null) return null;
   if (typeof raw === 'number') {
@@ -383,16 +391,16 @@ interface TimePlan {
  * switch to month buckets so the Z axis stays bounded.
  */
 function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
-  // Dates for renderable nodes that carry their own timestamp — photos AND
-  // notes. Both have `date_taken_friendly`/`created_at` (read by
-  // `parseNodeDate`) and must be bucketed by month/day like photos so a
-  // month containing only notes still produces its own bucket. The map is
-  // keyed by nodeId so the granularity decision and bucket-key collection
-  // cover notes too.
+  // Dates for renderable nodes that carry their own timestamp — photos,
+  // notes, and conversations. All have `date_taken_friendly`/`created_at`/
+  // `createdAt` (read by `parseNodeDate`) and must be bucketed by month/day
+  // like photos so a month containing only conversations still produces its
+  // own bucket. The map is keyed by nodeId so the granularity decision and
+  // bucket-key collection cover conversations too.
   const renderableDate = new Map<string, Date>();
   for (const n of nodes) {
     const kind = classifyKind(n);
-    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind !== 'photo' && kind !== 'note' && kind !== 'conversation') continue;
     if (kind === 'photo' && isStalePhotoNode(n)) continue;
     const d = parseNodeDate(n);
     if (d) renderableDate.set(n.id, d);
@@ -405,31 +413,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   // along Z, defeating the width spread. Prefer the FINEST granularity that
   // keeps at least ~3 renderable nodes per layer (more layers = more zoom
   // travel).
-  let granularity: 'month' | 'day' | 'photo' = 'photo';
-  if (renderableDate.size > 0) {
-    let minT = Infinity;
-    let maxT = -Infinity;
-    for (const d of renderableDate.values()) {
-      const t = d.getTime();
-      if (t < minT) minT = t;
-      if (t > maxT) maxT = t;
-    }
-    const spanDays = (maxT - minT) / 86_400_000;
-    const renderableCount = renderableDate.size;
-    const dayBuckets = Math.max(1, Math.ceil(spanDays));
-    const monthBuckets = Math.max(1, Math.ceil(spanDays / 30));
-    const perDay = renderableCount / dayBuckets;
-    const perMonth = renderableCount / monthBuckets;
-    if (perDay >= 3 && dayBuckets <= 16) {
-      granularity = 'day';
-    } else if (perMonth >= 3 && monthBuckets <= 16) {
-      granularity = 'month';
-    } else if (monthBuckets <= 16) {
-      granularity = 'month';
-    } else {
-      granularity = 'month';
-    }
-  }
+  const granularity: 'month' | 'day' | 'photo' = 'month';
 
   const bucketKeyOf = (d: Date): string => {
     if (granularity === 'month') return monthKey(d);
@@ -472,12 +456,14 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
 
   const cellZOf = new Map<string, number>();
 
-  // Renderable nodes with their own date (photos AND notes): direct bucket
-  // assignment. Notes must be assigned to their own month/day bucket so a
-  // month containing only notes still clusters them together on the Z axis.
+  // Renderable nodes with their own date (photos, notes, and conversations):
+  // direct bucket assignment. Notes/conversations must be assigned to their
+  // own month/day bucket so a month containing only notes/conversations still
+  // clusters them together on the Z axis instead of being pushed to a
+  // far-away fallback cellZ (which would pull the camera away from the photos).
   for (const n of nodes) {
     const kind = classifyKind(n);
-    if (kind !== 'photo' && kind !== 'note') continue;
+    if (kind !== 'photo' && kind !== 'note' && kind !== 'conversation') continue;
     if (kind === 'photo' && isStalePhotoNode(n)) continue;
     const d = renderableDate.get(n.id);
     if (!d) continue;
@@ -488,10 +474,10 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
 
   // Non-renderable entities (person/location/event/concept): inherit the
   // most-recent connected renderable node's bucket so they sit alongside
-  // the photos/notes they relate to.
+  // the photos/notes/conversations they relate to.
   for (const n of nodes) {
     const kind = classifyKind(n);
-    if (kind === 'photo' || kind === 'note') continue;
+    if (kind === 'photo' || kind === 'note' || kind === 'conversation') continue;
     if (cellZOf.has(n.id)) continue;
     const neighbors = adjacency.get(n.id) ?? [];
     let best: { idx: number; t: number } | null = null;
@@ -633,8 +619,8 @@ export function buildTimeIndex(nodes: KGNode[], edges: KGEdge[]): TimeIndex {
  *    horizontal parallax axis.
  *
  * Within a chunk cell, nodes are spread on a square grid sized to the cell's
- * node count so they never overlap. Only `photo`/`image` and `note` nodes are
- * rendered to the canvas; non-photo/non-note entities
+ * node count so they never overlap. Only `photo`/`image` and `conversation`
+ * nodes are rendered to the canvas; other entities
  * (person/location/event/concept) still participate in the cluster-band and
  * depth computation (via their edges) but do not get planes — they inform the
  * layout, not the render set.
@@ -655,9 +641,8 @@ export function buildCanvasLayout(
   photoImages: Record<string, string>,
   _personImages: Record<string, string>,
   selectedNodeId?: string | null,
-  noteContents: Record<string, string> = {},
 ): CanvasNode[] {
-  const ctx: BuildCtx = { photoImages, noteContents };
+  const ctx: BuildCtx = { photoImages };
   const timePlan = buildTimePlan(nodes, edges);
   const clusters = buildClusterAssignment(nodes, edges);
   const depthPlan = buildDepthPlan(nodes, edges, selectedNodeId);
@@ -667,14 +652,13 @@ export function buildCanvasLayout(
   // into a compact vertical stack. Each band occupies one chunk-Y row.
   const yBandsPerChunk = Math.max(1, Math.min(bandCount, 4));
 
-  // Group renderable nodes (photos, notes, and doc-chunks) by their time
+  // Group renderable nodes (photos and conversations) by their time
   // bucket (cellZ) so we can spread each layer across the screen. Without
   // this, all nodes in a bucket share cellX=0 (when nothing is focused) and
-  // collapse into a narrow column. Notes and doc-chunks share the photo
-  // timeline (the backend sets `date_taken_friendly`/`created_at` on them,
-  // read by `parseNodeDate`). Renderability is delegated to each provider's
-  // `shouldRender` — e.g. the docChunk provider hides image-description
-  // chunks, and the photo provider hides stale `manual_creation` photos.
+  // collapse into a narrow column. Conversations share the photo timeline
+  // (`createdAt` is read by `parseNodeDate`). Renderability is delegated to
+  // each provider's `shouldRender` — e.g. the photo provider hides stale
+  // `manual_creation` photos.
   const photosByBucket = new Map<number, KGNode[]>();
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -765,7 +749,7 @@ export function buildCanvasLayout(
       const aspect = pw / ph;
       height = base;
       width = Math.round(base * aspect);
-    } else if (kind === 'note') {
+    } else if (kind === 'note' || kind === 'conversation') {
       height = base;
       width = Math.round(base / 1.4);
     } else {
