@@ -664,8 +664,8 @@
   {@const noteBody = fetchedDocContent ?? descriptionContent ?? node.textContent ?? ''}
 
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="overlay-app" data-od-id="overlay-app" onclick={handleClose} role="presentation">
-    <div class="overlay-body" data-od-id="overlay-body" onclick={(e) => e.stopPropagation()} role="presentation">
+  <div class="spatial-scene" data-od-id="overlay-app" onclick={handleClose} role="presentation">
+    <div class="scene-inner" data-od-id="overlay-body" onclick={(e) => e.stopPropagation()} role="presentation">
 
       <header class="topbar" data-od-id="topbar">
         <div class="topbar-left">
@@ -692,146 +692,153 @@
         </button>
       </header>
 
-      <div class="content" data-od-id="content">
-
-        <main class="stage" data-od-id="main-stage">
-          {#if isNote}
-            <div class="note-reader" data-od-id="note-reader">
-              {#if noteBody}
-                <div class="note-content" data-od-id="note-content">
-                  {@html renderMarkdown(noteBody)}
-                </div>
-              {:else if docLoading}
-                <div class="note-loading" data-od-id="note-loading">
-                  <span class="spinner"></span> Loading note…
-                </div>
-              {:else if docError}
-                <div class="note-error" data-od-id="note-error">{docError}</div>
-              {:else}
-                <div class="note-empty">No content available.</div>
-              {/if}
-              {#if docLoading && noteBody}
-                <div class="note-loading note-loading-inline" data-od-id="note-loading-inline">
-                  <span class="spinner"></span> Loading full note…
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <div class="viewer" data-od-id="image-viewer">
-              {#if fullUrl ?? imageUrl}
-                <img class="photo" data-od-id="main-photo"
-                     src={fullUrl ?? imageUrl!}
-                     alt={fileName}
-                     onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
-              {:else}
-                <div class="photo-placeholder" data-od-id="photo-placeholder">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L3 21"/>
-                  </svg>
-                </div>
-              {/if}
-
-              {#if dateTimeText}
-                <div class="viewer-badges" data-od-id="viewer-badges">
-                  {#if dateTimeText}
-                    <div class="location-badge" data-od-id="time-badge">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                      <span>{dateTimeText}</span>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-
-            {#if sameDayPhotosWithCurrent.length > 1}
-              <div class="filmstrip" data-od-id="filmstrip">
-                <button class="filmstrip-nav filmstrip-nav-prev" data-od-id="filmstrip-prev"
-                  aria-label="Previous photo"
-                  disabled={currentMonthIndex <= 0}
-                  onclick={() => navigateByOffset(-1)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                </button>
-                <div class="filmstrip-track" data-od-id="filmstrip-track">
-                  {#each monthPhotosByDay as group (group.dayKey)}
-                    <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
-                      <div class="filmstrip-day-label">{group.label}</div>
-                      <div class="filmstrip-day-photos">
-                        {#each group.photos as n (n.id)}
-                          <button class="filmstrip-thumb {n.id === node?.id ? 'is-active' : ''}"
-                            data-od-id="filmstrip-thumb-{n.id}"
-                            aria-label="Photo {getNodeName(n)}"
-                            onclick={() => navigateToPhoto(n)}>
-                            <img src={photoThumbUrl(n)} alt={getNodeName(n)} loading="lazy" />
-                          </button>
-                        {/each}
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-                <button class="filmstrip-nav filmstrip-nav-next" data-od-id="filmstrip-next"
-                  aria-label="Next photo"
-                  disabled={currentMonthIndex < 0 || currentMonthIndex >= sameDayPhotosWithCurrent.length - 1}
-                  onclick={() => navigateByOffset(1)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
+      <div class="image-stage" data-od-id="main-stage">
+        {#if isNote}
+          <div class="note-reader" data-od-id="note-reader">
+            {#if noteBody}
+              <div class="note-content" data-od-id="note-content">
+                {@html renderMarkdown(noteBody)}
+              </div>
+            {:else if docLoading}
+              <div class="note-loading" data-od-id="note-loading">
+                <span class="spinner"></span> Loading note…
+              </div>
+            {:else if docError}
+              <div class="note-error" data-od-id="note-error">{docError}</div>
+            {:else}
+              <div class="note-empty">No content available.</div>
+            {/if}
+            {#if docLoading && noteBody}
+              <div class="note-loading note-loading-inline" data-od-id="note-loading-inline">
+                <span class="spinner"></span> Loading full note…
               </div>
             {/if}
-          {/if}
-        </main>
-
-        <aside class="sidebar" data-od-id="details-sidebar">
-          <nav class="tabs" data-od-id="sidebar-tabs">
-            <button class="tab {activeTab === 'details' ? 'active' : ''}" data-od-id="tab-details" onclick={() => (activeTab = 'details')}>Details</button>
-            <button class="tab {activeTab === 'insights' ? 'active' : ''}" data-od-id="tab-insights" onclick={() => (activeTab = 'insights')}>AI Insights</button>
-            {#if others.length > 0}
-              <button class="tab {activeTab === 'connections' ? 'active' : ''}" data-od-id="tab-connections" onclick={() => (activeTab = 'connections')}>Related</button>
+          </div>
+        {:else}
+          <div class="image-frame" data-od-id="image-viewer">
+            {#if fullUrl ?? imageUrl}
+              <img class="photo" data-od-id="main-photo"
+                   src={fullUrl ?? imageUrl!}
+                   alt={fileName}
+                   onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
+            {:else}
+              <div class="photo-placeholder" data-od-id="photo-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L3 21"/>
+                </svg>
+              </div>
             {/if}
-          </nav>
 
-          <div class="sidebar-content" data-od-id="sidebar-content">
-
-            {#if activeTab === 'details'}
-              <section class="section" data-od-id="sec-description">
-                <div class="section-header">Description</div>
-                {#if docLoading}
-                  <div class="loading-indicator" data-od-id="desc-loading">
-                    <span class="spinner"></span> Loading...
-                  </div>
-                {:else if docError}
-                  <div class="error-text" data-od-id="desc-error">{docError}</div>
-                {:else if descText}
-                  <div class="description">{@html renderMarkdown(descText)}</div>
-                {:else}
-                  <div class="empty-text">No description available.</div>
-                {/if}
-              </section>
-
-              {#if locationText}
-                <section class="section" data-od-id="sec-location">
-                  <div class="section-header">Location</div>
-                  <div class="location-row">
+            {#if locationText || dateTimeText}
+              <div class="image-tags" data-od-id="viewer-badges">
+                {#if locationText}
+                  <span class="tag tag-loc" data-od-id="time-badge">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
-                    <div class="location-text">{locationText}</div>
+                    {cityText ?? locationText}
+                  </span>
+                {/if}
+                {#if dateTimeText}
+                  <span class="tag tag-date" data-od-id="date-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    {dateTimeText}
+                  </span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          {#if sameDayPhotosWithCurrent.length > 1}
+            <div class="filmstrip" data-od-id="filmstrip">
+              <button class="filmstrip-nav filmstrip-nav-prev" data-od-id="filmstrip-prev"
+                aria-label="Previous photo"
+                disabled={currentMonthIndex <= 0}
+                onclick={() => navigateByOffset(-1)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <div class="filmstrip-track" data-od-id="filmstrip-track">
+                {#each monthPhotosByDay as group (group.dayKey)}
+                  <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
+                    <div class="filmstrip-day-label">{group.label}</div>
+                    <div class="filmstrip-day-photos">
+                      {#each group.photos as n (n.id)}
+                        <button class="filmstrip-thumb {n.id === node?.id ? 'is-active' : ''}"
+                          data-od-id="filmstrip-thumb-{n.id}"
+                          aria-label="Photo {getNodeName(n)}"
+                          onclick={() => navigateToPhoto(n)}>
+                          <img src={photoThumbUrl(n)} alt={getNodeName(n)} loading="lazy" />
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              <button class="filmstrip-nav filmstrip-nav-next" data-od-id="filmstrip-next"
+                aria-label="Next photo"
+                disabled={currentMonthIndex < 0 || currentMonthIndex >= sameDayPhotosWithCurrent.length - 1}
+                onclick={() => navigateByOffset(1)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          {/if}
+        {/if}
+      </div>
+
+      <aside class="sidebar" data-od-id="details-sidebar">
+        <nav class="tabs" data-od-id="sidebar-tabs">
+          <button class="tab {activeTab === 'details' ? 'active' : ''}" data-od-id="tab-details" onclick={() => (activeTab = 'details')}>Details</button>
+          <button class="tab {activeTab === 'insights' ? 'active' : ''}" data-od-id="tab-insights" onclick={() => (activeTab = 'insights')}>AI Insights</button>
+          {#if others.length > 0}
+            <button class="tab {activeTab === 'connections' ? 'active' : ''}" data-od-id="tab-connections" onclick={() => (activeTab = 'connections')}>Related</button>
+          {/if}
+        </nav>
+
+        <div class="sidebar-content" data-od-id="sidebar-content">
+
+          {#if activeTab === 'details'}
+            <div class="description-panel" data-od-id="sec-description">
+              <div class="description-label">Description</div>
+              {#if docLoading}
+                <div class="loading-indicator" data-od-id="desc-loading">
+                  <span class="spinner"></span> Loading...
+                </div>
+              {:else if docError}
+                <div class="error-text" data-od-id="desc-error">{docError}</div>
+              {:else if descText}
+                <div class="description-text">{@html renderMarkdown(descText)}</div>
+              {:else}
+                <div class="empty-text">No description available.</div>
+              {/if}
+            </div>
+
+            <div class="data-row" data-od-id="data-row-details">
+              {#if locationText}
+                <section class="data-panel" data-od-id="sec-location">
+                  <div class="panel-label">Location</div>
+                  <div class="chip-row">
+                    <span class="chip chip-loc" data-od-id="loc-chip">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                      {locationText}
+                    </span>
                   </div>
                 </section>
               {/if}
 
               {#if persons.length > 0}
-                <section class="section" data-od-id="sec-people">
-                  <div class="section-header">People - {persons.length}</div>
-                  <div class="people-grid">
+                <section class="data-panel" data-od-id="sec-people">
+                  <div class="panel-label">People<span class="count">{persons.length}</span></div>
+                  <div class="people-row">
                     {#each persons as n (n.id)}
                       <div class="person" data-od-id="person-{n.id}" tabindex="0" role="button">
                         {#if isPersonNamed(n) && !personPhotoErrors.has(n.id)}
-                          <img class="avatar" src={resolvePersonThumbUrl(n)} alt={getNodeName(n)} onerror={() => handlePersonImgError(n)}>
+                          <img class="person-thumb" src={resolvePersonThumbUrl(n)} alt={getNodeName(n)} onerror={() => handlePersonImgError(n)}>
                         {:else if isPersonNamed(n)}
-                          <div class="avatar-initials">{getInitials(getNodeName(n))}</div>
+                          <div class="person-initials">{getInitials(getNodeName(n))}</div>
                         {:else}
-                          <div class="avatar-unknown">
+                          <div class="person-initials person-unknown">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
                           </div>
                         {/if}
-                        <div class="person-name">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</div>
+                        <span class="person-name">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</span>
                       </div>
                     {/each}
                   </div>
@@ -839,38 +846,77 @@
               {/if}
 
               {#if events.length > 0}
-                <section class="section" data-od-id="sec-events">
-                  <div class="section-header">Events</div>
-                  <div class="event-list">
+                <section class="data-panel" data-od-id="sec-events">
+                  <div class="panel-label">Events<span class="count">{events.length}</span></div>
+                  <div class="chip-row">
                     {#each events as n (n.id)}
-                      <div class="event-item" data-od-id="event-{n.id}">
+                      <span class="chip chip-event" data-od-id="event-{n.id}">
                         <span class="event-dot"></span>
-                        <span>{getNodeName(n)}</span>
+                        {getNodeName(n)}
+                      </span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+
+              {#if !isNote && (exifCameraRow.length > 0 || exifExposureRow.length > 0 || exifImageRow.length > 0)}
+                <section class="data-panel exif-panel" data-od-id="sec-exif">
+                  <div class="panel-label">Exif</div>
+
+                  {#if exifCameraRow.length > 0}
+                    <div class="exif-group">
+                      <div class="exif-group-label">Camera</div>
+                      <div class="exif-grid">
+                        {#each exifCameraRow as row}
+                          <div class="exif-row">
+                            <span class="exif-label">{row.label}</span>
+                            <span class="exif-value">{row.value}</span>
+                          </div>
+                        {/each}
                       </div>
-                    {/each}
-                  </div>
+                    </div>
+                  {/if}
+
+                  {#if exifExposureRow.length > 0}
+                    <div class="exif-group">
+                      <div class="exif-group-label">Exposure</div>
+                      <div class="exif-grid">
+                        {#each exifExposureRow as row}
+                          <div class="exif-row">
+                            <span class="exif-label">{row.label}</span>
+                            <span class="exif-value" data-od-id="exif-{row.label}">{row.value}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if exifImageRow.length > 0}
+                    <div class="exif-group">
+                      <div class="exif-group-label">Image</div>
+                      <div class="exif-grid">
+                        {#each exifImageRow as row}
+                          <div class="exif-row">
+                            <span class="exif-label">{row.label}</span>
+                            <span class="exif-value">{row.value}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
                 </section>
               {/if}
+            </div>
+          {/if}
 
-              {#if !isNote && exifExposureRow.length > 0}
-                <section class="section" data-od-id="sec-exif">
-                  <div class="section-header">Exposure</div>
-                  <div class="pills">
-                    {#each exifExposureRow as row}
-                      <span class="pill" data-od-id="exif-{row.label}">{row.value}</span>
-                    {/each}
-                  </div>
-                </section>
-              {/if}
-            {/if}
-
-            {#if activeTab === 'insights'}
-              <section class="section" data-od-id="sec-insights-entities">
-                <div class="section-header">Entities - {others.length}</div>
+          {#if activeTab === 'insights'}
+            <div class="data-row" data-od-id="data-row-insights">
+              <section class="data-panel" data-od-id="sec-insights-entities">
+                <div class="panel-label">Entities<span class="count">{others.length}</span></div>
                 {#if others.length > 0}
-                  <div class="pills">
+                  <div class="chip-row">
                     {#each others as n, i (n.id)}
-                      <span class="pill {i === 0 ? 'pill-accent' : ''}" data-od-id="entity-{n.id}">{getNodeName(n)}</span>
+                      <span class="chip chip-entity {i === 0 ? 'chip-accent' : ''}" data-od-id="entity-{n.id}">{getNodeName(n)}</span>
                     {/each}
                   </div>
                 {:else}
@@ -879,63 +925,75 @@
               </section>
 
               {#if locations.length > 0}
-                <section class="section" data-od-id="sec-insights-locations">
-                  <div class="section-header">Locations</div>
-                  <div class="pills">
+                <section class="data-panel" data-od-id="sec-insights-locations">
+                  <div class="panel-label">Locations<span class="count">{locations.length}</span></div>
+                  <div class="chip-row">
                     {#each locations as n (n.id)}
-                      <span class="pill" data-od-id="loc-pill-{n.id}">{getNodeName(n)}</span>
+                      <span class="chip chip-loc" data-od-id="loc-pill-{n.id}">{getNodeName(n)}</span>
                     {/each}
                   </div>
                 </section>
               {/if}
 
               {#if events.length > 0}
-                <section class="section" data-od-id="sec-insights-events">
-                  <div class="section-header">Events</div>
-                  <div class="pills">
+                <section class="data-panel" data-od-id="sec-insights-events">
+                  <div class="panel-label">Events<span class="count">{events.length}</span></div>
+                  <div class="chip-row">
                     {#each events as n (n.id)}
-                      <span class="pill" data-od-id="event-pill-{n.id}">{getNodeName(n)}</span>
+                      <span class="chip chip-event" data-od-id="event-pill-{n.id}">{getNodeName(n)}</span>
                     {/each}
                   </div>
                 </section>
               {/if}
 
               {#if persons.length > 0}
-                <section class="section" data-od-id="sec-insights-people">
-                  <div class="section-header">People</div>
-                  <div class="pills">
+                <section class="data-panel" data-od-id="sec-insights-people">
+                  <div class="panel-label">People<span class="count">{persons.length}</span></div>
+                  <div class="people-row">
                     {#each persons as n (n.id)}
-                      <span class="pill" data-od-id="person-pill-{n.id}">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</span>
+                      <div class="person" data-od-id="person-pill-{n.id}" tabindex="0" role="button">
+                        {#if isPersonNamed(n) && !personPhotoErrors.has(n.id)}
+                          <img class="person-thumb" src={resolvePersonThumbUrl(n)} alt={getNodeName(n)} onerror={() => handlePersonImgError(n)}>
+                        {:else if isPersonNamed(n)}
+                          <div class="person-initials">{getInitials(getNodeName(n))}</div>
+                        {:else}
+                          <div class="person-initials person-unknown">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+                          </div>
+                        {/if}
+                        <span class="person-name">{isPersonNamed(n) ? getNodeName(n) : 'Unknown'}</span>
+                      </div>
                     {/each}
                   </div>
                 </section>
               {/if}
-            {/if}
+            </div>
+          {/if}
 
-            {#if activeTab === 'connections' && others.length > 0}
-              <section class="section" data-od-id="sec-connections">
-                <div class="section-header">Connected Entities - {others.length}</div>
-                <div class="connection-list">
+          {#if activeTab === 'connections' && others.length > 0}
+            <div class="data-row" data-od-id="data-row-connections">
+              <section class="data-panel exif-panel" data-od-id="sec-connections">
+                <div class="panel-label">Connected Entities<span class="count">{others.length}</span></div>
+                <div class="exif-grid">
                   {#each others as n (n.id)}
-                    <div class="connection-item" data-od-id="conn-{n.id}">
-                      <span class="connection-kind">{classifyKind(n)}</span>
-                      <span class="connection-name">{getNodeName(n)}</span>
+                    <div class="exif-row connection-item" data-od-id="conn-{n.id}">
+                      <span class="exif-label connection-kind">{classifyKind(n)}</span>
+                      <span class="exif-value connection-name">{getNodeName(n)}</span>
                     </div>
                   {/each}
                 </div>
               </section>
-            {/if}
+            </div>
+          {/if}
 
-          </div>
+        </div>
+      </aside>
 
-          <div class="sidebar-footer" data-od-id="sidebar-footer">
-            <button class="btn-delete" data-od-id="btn-delete" onclick={handleDelete} disabled={deleting}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              {deleting ? 'Deleting...' : isNote ? 'Delete Note' : 'Delete Photo'}
-            </button>
-          </div>
-        </aside>
-
+      <div class="action-area" data-od-id="sidebar-footer">
+        <button class="btn-delete" data-od-id="btn-delete" onclick={handleDelete} disabled={deleting}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          {deleting ? 'Deleting...' : isNote ? 'Delete Note' : 'Delete Photo'}
+        </button>
       </div>
     </div>
   </div>
@@ -952,42 +1010,73 @@
   {/if}
 
 <style>
+  /* ════════════════════════════════════════════════════════════════════
+     Tokens — oklch system matching the CanvasView prototype
+     ════════════════════════════════════════════════════════════════════ */
   :root {
-    --bg:          #0B0C10;
-    --bg-elev:     #121317;
-    --surface:     rgba(255, 255, 255, 0.05);
-    --surface-2:   rgba(255, 255, 255, 0.08);
-    --surface-dark: rgba(0, 0, 0, 0.40);
-    --hairline:    rgba(255, 255, 255, 0.08);
-    --hairline-2:  rgba(255, 255, 255, 0.12);
-    --fg:          #FFFFFF;
-    --fg-2:        #C8C9CE;
-    --muted:       #A0A0A0;
-    --faint:       #6B6C72;
-    --accent:      #007AFF;
-    --accent-soft: rgba(0, 122, 255, 0.15);
-    --success:     #34C759;
-    --warn:        #FF9F0A;
-    --danger:      #FF3B30;
-    --font-body:   -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
-    --font-display:-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-    --font-mono:   ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+    --bg:          oklch(6% 0.02 260);
+    --fg:          oklch(90% 0.005 250);
+    --muted:       oklch(65% 0.02 255);
+    --faint:       oklch(55% 0.02 255);
+    --accent:      oklch(82% 0.14 210);
+    --accent-dim:  oklch(82% 0.14 210 / 18%);
+    --accent-purple: oklch(72% 0.16 295);
+    --accent-purple-dim: oklch(72% 0.16 295 / 18%);
+    --success:     oklch(72% 0.15 150);
+    --danger:      oklch(62% 0.20 18);
+    --glass:       oklch(16% 0.015 255 / 45%);
+    --glass-light: oklch(20% 0.015 255 / 30%);
+    --hairline:    oklch(50% 0.03 255 / 8%);
 
-  .overlay-app {
+    --font-mono:   ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    --font-sans:   -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-display: 'Iowan Old Style', 'Charter', Georgia, 'SF Pro Display', serif;
+    --font-body:    -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  }
+
+  /* Focus-visible — keyboard accessibility */
+  .close-btn:focus-visible,
+  .btn-delete:focus-visible,
+  .filmstrip-nav:focus-visible,
+  .filmstrip-thumb:focus-visible,
+  .tab:focus-visible,
+  .person:focus-visible,
+  .chip:focus-visible,
+  .fullscreen-close:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+  .filmstrip-thumb:focus-visible { outline-offset: 1px; }
+  .tab:focus-visible { outline-offset: -2px; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Spatial scene — the overlay backdrop with radial gradients + glass
+     ════════════════════════════════════════════════════════════════════ */
+  .spatial-scene {
     position: fixed;
     inset: 0;
     z-index: 1000;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 5vh 5vw;
-    font-family: var(--font-body);
+    justify-content: flex-start;
+    padding: 3vh 2vw 2vh;
+    perspective: 1200px;
+    perspective-origin: 50% 40%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 35%, oklch(14% 0.06 270 / 40%), transparent),
+      radial-gradient(ellipse 60% 50% at 30% 80%, oklch(10% 0.04 210 / 30%), transparent),
+      radial-gradient(ellipse 50% 40% at 80% 20%, oklch(8% 0.03 180 / 20%), transparent),
+      oklch(6% 0.02 260 / 92%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     color: var(--fg);
+    font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -996,190 +1085,190 @@
   }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-  .overlay-body {
-    display: flex;
-    flex-direction: column;
+  .scene-inner {
+    position: relative;
     width: 100%;
-    height: 100%;
-    max-width: 1200px;
-    max-height: 100%;
-    background: var(--bg);
-    border-radius: 16px;
-    border: 1px solid var(--hairline-2);
-    overflow: hidden;
-    box-shadow:
-      0 24px 80px rgba(0, 0, 0, 0.6),
-      0 0 0 1px rgba(255, 255, 255, 0.04);
-    animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  @keyframes pop-in {
-    from { opacity: 0; transform: scale(0.97) translateY(8px); }
-    to   { opacity: 1; transform: scale(1) translateY(0); }
+    max-width: 920px;
+    transform-style: preserve-3d;
+    will-change: transform;
   }
 
+  /* ════════════════════════════════════════════════════════════════════
+     Topbar — status pill, filename, close button
+     ════════════════════════════════════════════════════════════════════ */
   .topbar {
-    height: 56px;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
-    background: rgba(11, 12, 16, 0.80);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border-bottom: 1px solid var(--hairline);
-    z-index: 100;
+    width: 100%;
+    margin-bottom: 2vh;
+    transform: translateZ(20px);
   }
   .topbar-left {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     min-width: 0;
+    flex: 1;
   }
-  .filename {
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--fg);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 400px;
-  }
+
   .status-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
+    padding: 5px 12px;
+    background: var(--glass);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-radius: 100px;
+    font-family: var(--font-mono);
     font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
     color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .status-pill.is-processing { border-color: rgba(255, 159, 10, 0.3); }
-  .status-pill.is-complete { border-color: rgba(52, 199, 89, 0.3); color: var(--success); }
-  .status-pill.is-error { border-color: rgba(255, 59, 48, 0.3); color: var(--danger); }
-  .status-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--success);
-  }
-  .status-dot.is-processing {
-    background: var(--warn);
-    animation: pulse 1.4s ease-in-out infinite;
-  }
-  .status-dot.is-error { background: var(--danger); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-  .close-btn {
-    width: 34px; height: 34px;
-    border-radius: 50%;
-    background: var(--surface-dark);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--hairline-2);
-    color: rgba(255, 255, 255, 0.80);
-    display: grid; place-items: center;
-    cursor: pointer;
-    transition: all 0.15s ease;
     flex-shrink: 0;
   }
-  .close-btn:hover {
-    background: rgba(255, 59, 48, 0.15);
-    border-color: rgba(255, 59, 48, 0.4);
-    color: var(--danger);
-    transform: scale(1.05);
+  .status-pill.is-complete { color: var(--success); }
+  .status-pill.is-processing { color: oklch(78% 0.15 60); }
+  .status-pill.is-error { color: var(--danger); }
+  .status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
   }
-  .close-btn:active { transform: scale(0.95); }
-  .close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .close-btn svg { width: 16px; height: 16px; }
+  .status-dot.is-processing {
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  .content {
-    flex: 1;
-    display: flex;
-    min-height: 0;
+  .filename {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .stage {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    padding: 20px;
-    gap: 14px;
-  }
-
-  .viewer {
-    flex: 1;
+  .close-btn {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    background: oklch(20% 0.02 255 / 70%);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border-radius: 50%;
+    cursor: pointer;
+    color: var(--fg);
+    border: 2px solid oklch(60% 0.03 255 / 55%);
+    box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 12px oklch(0% 0 0 / 25%);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .close-btn:hover {
+    color: var(--danger);
+    background: oklch(62% 0.20 18 / 18%);
+    border-color: oklch(62% 0.20 18 / 70%);
+    box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 16px oklch(62% 0.20 18 / 25%);
+    transform: scale(1.08);
+  }
+  .close-btn:active { transform: scale(0.95); }
+  .close-btn svg { width: 18px; height: 18px; transition: transform 0.2s; }
+  .close-btn:hover svg { transform: rotate(90deg); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Image stage — the hero photo with tags
+     ════════════════════════════════════════════════════════════════════ */
+  .image-stage {
     position: relative;
-    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-bottom: 1.5vh;
+    transform: translateZ(0px);
+    gap: 14px;
   }
 
-  .photo {
-    max-width: 100%;
-    max-height: 100%;
+  .image-frame {
+    position: relative;
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
     border-radius: 16px;
+    overflow: hidden;
     box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 20px 60px rgba(0, 0, 0, 0.5),
-      0 0 80px rgba(0, 122, 255, 0.05);
-    object-fit: contain;
-    display: block;
-    cursor: zoom-in;
-    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      0 40px 100px oklch(0% 0 0 / 60%),
+      0 0 60px oklch(82% 0.14 210 / 8%),
+      0 0 0 1px oklch(50% 0.03 255 / 10%);
+    cursor: pointer;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s;
   }
-  .photo:hover { transform: translateY(-2px); }
+  .image-frame:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      0 50px 120px oklch(0% 0 0 / 70%),
+      0 0 80px oklch(82% 0.14 210 / 12%),
+      0 0 0 1px oklch(82% 0.14 210 / 20%);
+  }
+  .image-frame .photo {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 55vh;
+    object-fit: cover;
+    cursor: zoom-in;
+  }
 
   .photo-placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 300px;
-    height: 300px;
-    border-radius: 16px;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
+    width: 100%;
+    min-height: 300px;
+    background: var(--glass);
     color: var(--faint);
   }
-  .photo-placeholder svg { width: 48px; height: 48px; }
+  .photo-placeholder svg { width: 64px; height: 64px; }
 
-  .viewer-badges {
+  .image-tags {
     position: absolute;
-    right: 12px;
-    bottom: 12px;
-    z-index: 10;
+    bottom: 14px;
+    left: 14px;
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
+    gap: 6px;
+    z-index: 2;
     pointer-events: none;
   }
-  .location-badge {
+  .tag {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     padding: 5px 10px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(12px) saturate(1.3);
-    -webkit-backdrop-filter: blur(12px) saturate(1.3);
-    border: 1px solid var(--hairline-2);
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--fg);
+    background: oklch(6% 0.01 255 / 60%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     max-width: 240px;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .location-badge svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--muted); }
-  .location-badge span { overflow: hidden; text-overflow: ellipsis; }
+  .tag svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .tag-loc { color: oklch(78% 0.13 155); }
+  .tag-date { color: var(--accent); }
 
+  /* ════════════════════════════════════════════════════════════════════
+     Filmstrip — same-day photos navigation
+     ════════════════════════════════════════════════════════════════════ */
   .filmstrip {
     display: flex;
     align-items: center;
@@ -1188,26 +1277,24 @@
     padding: 4px 0;
   }
   .filmstrip-nav {
-    width: 32px; height: 32px;
+    width: 34px; height: 34px;
     flex-shrink: 0;
     border-radius: 50%;
-    background: var(--surface-dark);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--glass);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
     border: 1px solid var(--hairline);
-    color: var(--fg-2);
+    color: var(--muted);
     display: grid; place-items: center;
     cursor: pointer;
     transition: all 0.15s ease;
   }
   .filmstrip-nav:hover:not(:disabled) {
-    background: var(--surface-2);
-    border-color: var(--hairline-2);
+    background: var(--glass-light);
     color: var(--fg);
   }
   .filmstrip-nav:active:not(:disabled) { transform: scale(0.92); }
   .filmstrip-nav:disabled { opacity: 0.3; cursor: default; }
-  .filmstrip-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .filmstrip-nav svg { width: 16px; height: 16px; }
 
   .filmstrip-track {
@@ -1217,12 +1304,12 @@
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
-    scrollbar-color: var(--hairline-2) transparent;
+    scrollbar-color: var(--accent-dim) transparent;
     padding: 2px 0;
     min-width: 0;
   }
   .filmstrip-track::-webkit-scrollbar { height: 4px; }
-  .filmstrip-track::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 2px; }
+  .filmstrip-track::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
 
   .filmstrip-thumb {
     flex-shrink: 0;
@@ -1230,7 +1317,7 @@
     border-radius: 8px;
     overflow: hidden;
     border: 2px solid transparent;
-    background: var(--surface);
+    background: var(--glass);
     cursor: pointer;
     padding: 0;
     transition: border-color 0.15s ease, transform 0.15s ease;
@@ -1240,12 +1327,11 @@
     object-fit: cover;
     display: block;
   }
-  .filmstrip-thumb:hover { transform: translateY(-2px); border-color: var(--hairline-2); }
+  .filmstrip-thumb:hover { transform: translateY(-2px); border-color: var(--hairline); }
   .filmstrip-thumb.is-active {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
   }
-  .filmstrip-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   .filmstrip-day-group {
     display: flex;
@@ -1259,12 +1345,13 @@
     gap: 6px;
   }
   .filmstrip-day-group + .filmstrip-day-group {
-    border-left: 1px solid var(--hairline-2);
+    border-left: 1px solid var(--hairline);
     padding-left: 8px;
     margin-left: 4px;
   }
   .filmstrip-day-label {
     flex-shrink: 0;
+    font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
@@ -1274,68 +1361,282 @@
     padding: 2px 0;
   }
 
-  .meta-bar {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    background: var(--surface);
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
-    border: 1px solid var(--hairline);
-    border-radius: 14px;
-    padding: 14px 18px;
-    flex-shrink: 0;
-  }
-  .meta-seg {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 16px;
-    border-right: 1px solid var(--hairline);
-    min-width: 0;
-  }
-  .meta-seg:first-child { padding-left: 0; }
-  .meta-seg:last-child { border-right: none; padding-right: 0; }
-  .meta-seg-icon {
-    width: 32px; height: 32px;
-    border-radius: 8px;
-    background: var(--surface-2);
-    display: grid; place-items: center;
-    color: var(--muted);
-    flex-shrink: 0;
-  }
-  .meta-seg-icon svg { width: 16px; height: 16px; }
-  .meta-seg-text { min-width: 0; flex: 1; }
-  .meta-seg-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--fg);
-    line-height: 1.3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .meta-seg-sub {
-    font-size: 11px;
-    color: var(--muted);
-    line-height: 1.3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-top: 1px;
-  }
-
-  .sidebar {
-    width: 360px;
-    flex-shrink: 0;
-    background: rgba(15, 16, 20, 0.85);
+  /* ════════════════════════════════════════════════════════════════════
+     Description panel — glassmorphism card
+     ════════════════════════════════════════════════════════════════════ */
+  .description-panel {
+    position: relative;
+    max-width: 920px;
+    width: 100%;
+    margin: 0 auto 1.5vh;
+    padding: 18px 24px;
+    background: var(--glass);
     backdrop-filter: blur(24px) saturate(1.4);
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border-left: 1px solid var(--hairline);
+    border-radius: 14px;
+    box-shadow:
+      0 20px 60px oklch(0% 0 0 / 30%),
+      0 0 0 1px oklch(50% 0.03 255 / 6%);
+    transform: translateZ(10px);
+  }
+  .description-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+    opacity: 0.95;
+  }
+  .description-text {
+    font-size: 15px;
+    line-height: 1.75;
+    color: oklch(86% 0.004 250);
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-dim) transparent;
+  }
+  .description-text::-webkit-scrollbar { width: 2px; }
+  .description-text::-webkit-scrollbar-thumb { background: var(--accent-dim); }
+  .description-text :global(.overlay-p) { margin-bottom: 8px; }
+  .description-text :global(.overlay-p:last-child) { margin-bottom: 0; }
+  .description-text :global(.overlay-code) {
+    background: oklch(20% 0.02 255 / 40%);
+    border-radius: 8px;
+    padding: 10px;
+    overflow-x: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    margin-bottom: 8px;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Data row + panels — people, events, locations, entities, exif
+     ════════════════════════════════════════════════════════════════════ */
+  .data-row {
+    display: flex;
+    gap: 12px;
+    max-width: 920px;
+    width: 100%;
+    margin: 0 auto;
+    flex-wrap: wrap;
+    transform: translateZ(5px);
+  }
+  .data-panel {
+    flex: 1;
+    min-width: 200px;
+    padding: 14px 18px;
+    background: var(--glass-light);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px oklch(50% 0.03 255 / 5%);
+  }
+  .exif-panel {
+    flex-basis: 100%;
+    min-width: 100%;
+    padding: 16px 20px;
+  }
+
+  .panel-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--accent-dim);
+  }
+  .panel-label .count {
+    color: var(--fg);
+    font-weight: 700;
+    margin-left: 6px;
+  }
+
+  /* People */
+  .people-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .person {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 8px 4px 4px;
+    border-radius: 100px;
+    transition: background 0.2s;
+    cursor: pointer;
+  }
+  .person:hover { background: oklch(20% 0.02 255 / 30%); }
+  .person-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    filter: saturate(0.8);
+  }
+  .person-initials {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    background: oklch(30% 0.02 255 / 60%);
+    color: var(--fg);
+  }
+  .person-unknown {
+    background: oklch(20% 0.02 255 / 40%);
+    color: var(--faint);
+  }
+  .person-unknown svg { width: 14px; height: 14px; }
+  .person-name {
+    font-size: 13px;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  /* Chips */
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    cursor: pointer;
+    transition: filter 0.15s;
+    letter-spacing: 0.02em;
+  }
+  .chip:hover { filter: brightness(1.25); }
+  .chip-loc {
+    color: oklch(78% 0.13 155);
+    background: oklch(72% 0.13 155 / 8%);
+  }
+  .chip-event {
+    color: oklch(80% 0.13 70);
+    background: oklch(74% 0.13 70 / 8%);
+  }
+  .chip-entity {
+    color: var(--muted);
+    background: oklch(20% 0.02 255 / 25%);
+  }
+  .chip-entity:hover { color: var(--fg); }
+  .chip-accent {
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+  .chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+  .event-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     EXIF grid
+     ════════════════════════════════════════════════════════════════════ */
+  .exif-group {
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    gap: 2px;
+  }
+  .exif-group + .exif-group {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+  }
+  .exif-group-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .exif-grid { display: grid; gap: 0; }
+  .exif-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 8px;
+    gap: 12px;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+  .exif-row:hover { background: oklch(50% 0.03 255 / 6%); }
+  .exif-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .exif-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .connection-kind {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .connection-name {
+    font-size: 12px;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Sidebar — tabs (details/insights/connections) restyled to fit aesthetic
+     ════════════════════════════════════════════════════════════════════ */
+  .sidebar {
+    width: 100%;
+    max-width: 920px;
+    margin: 0 auto 1.5vh;
+    background: var(--glass);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    border-radius: 14px;
+    box-shadow:
+      0 20px 60px oklch(0% 0 0 / 30%),
+      0 0 0 1px oklch(50% 0.03 255 / 6%);
+    transform: translateZ(8px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .tabs {
@@ -1346,23 +1647,24 @@
   }
   .tab {
     padding: 14px 16px;
-    font-size: 13px;
-    font-weight: 500;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
     color: var(--muted);
     background: transparent;
     border: none;
-    border-bottom: 3px solid transparent;
+    border-bottom: 2px solid transparent;
     cursor: pointer;
     transition: color 0.15s ease, border-color 0.15s ease;
-    font-family: var(--font-body);
     margin-bottom: -1px;
   }
-  .tab:hover { color: var(--fg-2); }
+  .tab:hover { color: var(--fg); }
   .tab.active {
-    color: var(--fg);
+    color: var(--accent);
     border-bottom-color: var(--accent);
   }
-  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .sidebar-content {
     flex: 1;
@@ -1370,41 +1672,10 @@
     overflow-x: hidden;
     padding: 20px;
     scrollbar-width: thin;
-    scrollbar-color: var(--hairline-2) transparent;
+    scrollbar-color: var(--accent-dim) transparent;
   }
-  .sidebar-content::-webkit-scrollbar { width: 6px; }
-  .sidebar-content::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 3px; }
-
-  .section { margin-bottom: 24px; }
-  .section:last-child { margin-bottom: 0; }
-  .section-header {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    margin-bottom: 10px;
-  }
-
-  .description {
-    font-size: 13px;
-    line-height: 1.55;
-    color: var(--fg-2);
-  }
-  .description :global(.overlay-p) { margin-bottom: 8px; }
-  .description :global(.overlay-p:last-child) { margin-bottom: 0; }
-  .description :global(.overlay-code) {
-    background: var(--surface-2);
-    border-radius: 8px;
-    padding: 10px;
-    overflow-x: hidden;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--fg-2);
-    margin-bottom: 8px;
-  }
+  .sidebar-content::-webkit-scrollbar { width: 4px; }
+  .sidebar-content::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
 
   .loading-indicator {
     display: flex;
@@ -1415,7 +1686,7 @@
   }
   .spinner {
     width: 14px; height: 14px;
-    border: 2px solid var(--hairline-2);
+    border: 2px solid var(--hairline);
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -1425,179 +1696,56 @@
   .error-text { font-size: 13px; color: var(--danger); }
   .empty-text { font-size: 13px; color: var(--faint); font-style: italic; }
 
-  .location-row {
+  /* ════════════════════════════════════════════════════════════════════
+     Action area — delete button
+     ════════════════════════════════════════════════════════════════════ */
+  .action-area {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .location-row svg {
-    width: 16px; height: 16px;
-    color: var(--muted);
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  .location-text {
-    font-size: 13px;
-    color: var(--fg-2);
-    line-height: 1.5;
-  }
-
-  .people-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .person {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    width: 60px;
-    cursor: pointer;
-  }
-  .person:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
-  .avatar {
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    border: 2px solid var(--hairline-2);
-    object-fit: cover;
-    background: var(--surface-2);
-    transition: border-color 0.15s ease, transform 0.15s ease;
-  }
-  .person:hover .avatar { border-color: var(--accent); transform: scale(1.05); }
-  .avatar-initials {
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    border: 2px solid var(--hairline-2);
-    background: linear-gradient(135deg, #3A3B40, #2A2B30);
-    display: grid; place-items: center;
-    font-size: 14px; font-weight: 600;
-    color: var(--fg-2);
-    transition: border-color 0.15s ease, transform 0.15s ease;
-  }
-  .person:hover .avatar-initials { border-color: var(--accent); }
-  .avatar-unknown {
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    border: 2px solid var(--hairline-2);
-    background: var(--surface);
-    display: grid; place-items: center;
-    color: var(--faint);
-    transition: border-color 0.15s ease;
-  }
-  .person:hover .avatar-unknown { border-color: var(--accent); }
-  .avatar-unknown svg { width: 20px; height: 20px; }
-  .person-name {
-    font-size: 11px;
-    color: var(--muted);
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    width: 100%;
-  }
-
-  .pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .pill {
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--fg-2);
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-  .pill:hover { background: var(--surface-2); border-color: var(--hairline-2); }
-  .pill-accent {
-    background: var(--accent-soft);
-    border-color: rgba(0, 122, 255, 0.3);
-    color: #5AC8FA;
-  }
-
-  .event-list { display: flex; flex-direction: column; gap: 8px; }
-  .event-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: var(--fg-2);
-  }
-  .event-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--warn);
-    flex-shrink: 0;
-  }
-
-  .connection-list { display: flex; flex-direction: column; gap: 10px; }
-  .connection-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    background: var(--surface);
-    border-radius: 10px;
-    border: 1px solid var(--hairline);
-  }
-  .connection-kind {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    flex-shrink: 0;
-    min-width: 60px;
-  }
-  .connection-name {
-    font-size: 13px;
-    color: var(--fg-2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .sidebar-footer {
-    padding: 16px 20px;
-    border-top: 1px solid var(--hairline);
-    flex-shrink: 0;
+    justify-content: center;
+    margin-top: 1.5vh;
+    transform: translateZ(15px);
   }
   .btn-delete {
-    width: 100%;
-    padding: 10px;
-    border-radius: 10px;
-    background: transparent;
-    border: 1px solid rgba(255, 59, 48, 0.3);
-    color: var(--danger);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: var(--font-body);
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
+    gap: 7px;
+    padding: 10px 22px;
+    background: oklch(62% 0.20 18 / 10%);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border-radius: 100px;
+    border: 1px solid oklch(62% 0.20 18 / 20%);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+    color: oklch(62% 0.20 18 / 80%);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .btn-delete:hover:not(:disabled) {
-    background: rgba(255, 59, 48, 0.1);
-    border-color: var(--danger);
+    color: oklch(62% 0.20 18);
+    background: oklch(62% 0.20 18 / 18%);
+    border-color: oklch(62% 0.20 18 / 50%);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px oklch(62% 0.20 18 / 15%);
   }
-  .btn-delete:active:not(:disabled) { transform: scale(0.98); }
-  .btn-delete:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+  .btn-delete:active:not(:disabled) { transform: translateY(0) scale(0.98); }
   .btn-delete:disabled { opacity: 0.5; cursor: default; }
-  .btn-delete svg { width: 14px; height: 14px; }
+  .btn-delete svg { width: 13px; height: 13px; opacity: 0.8; }
 
+  /* ════════════════════════════════════════════════════════════════════
+     Fullscreen overlay — restyled with new tokens
+     ════════════════════════════════════════════════════════════════════ */
   .fullscreen-overlay {
     position: fixed;
     inset: 0;
     z-index: 2000;
-    background: rgba(0, 0, 0, 0.92);
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 50%, oklch(10% 0.02 260 / 80%), oklch(3% 0.01 260 / 96%));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1607,54 +1755,62 @@
     max-width: 92%;
     max-height: 92%;
     border-radius: 8px;
-    box-shadow: 0 30px 100px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 30px 100px oklch(0% 0 0 / 80%);
   }
   .fullscreen-close {
     position: absolute;
     top: 20px; right: 20px;
     width: 40px; height: 40px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #fff;
-    display: grid; place-items: center;
+    background: oklch(20% 0.02 255 / 70%);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border: 2px solid oklch(60% 0.03 255 / 55%);
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .fullscreen-close:hover {
-    background: rgba(255, 59, 48, 0.2);
-    border-color: rgba(255, 59, 48, 0.4);
     color: var(--danger);
+    background: oklch(62% 0.20 18 / 18%);
+    border-color: oklch(62% 0.20 18 / 70%);
+    transform: scale(1.08);
   }
-  .fullscreen-close svg { width: 18px; height: 18px; }
+  .fullscreen-close svg { width: 18px; height: 18px; transition: transform 0.2s; }
+  .fullscreen-close:hover svg { transform: rotate(90deg); }
 
-  /* ── Note reader ─────────────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════════════
+     Note reader — serif reading view, preserved
+     ════════════════════════════════════════════════════════════════════ */
   .note-reader {
-    flex: 1;
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     min-height: 0;
     overflow-y: auto;
     scrollbar-width: thin;
-    scrollbar-color: var(--hairline-2) transparent;
+    scrollbar-color: var(--accent-dim) transparent;
     padding: 8px 0;
   }
-  .note-reader::-webkit-scrollbar { width: 6px; }
-  .note-reader::-webkit-scrollbar-thumb { background: var(--hairline-2); border-radius: 3px; }
+  .note-reader::-webkit-scrollbar { width: 4px; }
+  .note-reader::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
 
   .note-content {
     width: 100%;
     max-width: 680px;
-    background: #f5e9c8;
-    color: #2b2620;
+    background: oklch(92% 0.04 85);
+    color: oklch(28% 0.02 60);
     border-radius: 16px;
     padding: 1.5rem 1.75rem;
     box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.06),
-      0 20px 60px rgba(0, 0, 0, 0.45);
+      0 0 0 1px oklch(0% 0 0 / 6%),
+      0 20px 60px oklch(0% 0 0 / 45%);
     font-family: var(--font-body);
     font-size: 15px;
     line-height: 1.6;
@@ -1667,7 +1823,7 @@
   .note-content :global(h5),
   .note-content :global(h6) {
     font-family: var(--font-display);
-    color: #1c1812;
+    color: oklch(22% 0.02 60);
     line-height: 1.3;
     margin-top: 1.25em;
     margin-bottom: 0.5em;
@@ -1698,21 +1854,21 @@
   .note-content :global(blockquote) {
     margin: 0 0 0.85em;
     padding: 0.25em 0.9em;
-    border-left: 3px solid rgba(43, 38, 32, 0.25);
-    color: #4a4338;
+    border-left: 3px solid oklch(43% 0.02 60 / 25%);
+    color: oklch(40% 0.02 60);
     font-style: italic;
   }
   .note-content :global(a) {
-    color: #8a4b1a;
+    color: oklch(55% 0.10 50);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-  .note-content :global(a:hover) { color: #6d3a13; }
-  .note-content :global(strong) { font-weight: 600; color: #1c1812; }
+  .note-content :global(a:hover) { color: oklch(45% 0.10 50); }
+  .note-content :global(strong) { font-weight: 600; color: oklch(22% 0.02 60); }
   .note-content :global(em) { font-style: italic; }
   .note-content :global(.overlay-code),
   .note-content :global(pre) {
-    background: rgba(43, 38, 32, 0.08);
+    background: oklch(43% 0.02 60 / 8%);
     border-radius: 8px;
     padding: 0.75em 0.9em;
     overflow-x: auto;
@@ -1720,7 +1876,7 @@
     word-break: break-word;
     font-family: var(--font-mono);
     font-size: 0.85em;
-    color: #2b2620;
+    color: oklch(28% 0.02 60);
     margin: 0 0 0.85em;
   }
   .note-content :global(.overlay-code:last-child),
@@ -1728,7 +1884,7 @@
   .note-content :global(code) {
     font-family: var(--font-mono);
     font-size: 0.88em;
-    background: rgba(43, 38, 32, 0.08);
+    background: oklch(43% 0.02 60 / 8%);
     padding: 0.12em 0.35em;
     border-radius: 4px;
   }
@@ -1739,7 +1895,7 @@
   }
   .note-content :global(hr) {
     border: none;
-    border-top: 1px solid rgba(43, 38, 32, 0.18);
+    border-top: 1px solid oklch(43% 0.02 60 / 18%);
     margin: 1.2em 0;
   }
   .note-content :global(img) {
@@ -1755,11 +1911,11 @@
   }
   .note-content :global(th),
   .note-content :global(td) {
-    border: 1px solid rgba(43, 38, 32, 0.18);
+    border: 1px solid oklch(43% 0.02 60 / 18%);
     padding: 0.4em 0.6em;
     text-align: left;
   }
-  .note-content :global(th) { background: rgba(43, 38, 32, 0.08); font-weight: 600; }
+  .note-content :global(th) { background: oklch(43% 0.02 60 / 8%); font-weight: 600; }
 
   .note-loading,
   .note-error,
@@ -1776,7 +1932,7 @@
     width: auto;
     padding: 10px 14px;
     margin-top: 12px;
-    background: var(--surface);
+    background: var(--glass);
     border: 1px solid var(--hairline);
     border-radius: 999px;
     font-size: 12px;
@@ -1784,27 +1940,52 @@
   .note-error { color: var(--danger); }
   .note-empty { font-style: italic; color: var(--faint); }
 
-  @media (max-width: 900px) {
-    .content { flex-direction: column; }
-    .sidebar {
-      width: 100%;
-      border-left: none;
-      border-top: 1px solid var(--hairline);
-      max-height: 50vh;
-    }
-    .stage { padding: 14px; gap: 10px; }
-    .photo { max-width: 100%; }
-    .meta-bar { flex-wrap: wrap; gap: 12px; padding: 12px; }
-    .meta-seg { flex: 1 1 45%; border-right: none; padding: 0; }
+  /* ════════════════════════════════════════════════════════════════════
+     Float-in stagger animations
+     ════════════════════════════════════════════════════════════════════ */
+  .scene-inner > * {
+    animation: float-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  @media (max-width: 480px) {
-    .topbar { height: 48px; padding: 0 14px; }
-    .filename { font-size: 13px; }
-    .status-pill { display: none; }
-    .stage { padding: 10px; }
-    .meta-seg { flex: 1 1 100%; }
-    .sidebar-content { padding: 14px; }
-    .tab { padding: 12px 12px; font-size: 12px; }
-    .sidebar { max-height: 60vh; }
+  .topbar          { animation-delay: 0s; }
+  .image-stage     { animation-delay: 0.08s; }
+  .description-panel { animation-delay: 0.16s; }
+  .sidebar         { animation-delay: 0.20s; }
+  .data-row        { animation-delay: 0.24s; }
+  .action-area     { animation-delay: 0.32s; }
+  @keyframes float-in {
+    from { opacity: 0; transform: translateY(20px) translateZ(-30px); }
+    to   { opacity: 1; }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Reduced motion
+     ════════════════════════════════════════════════════════════════════ */
+  @media (prefers-reduced-motion: reduce) {
+    .scene-inner > *,
+    .spatial-scene,
+    .image-frame,
+    .close-btn,
+    .btn-delete {
+      animation: none !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     Mobile responsive
+     ════════════════════════════════════════════════════════════════════ */
+  @media (max-width: 768px) {
+    .spatial-scene { padding: 2vh 4vw; perspective: none; }
+    .scene-inner { transform: none !important; }
+    .image-frame { border-radius: 12px; }
+    .image-frame .photo { max-height: 40vh; }
+    .description-panel { padding: 14px 18px; border-radius: 12px; }
+    .description-text { font-size: 13px; line-height: 1.65; }
+    .data-row { flex-direction: column; gap: 8px; }
+    .data-panel { min-width: 100%; border-radius: 10px; }
+    .topbar { margin-bottom: 1.5vh; }
+    .image-stage, .description-panel, .data-row, .action-area, .sidebar {
+      transform: none !important;
+    }
   }
 </style>

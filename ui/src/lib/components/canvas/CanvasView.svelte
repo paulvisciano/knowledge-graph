@@ -272,13 +272,12 @@
 {/if}
 
 {#if hoveredNodeId && !selectedNodeId}
-  <div class="hover-tooltip" style="left: {tooltipX + 14}px; top: {tooltipY + 14}px;">
+  <div class="hover-tooltip show" style="left: {tooltipX + 14}px; top: {tooltipY + 14}px;" data-od-id="hover-tooltip">
     Click to view details
   </div>
 {/if}
 
 {#if dateLabel}
-  <!-- Click-outside / escape backdrop for the timeline dropdown -->
   {#if timelineOpen}
     <div
       class="timeline-backdrop"
@@ -290,48 +289,63 @@
     ></div>
   {/if}
 
-  <div class="date-indicator-wrap">
-    <button
-      type="button"
-      class="date-indicator"
-      class:is-open={timelineOpen}
-      onclick={toggleTimeline}
-      aria-haspopup="listbox"
+  <div
+    class="timeline-bar"
+    class:collapsed={!timelineOpen}
+    data-od-id="timeline-bar"
+    data-testid="timeline-bar"
+  >
+    <div
+      class="timeline-header"
+      role="button"
+      tabindex="0"
+      aria-label="Toggle timeline"
       aria-expanded={timelineOpen}
-      aria-label="Open photo timeline"
-      data-testid="date-pill"
+      onclick={toggleTimeline}
+      onkeydown={(e) => (e.key === 'Enter' || e.key === ' ' ? toggleTimeline() : null)}
+      data-od-id="timeline-header"
     >
-      <span class="date-indicator-icon" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span class="timeline-header-label" data-od-id="timeline-header-label">
+        {#key dateLabel}
+          <span in:fade={{ duration: 220 }}>{dateLabel}</span>
+        {/key}
       </span>
-      {#key dateLabel}
-        <span class="date-indicator-label" in:fade={{ duration: 220 }}>{dateLabel}</span>
-      {/key}
-      <span class="date-indicator-chevron" class:is-open={timelineOpen} aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="timeline-header-chevron" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </span>
-    </button>
+    </div>
 
-    {#if timelineOpen}
-      <div class="timeline-dropdown" role="listbox" aria-label="Photo timeline months" data-testid="timeline-dropdown">
-        <ul class="timeline-list">
-          {#each timelineEntries as entry (entry.idx)}
-            <li>
-              <button
-                type="button"
-                class="timeline-item"
-                class:is-current={entry.idx === currentBucketIdx}
-                onclick={() => flyToBucket(entry.idx)}
-                aria-current={entry.idx === currentBucketIdx ? 'true' : undefined}
-              >
-                <span class="timeline-dot" class:is-current={entry.idx === currentBucketIdx} aria-hidden="true"></span>
-                <span class="timeline-label">{entry.label}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
+    <div class="timeline-track" role="listbox" aria-label="Photo timeline months" data-od-id="timeline-track" data-testid="timeline-dropdown">
+      {#each timelineEntries as entry, i (entry.idx)}
+        {#if i === 0 || entry.label.split(' ')[1] !== timelineEntries[i - 1].label.split(' ')[1]}
+          {#if i !== 0}
+            <div class="timeline-divider" aria-hidden="true" data-od-id="timeline-divider"></div>
+          {/if}
+          <div class="timeline-year-label" data-od-id="timeline-year-label">{entry.label.split(' ')[1]}</div>
+          {#if i !== 0}
+            <div class="timeline-divider" aria-hidden="true" data-od-id="timeline-divider"></div>
+          {/if}
+        {/if}
+        <button
+          type="button"
+          class="timeline-tick has-content"
+          class:active={entry.idx === currentBucketIdx}
+          onclick={() => flyToBucket(entry.idx)}
+          aria-current={entry.idx === currentBucketIdx ? 'true' : undefined}
+          data-od-id="timeline-tick"
+        >
+          <span class="timeline-tick-dot" aria-hidden="true"></span>
+          <span class="timeline-tick-label">{entry.label.split(' ')[0]}</span>
+        </button>
+      {/each}
+    </div>
+  </div>
+{/if}
+
+{#if loaded && !isEmpty && !loadError}
+  <div class="zoom-hint" data-od-id="zoom-hint">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+    <span>Scroll to zoom through time · Drag to pan</span>
   </div>
 {/if}
 
@@ -348,8 +362,10 @@
     --canvas-fg:          oklch(90% 0.005 250);
     --canvas-muted:       oklch(65% 0.02 255);
     --canvas-faint:       oklch(55% 0.02 255);
-    --canvas-accent:      oklch(82% 0.14 210);
-    --canvas-accent-dim:  oklch(82% 0.14 210 / 18%);
+    --canvas-accent:           oklch(82% 0.14 210);
+    --canvas-accent-dim:       oklch(82% 0.14 210 / 18%);
+    --canvas-accent-purple:    oklch(72% 0.16 295);
+    --canvas-accent-purple-dim: oklch(72% 0.16 295 / 18%);
     --canvas-success:     oklch(72% 0.15 150);
     --canvas-danger:      oklch(62% 0.20 18);
     --canvas-glass:       oklch(16% 0.015 255 / 45%);
@@ -457,17 +473,12 @@
     text-transform: uppercase;
     white-space: nowrap;
     pointer-events: none;
+    opacity: 0;
     transition: opacity 0.12s ease;
   }
+  .hover-tooltip.show { opacity: 1; }
 
-  /* ── Date indicator — floating glass pill (clickable) ── */
-  .date-indicator-wrap {
-    position: absolute;
-    right: 16px;
-    top: 16px;
-    z-index: 20;
-  }
-
+  /* ── Timeline backdrop (click-outside / escape) ── */
   .timeline-backdrop {
     position: fixed;
     inset: 0;
@@ -475,176 +486,191 @@
     cursor: default;
   }
 
-  .date-indicator {
+  /* ── Timeline bar — right-side vertical collapsible glass panel ── */
+  .timeline-bar {
+    position: absolute;
+    right: 24px;
+    top: 24px;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    width: 120px;
+    background: oklch(12% 0.015 255 / 75%);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    border-radius: 16px;
+    border: 1px solid oklch(50% 0.03 255 / 10%);
+    box-shadow:
+      0 0 0 1px oklch(50% 0.03 255 / 6%),
+      0 12px 40px oklch(0% 0 0 / 40%);
+    pointer-events: auto;
+    transition: opacity 0.3s, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+  }
+
+  .timeline-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--canvas-hairline);
+    flex-shrink: 0;
+  }
+  .timeline-header:focus-visible {
+    outline: 2px solid var(--canvas-accent);
+    outline-offset: -2px;
+    border-radius: inherit;
+  }
+
+  .timeline-header-label {
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--canvas-accent);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .timeline-header-chevron {
+    display: flex;
+    align-items: center;
+    color: var(--canvas-muted);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .timeline-header-chevron svg { width: 16px; height: 16px; }
+  .timeline-bar.collapsed .timeline-header-chevron { transform: rotate(180deg); }
+
+  .timeline-track {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+    position: relative;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--canvas-accent-dim) transparent;
+    max-height: 0;
+    transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .timeline-track::-webkit-scrollbar { width: 3px; }
+  .timeline-track::-webkit-scrollbar-thumb {
+    background: var(--canvas-accent-dim);
+    border-radius: 2px;
+  }
+  .timeline-bar:not(.collapsed) .timeline-track { max-height: 520px; }
+
+  .timeline-tick {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    flex-shrink: 0;
+    text-align: left;
+  }
+  .timeline-tick:focus-visible {
+    outline: 2px solid var(--canvas-accent);
+    outline-offset: -2px;
+    border-radius: inherit;
+  }
+
+  .timeline-tick-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: oklch(50% 0.03 255 / 30%);
+    transition: all 0.25s;
+    flex-shrink: 0;
+  }
+
+  .timeline-tick-label {
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--canvas-faint);
+    white-space: nowrap;
+    transition: color 0.25s;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .timeline-tick:hover .timeline-tick-dot {
+    background: var(--canvas-accent);
+    box-shadow: 0 0 6px oklch(82% 0.14 210 / 40%);
+  }
+  .timeline-tick:hover .timeline-tick-label { color: var(--canvas-fg); }
+
+  .timeline-tick.active { background: oklch(82% 0.14 210 / 10%); }
+  .timeline-tick.active .timeline-tick-dot {
+    background: var(--canvas-accent);
+    box-shadow: 0 0 8px oklch(82% 0.14 210 / 50%);
+    width: 6px;
+    height: 6px;
+  }
+  .timeline-tick.active .timeline-tick-label {
+    color: var(--canvas-accent);
+    font-weight: 600;
+  }
+
+  .timeline-tick.has-content .timeline-tick-dot {
+    background: oklch(50% 0.03 255 / 50%);
+  }
+
+  .timeline-divider {
+    width: 100%;
+    height: 1px;
+    background: oklch(50% 0.03 255 / 12%);
+    flex-shrink: 0;
+    margin: 2px 0;
+  }
+
+  .timeline-year-label {
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--canvas-accent);
+    padding: 8px 14px 6px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  /* ── Zoom hint — glass pill (bottom-left) ── */
+  .zoom-hint {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    z-index: 20;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 6px 12px;
     background: var(--canvas-glass);
-    backdrop-filter: blur(24px) saturate(1.4);
-    -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    border: 1px solid transparent;
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
     border-radius: 100px;
-    box-shadow:
-      0 0 0 1px oklch(50% 0.03 255 / 8%),
-      0 8px 32px oklch(0% 0 0 / 30%);
-    color: var(--canvas-accent);
+    box-shadow: 0 0 0 1px oklch(50% 0.03 255 / 8%);
+    color: var(--canvas-faint);
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
-    letter-spacing: 0.06em;
-    white-space: nowrap;
-    cursor: pointer;
-    pointer-events: auto;
-    transition:
-      border-color 0.18s ease,
-      box-shadow 0.18s ease,
-      transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .date-indicator:hover {
-    transform: translateY(-1px);
-    box-shadow:
-      0 0 0 1px oklch(82% 0.14 210 / 35%),
-      0 12px 36px oklch(0% 0 0 / 40%);
-  }
-
-  .date-indicator.is-open {
-    border-color: oklch(82% 0.14 210 / 40%);
-    box-shadow:
-      0 0 0 1px oklch(82% 0.14 210 / 45%),
-      0 12px 36px oklch(0% 0 0 / 45%);
-  }
-
-  .date-indicator-icon {
-    display: flex;
-    align-items: center;
-    color: var(--canvas-muted);
-  }
-
-  .date-indicator-label {
-    font-variant-numeric: tabular-nums;
-    color: var(--canvas-fg);
-  }
-
-  .date-indicator-chevron {
-    display: flex;
-    align-items: center;
-    color: var(--canvas-muted);
-    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .date-indicator-chevron.is-open {
-    transform: rotate(180deg);
-  }
-
-  /* ── Timeline dropdown ── */
-  .timeline-dropdown {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 10px);
-    padding: 10px 12px 10px 10px;
-    background: oklch(14% 0.015 255 / 72%);
-    backdrop-filter: blur(28px) saturate(1.5);
-    -webkit-backdrop-filter: blur(28px) saturate(1.5);
-    border-radius: 18px;
-    box-shadow:
-      0 0 0 1px oklch(50% 0.03 255 / 10%),
-      0 18px 56px oklch(0% 0 0 / 50%);
-    min-width: 150px;
-    max-height: min(56vh, 420px);
-    pointer-events: auto;
-    transform-origin: top right;
-    animation: timeline-pop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes timeline-pop {
-    from { opacity: 0; transform: translateY(-8px) scale(0.96); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-
-  .timeline-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: oklch(50% 0.03 255 / 20%) transparent;
-    position: relative;
-  }
-
-  .timeline-list > li {
-    position: relative;
-  }
-
-  /* Continuous connector line through the dot column. Top is inset to the
-     first dot's center (padding-top 7 + half-dot 4 = 11px); bottom likewise. */
-  .timeline-list::before {
-    content: '';
-    position: absolute;
-    left: 12px;
-    top: 11px;
-    bottom: 11px;
-    width: 1px;
-    background: oklch(50% 0.03 255 / 18%);
-    transform: translateX(-50%);
-    pointer-events: none;
-  }
-
-  .timeline-list::-webkit-scrollbar { width: 5px; }
-  .timeline-list::-webkit-scrollbar-thumb {
-    background: oklch(50% 0.03 255 / 20%);
-    border-radius: 3px;
-  }
-
-  .timeline-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 7px 12px 7px 8px;
-    border: none;
-    background: transparent;
-    border-radius: 8px;
-    color: var(--canvas-muted);
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.04em;
-    text-align: left;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    pointer-events: none;
+    animation: float-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
+    transition: opacity 0.4s;
   }
-
-  .timeline-item:hover {
-    background: oklch(82% 0.14 210 / 14%);
-    color: var(--canvas-fg);
-  }
-
-  .timeline-dot {
-    position: relative;
-    z-index: 1;
-    flex-shrink: 0;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: oklch(40% 0.03 255 / 100%);
-    transition: background 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .timeline-dot.is-current {
-    background: var(--canvas-accent);
-    box-shadow: 0 0 8px oklch(82% 0.14 210 / 60%);
-  }
-
-  .timeline-label {
-    flex: 1 1 auto;
-  }
-
-  .timeline-item.is-current {
-    color: var(--canvas-accent);
-    font-weight: 600;
-    background: oklch(82% 0.14 210 / 10%);
-  }
+  .zoom-hint svg { color: var(--canvas-muted); }
 
   /* ── Shared animations ── */
   @keyframes float-in {
