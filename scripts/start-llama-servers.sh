@@ -23,11 +23,14 @@ WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-large-v3-turbo
 
 # LLM sampler settings — anti-repetition (fixes verbatim phrase-loop degeneration at Q1 quant).
 # DRY sampler targets phrase-level repetition; repeat_penalty is a token-level backstop.
+# XTC disrupts repetitive token selection on heavily-quantized models (stopgap for Q1).
 LLM_REPEAT_PENALTY="${LLM_REPEAT_PENALTY:-1.1}"
 LLM_REPEAT_LAST_N="${LLM_REPEAT_LAST_N:-128}"
 LLM_DRY_MULTIPLIER="${LLM_DRY_MULTIPLIER:-0.5}"
 LLM_DRY_BASE="${LLM_DRY_BASE:-1.75}"
 LLM_DRY_ALLOWED_LENGTH="${LLM_DRY_ALLOWED_LENGTH:-2}"
+LLM_XTC_PROBABILITY="${LLM_XTC_PROBABILITY:-0.1}"
+LLM_XTC_THRESHOLD="${LLM_XTC_THRESHOLD:-0.1}"
 # Single slot gets the full context window (set LLM_SLOTS=2 to split for concurrency).
 LLM_SLOTS="${LLM_SLOTS:-1}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH" "$RERANK_MODEL_PATH"; do
@@ -99,6 +102,7 @@ echo "Starting LLM on port ${LLM_PORT}..."
     -np "$LLM_SLOTS" -fa on -cram 0 -ngl 99 \
     --repeat-penalty "$LLM_REPEAT_PENALTY" --repeat-last-n "$LLM_REPEAT_LAST_N" \
     --dry-multiplier "$LLM_DRY_MULTIPLIER" --dry-base "$LLM_DRY_BASE" --dry-allowed-length "$LLM_DRY_ALLOWED_LENGTH" \
+    --xtc-probability "$LLM_XTC_PROBABILITY" --xtc-threshold "$LLM_XTC_THRESHOLD" \
     --reasoning off --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &
