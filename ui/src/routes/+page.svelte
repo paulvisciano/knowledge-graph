@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ChatMessage, MCPToolCall, OllamaMessage } from '$lib/constants';
   import { API } from '$lib/constants';
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
   import { mcpClient } from '$lib/services/mcp-client.svelte';
@@ -23,7 +23,7 @@
   import AttachmentMenu from '$lib/components/ui/AttachmentMenu.svelte';
   import AttachmentPreview from '$lib/components/ui/AttachmentPreview.svelte';
   import { lightragClient } from '$lib/services/lightrag-client';
-  import { kgApiClient } from '$lib/services/kg-api-client';
+  import { kgApiClient, type JobInfo } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
   import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, type Attachment } from '$lib/utils/file-utils';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
@@ -99,7 +99,7 @@
     };
   }
 
-  $effect(() => {
+  onMount(() => {
     resumeInProgressJobs();
   });
   let activeConversationId = $state('');
@@ -1182,6 +1182,10 @@
     try {
       const job = await kgApiClient.createJob(att.file, { insert: true, note });
       imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
+      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
+      if (att.thumbnailUrl ?? att.dataUrl) {
+        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
+      }
       await consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -1259,7 +1263,9 @@
           }
 
           if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
-            imageProcessingStore.setExifData(photoNodeId, eventData.exif as Record<string, unknown>);
+            const exif = eventData.exif as Record<string, unknown>;
+            imageProcessingStore.setExifData(photoNodeId, exif);
+            graphStore.mergeNodeProperties(photoNodeId, ['Photo'], exif);
           }
 
           if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
@@ -1331,23 +1337,88 @@
     }
   }
 
-  /** On page load, reconnect to any in-progress jobs from the server. */
+  /** On page load, reconnect to any in-progress or queued jobs from the server
+   *  so the processing queue survives refreshes. Sets all store entries
+   *  immediately (dots appear), then polls for status updates with limited
+   *  concurrency to avoid exhausting the browser's HTTP connection pool. */
   async function resumeInProgressJobs() {
     try {
-      const jobs = await kgApiClient.listJobs('processing');
-      for (const job of jobs) {
+      const [pending, processing] = await Promise.all([
+        kgApiClient.listJobs('pending'),
+        kgApiClient.listJobs('processing'),
+      ]);
+
+      for (const job of pending) {
+        const photoNodeId = `${job.file_source} (Photo)`;
+        if (imageProcessingStore.getByJobId(job.job_id)) continue;
+        imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
+        graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: job.file_source });
+      }
+
+      for (const job of processing) {
         const photoNodeId = `${job.file_source} (Photo)`;
         const existing = imageProcessingStore.getByJobId(job.job_id);
-        if (existing) {
-          await consumeJobEvents(job.job_id, existing.nodeId, { name: job.file_source, dataUrl: '' } as Attachment);
-        } else {
+        if (!existing) {
+          const stage = job.stage === 'exif_complete' ? 'queued_for_ai' : 'extracting_exif';
           imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
+          if (stage === 'queued_for_ai') imageProcessingStore.updateStage(photoNodeId, 'queued_for_ai');
           graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: job.file_source });
-          await consumeJobEvents(job.job_id, photoNodeId, { name: job.file_source, dataUrl: '' } as Attachment);
         }
       }
+
+      const allJobs = [...pending, ...processing];
+      pollJobBatch(allJobs);
     } catch (err) {
       console.warn('Failed to resume in-progress jobs:', err);
+    }
+  }
+
+  /** Poll a batch of jobs for status updates with limited concurrency.
+   *  When a job transitions to 'processing', opens a single SSE stream for it.
+   *  Caps concurrent SSE connections to avoid exhausting the browser's HTTP
+   *  connection pool (browsers allow ~6 per origin). */
+  const MAX_CONCURRENT_SSE = 3;
+
+  async function pollJobBatch(jobs: JobInfo[]) {
+    const activeSSE = new Set<string>();
+    const pollIntervalMs = 5000;
+
+    while (true) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+
+      // Remove jobs that have left the store (user dismissed them).
+      const liveJobs = jobs.filter((j) => {
+        const photoNodeId = `${j.file_source} (Photo)`;
+        return !!imageProcessingStore.statuses[photoNodeId];
+      });
+      if (liveJobs.length === 0) return;
+      jobs = liveJobs;
+
+      for (const job of jobs) {
+        const photoNodeId = `${job.file_source} (Photo)`;
+        if (activeSSE.has(job.job_id)) continue;
+
+        try {
+          const fresh = await kgApiClient.getJob(job.job_id);
+          if (fresh.status === 'complete') {
+            imageProcessingStore.updateStage(photoNodeId, 'complete');
+            graphStore.pipelineDone = true;
+            graphStore.refresh();
+            continue;
+          }
+          if (fresh.status === 'failed' || fresh.status === 'cancelled') {
+            imageProcessingStore.updateStage(photoNodeId, 'error', fresh.error || `Job ${fresh.status}`);
+            continue;
+          }
+          if (fresh.status === 'processing' && activeSSE.size < MAX_CONCURRENT_SSE) {
+            activeSSE.add(job.job_id);
+            consumeJobEvents(job.job_id, photoNodeId, { name: job.file_source, dataUrl: '' } as Attachment)
+              .finally(() => activeSSE.delete(job.job_id));
+          }
+        } catch {
+          // transient error — keep polling
+        }
+      }
     }
   }
 
