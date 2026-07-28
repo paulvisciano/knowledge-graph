@@ -12,10 +12,9 @@ export async function waitForGraphReady(page: Page) {
   await page.waitForTimeout(2_000);
 }
 
-/** Open the attachment menu and pick "Image" to trigger the hidden file input. */
+/** Trigger the graph page's floating "Add Image" button to open the hidden file input. */
 export async function openImagePicker(page: Page) {
-  await page.getByTestId('attach-file-button').click();
-  await page.getByTestId('pick-image-button').click();
+  await page.getByTestId('add-image-button').click();
 }
 
 /** Upload an image file through the hidden file input. Returns the file input element. */

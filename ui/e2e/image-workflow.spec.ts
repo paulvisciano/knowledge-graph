@@ -28,9 +28,8 @@ test.describe('Image processing workflow', () => {
     await expect(fileInput).not.toBeVisible();
   });
 
-  test('attach file button opens menu with image option', async ({ page }) => {
-    await page.getByTestId('attach-file-button').click();
-    await expect(page.getByTestId('pick-image-button')).toBeVisible();
+  test('add image button is present on the graph page', async ({ page }) => {
+    await expect(page.getByTestId('add-image-button')).toBeVisible();
   });
 
   test('uploading an image creates a Photo node in the graph', async ({ page }) => {

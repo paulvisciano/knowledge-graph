@@ -463,15 +463,11 @@
     // Convert all files to attachments in parallel for responsiveness
     const results = await Promise.allSettled(files.map((file) => fileToAttachment(file)));
     const newAttachments: Attachment[] = [];
-    const imageAttachments: Attachment[] = [];
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const att = result.value;
         newAttachments.push(att);
-        if (isImageType(att.mimeType)) {
-          imageAttachments.push(att);
-        }
       } else {
         attachError = result.reason instanceof Error ? result.reason.message : 'Failed to attach file';
       }
@@ -480,20 +476,30 @@
     if (newAttachments.length > 0) {
       attachments = [...attachments, ...newAttachments];
     }
-
-    // Add all image nodes to the graph immediately (no processing yet — that
-    // happens on send, so the user's text note can be threaded through as context).
-    for (const att of imageAttachments) {
-      const photoNodeId = `${att.name} (Photo)`;
-      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
-      if (att.dataUrl) {
-        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl);
-      }
-    }
   }
 
-  function openImagePicker() {
+  /** Pick images directly on the graph page — runs them through the KG EXIF
+   *  pipeline only (no chat message, no LLM). */
+  function openGraphImagePicker() {
     imageFileInput?.click();
+  }
+
+  /** Process image files picked from the graph page directly through the KG
+   *  EXIF pipeline. Does NOT add them to chat attachments, does NOT send them
+   *  to the LLM. */
+  async function handleGraphImageFiles(fileList: FileList | null) {
+    if (!fileList) return;
+    const files = Array.from(fileList);
+    for (const file of files) {
+      try {
+        const att = await fileToAttachment(file);
+        if (!isImageType(att.mimeType)) continue;
+        await processSingleImage(att, '');
+      } catch (err) {
+        console.warn(`Graph image processing failed for ${file.name}:`, err);
+      }
+    }
+    if (imageFileInput) imageFileInput.value = '';
   }
 
   function openDocumentPicker() {
@@ -536,7 +542,7 @@
     dragCounter = 0;
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
-      handleAttachFiles(files);
+      handleGraphImageFiles(files);
     }
   }
 
@@ -1140,10 +1146,6 @@
       startNewConversation();
     }
 
-    const imageUrls = attachments
-      .filter((a) => isImageType(a.mimeType))
-      .map((a) => a.dataUrl);
-
     const userMsg: ChatMessage = {
       id: generateId(),
       role: 'user',
@@ -1151,7 +1153,6 @@
       timestamp: Date.now(),
       ...(audioUrl ? { audioUrl } : {}),
       ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
-      ...(imageUrls.length > 0 ? { imageUrls } : {}),
     };
     messages = [...messages, userMsg];
     saveMessagesToConversation();
@@ -1171,15 +1172,6 @@
       if (textareaEl) textareaEl.style.height = 'auto';
       scrollToBottom();
     });
-
-    // Kick off image processing for all image attachments, with the user's note as context.
-    const messageNote = trimmed || transcript || '';
-    const imageAttachments = sentAttachments.filter((a) => isImageType(a.mimeType));
-    if (imageAttachments.length > 0) {
-      for (const att of imageAttachments) {
-        processSingleImage(att, messageNote);
-      }
-    }
 
     await streamAssistantResponse(sentAttachments);
   }
@@ -1747,9 +1739,24 @@
       <CanvasView onqueryAbout={handleQueryAbout} />
     </div>
 
+    <!-- Floating "Add Image" button — picks images and runs them through
+         the EXIF pipeline directly (no chat/LLM). -->
+    <button
+      type="button"
+      onclick={openGraphImagePicker}
+      class="add-image-fab"
+      data-testid="add-image-button"
+      title="Add images to graph"
+      aria-label="Add images to graph"
+    >
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16M4 12h16" />
+      </svg>
+    </button>
+
     <!-- Inline chat overlay (game-style, bottom-right) -->
     <div class="chat-inline-overlay" data-testid="chat-inline-overlay">
-      <!-- Hidden file inputs (used by both input rows) -->
+      <!-- Image input: graph page "Add Image" button → EXIF pipeline only -->
       <input
         bind:this={imageFileInput}
         type="file"
@@ -1757,7 +1764,7 @@
         multiple
         class="hidden"
         data-testid="image-file-input"
-        onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
+        onchange={(e) => handleGraphImageFiles((e.target as HTMLInputElement).files)}
       />
       <input
         bind:this={docFileInput}
@@ -2278,7 +2285,6 @@
           <AttachmentMenu
             fluid
             disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-            onPickImage={openImagePicker}
             onPickDocument={openDocumentPicker}
           />
           {#if isActiveConversationStreaming}
@@ -2334,6 +2340,28 @@
 </div>
 
 <style>
+  .add-image-fab {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    z-index: 25;
+    display: flex;
+    height: 2.75rem;
+    width: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid var(--color-cyber-cyan, #22d3ee);
+    background: rgba(16, 24, 39, 0.8);
+    color: var(--color-cyber-cyan, #22d3ee);
+    backdrop-filter: blur(8px);
+    transition: background-color 200ms, color 200ms, transform 200ms;
+  }
+  .add-image-fab:hover {
+    background: rgba(34, 211, 238, 0.15);
+    transform: scale(1.05);
+  }
+
   .chat-inline-overlay {
     position: absolute;
     left: 50%;
