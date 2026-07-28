@@ -171,6 +171,19 @@ class GraphStore {
     this.nodes = [...this.nodes.filter((n) => n.id !== id), node];
   }
 
+  /** Merge properties into an existing node, preserving any backend-provided
+   *  fields not present in the incoming `properties`. Falls back to
+   *  `upsertNode` when the node doesn't exist yet. */
+  mergeNodeProperties(id: string, labels: string[], properties: Record<string, unknown>) {
+    const existing = this.nodes.find((n) => n.id === id);
+    if (!existing) {
+      this.upsertNode(id, labels, properties);
+      return;
+    }
+    existing.properties = { ...existing.properties, ...properties };
+    this.nodes = [...this.nodes];
+  }
+
   upsertEdge(source: string, target: string, type: string, properties: Record<string, unknown> = {}) {
     const id = `${source}-${type}-${target}`;
     const edge: KGEdge = { id, source, target, type, properties };
