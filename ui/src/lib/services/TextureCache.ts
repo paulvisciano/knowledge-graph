@@ -25,6 +25,10 @@ class TextureCache {
    */
   private inFlightImages = new Map<string, HTMLImageElement>();
 
+  private static readonly MAX_RETRIES = 4;
+  private static readonly BASE_RETRY_MS = 500;
+  private retries = new Map<string, number>();
+
   /** Returns the cached texture for `url`, or `undefined` if not yet loaded. */
   get(url: string): THREE.Texture | undefined {
     return this.cache.get(url);
@@ -57,34 +61,55 @@ class TextureCache {
     if (onLoad) callbacks.add(onLoad);
     this.loaders.set(url, callbacks);
 
+    this._loadInternal(url, callbacks);
+    return undefined;
+  }
+
+  private _loadInternal(url: string, callbacks: Set<(t: THREE.Texture) => void>): void {
     const texture = this.textureLoader.load(
       url,
       (t: THREE.Texture) => this.onDone(url, t),
       undefined,
-      (err: unknown) => {
-        // On error the texture may still be partially loaded (or a default);
-        // flush queued callbacks with whatever we have so requesters don't
-        // hang forever, then drop the loaders entry.
-        console.warn(`[TextureCache] failed to load texture: ${url}`, err);
-        this.inFlightImages.delete(url);
-        const tex = this.cache.get(url);
-        this.flush(url, tex);
-      },
+      (err: unknown) => this.onLoadError(url, callbacks, err),
     );
 
-    // `TextureLoader.load` returns synchronously with a Texture whose
-    // `.image` is the HTMLImageElement created by ImageLoader. Track it so
-    // `abortInFlight()` can cancel the underlying fetch.
     const img = texture.image as HTMLImageElement | undefined;
     if (img && typeof img === 'object' && 'src' in img) {
       this.inFlightImages.set(url, img);
     }
-
-    return undefined;
   }
+
+  private onLoadError(url: string, callbacks: Set<(t: THREE.Texture) => void>, err: unknown): void {
+    this.inFlightImages.delete(url);
+    const attempt = (this.retries.get(url) ?? 0) + 1;
+    this.retries.set(url, attempt);
+
+    if (attempt <= TextureCache.MAX_RETRIES) {
+      const delay = TextureCache.BASE_RETRY_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[TextureCache] load failed (attempt ${attempt}/${TextureCache.MAX_RETRIES}), retrying in ${delay}ms: ${url}`,
+        err,
+      );
+      this._loadTimers ??= new Map<string, ReturnType<typeof setTimeout>>();
+      this._loadTimers.set(url, setTimeout(() => this._loadInternal(url, callbacks), delay));
+      return;
+    }
+
+    console.warn(`[TextureCache] giving up after ${attempt} attempts: ${url}`, err);
+    this.retries.delete(url);
+    const tex = this.cache.get(url);
+    this.flush(url, tex);
+  }
+
+  private _loadTimers?: Map<string, ReturnType<typeof setTimeout>>;
 
   private onDone(url: string, texture: THREE.Texture): void {
     this.inFlightImages.delete(url);
+    this.retries.delete(url);
+    if (this._loadTimers) {
+      const t = this._loadTimers.get(url);
+      if (t) { clearTimeout(t); this._loadTimers.delete(url); }
+    }
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.generateMipmaps = true;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -174,6 +199,11 @@ class TextureCache {
   }
 
   clear(): void {
+    if (this._loadTimers) {
+      for (const t of this._loadTimers.values()) clearTimeout(t);
+      this._loadTimers.clear();
+    }
+    this.retries.clear();
     for (const texture of this.cache.values()) {
       texture.dispose();
     }
@@ -194,6 +224,11 @@ class TextureCache {
       img.src = '';
     }
     this.inFlightImages.clear();
+    if (this._loadTimers) {
+      for (const t of this._loadTimers.values()) clearTimeout(t);
+      this._loadTimers.clear();
+    }
+    this.retries.clear();
   }
 
   size(): number {
