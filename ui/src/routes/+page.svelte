@@ -581,7 +581,6 @@
     conversations.unshift(conv);
     activeConversationId = id;
     messages = [];
-    syncClient.saveConversation(conv);
     return id;
   }
 
@@ -1170,13 +1169,14 @@
       ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
     };
     messages = [...messages, userMsg];
-    saveMessagesToConversation();
 
     const conv = conversations.find((c) => c.id === activeConversationId);
     if (conv && !conv.title) {
       conv.title = trimmed.slice(0, 50) + (trimmed.length > 50 ? '…' : '');
     }
     conv?.updatedAt && (conv.updatedAt = Date.now());
+
+    saveMessagesToConversation();
 
     const sentAttachments = [...attachments];
     chatInput = '';
@@ -1732,6 +1732,7 @@
     conversationStore.conversations = conversations;
     conversationStore.activeConversationId = activeConversationId;
     conversationStore.unreadConversations = unreadConversations;
+    graphStore.setActiveConversation(activeConversationId);
   });
 
   let lastNavigatedId = '';

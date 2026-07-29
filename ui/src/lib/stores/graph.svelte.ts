@@ -15,6 +15,9 @@ class GraphStore {
   photoImages = $state<Record<string, string>>({});
   /** nodeId → dataUrl for Person face-crop images */
   personImages = $state<Record<string, string>>({});
+  /** Currently-active conversation id — conversation node with this id gets
+   *  `properties.isActive = true` so the renderer can highlight it. */
+  activeConversationId = $state('');
 
   filteredNodes = $derived.by(() => {
     if (!this.searchQuery.trim()) return this.nodes;
@@ -81,6 +84,7 @@ class GraphStore {
         name: c.title,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
+        isActive: c.id === this.activeConversationId,
       },
     }));
     // Drop ALL existing conversation nodes (including ones no longer in the
@@ -91,6 +95,13 @@ class GraphStore {
 
   selectNode(node: KGNode | null) {
     this.selectedNode = node;
+  }
+
+  /** Set the active conversation and re-merge nodes so `isActive` flips. */
+  setActiveConversation(id: string) {
+    if (this.activeConversationId === id) return;
+    this.activeConversationId = id;
+    this.loadConversations();
   }
 
   setHoveredNode(node: KGNode | null) {
