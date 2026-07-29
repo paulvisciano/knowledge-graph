@@ -2421,6 +2421,8 @@
               <span class="mic-tooltip" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
             {/if}
           </div>
+
+          {#if orbOptionsOpen}
           <div
             class="chat-orb-add"
             class:show={orbOptionsOpen}
@@ -2436,6 +2438,7 @@
             </div>
             <span>Add images</span>
           </div>
+
           <div
             class="chat-orb-expand"
             class:show={orbOptionsOpen}
@@ -2451,6 +2454,8 @@
             </div>
             <span>Type a message</span>
           </div>
+        {/if}
+
         </div>
       </div>
     {/if}
