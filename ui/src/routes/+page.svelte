@@ -346,10 +346,12 @@
   // click: on the collapsed orb it toggles the sibling options, on the
   // expanded panel it focuses the textarea. Recording also forces the orb
   // options closed so the countdown is unobstructed.
+  let holdStartedByTouch = false;
+
   async function handleMicPointerDown(e: PointerEvent) {
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
-    // Stop the browser from starting a text-selection drag / context menu.
+    if (holdStartedByTouch) return;
     e.preventDefault();
     startHoldTimer();
   }
@@ -370,7 +372,7 @@
   function handleMicTouchStart(e: TouchEvent) {
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
-    e.preventDefault();
+    holdStartedByTouch = true;
     startHoldTimer();
   }
 
@@ -380,7 +382,7 @@
 
   function handleMicTouchEnd(e: TouchEvent) {
     if (!holdActive) return;
-    e.preventDefault();
+    holdStartedByTouch = false;
     handleMicPointerUp();
   }
 
@@ -401,6 +403,7 @@
     const elapsed = holdElapsed;
     holdActive = false;
     holdElapsed = 0;
+    holdStartedByTouch = false;
     if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
 
     if (!wasHolding) return;
@@ -437,14 +440,13 @@
   }
 
   function handleMicPointerLeave() {
-    // Pointer left the button while still counting/recording → treat as
-    // release-to-send if recording, otherwise cancel the countdown.
     if (!holdActive) return;
     if (isRecording) {
       handleMicPointerUp();
     } else {
       holdActive = false;
       holdElapsed = 0;
+      holdStartedByTouch = false;
       if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
     }
   }
@@ -452,6 +454,7 @@
   function handleMicPointerCancel() {
     holdActive = false;
     holdElapsed = 0;
+    holdStartedByTouch = false;
     if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
     if (isRecording) {
       // Abort an in-flight recording without sending.
