@@ -95,13 +95,13 @@ echo "Starting LLM on port ${LLM_PORT}..."
     --alias "$LLM_MODEL_ALIAS" \
     $MMPROJ_FLAG \
     --image-max-tokens 280 --image-min-tokens 40 \
-    -c 131072 -b 2048 -ub 2048 \
+    -c 32768 -b 2048 -ub 2048 \
     -ctk q4_0 -ctv q4_0 \
     -np "$LLM_SLOTS" -fa on -cram 0 -ngl 99 \
     --repeat-penalty "$LLM_REPEAT_PENALTY" --repeat-last-n "$LLM_REPEAT_LAST_N" \
     --dry-multiplier "$LLM_DRY_MULTIPLIER" --dry-base "$LLM_DRY_BASE" --dry-allowed-length "$LLM_DRY_ALLOWED_LENGTH" \
     --xtc-probability "$LLM_XTC_PROBABILITY" --xtc-threshold "$LLM_XTC_THRESHOLD" \
-    --reasoning off --ui-mcp-proxy \
+    --reasoning on --reasoning-budget 1024 --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &
 PIDS+=($!)
