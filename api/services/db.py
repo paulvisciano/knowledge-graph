@@ -150,11 +150,17 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS app_settings (
                 id INTEGER PRIMARY KEY DEFAULT 0,
                 face_detection_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                pinch_zoom_sensitivity REAL NOT NULL DEFAULT 0.25,
                 CONSTRAINT singleton CHECK (id = 0)
             );
             INSERT INTO app_settings (id, face_detection_enabled)
             VALUES (0, FALSE)
             ON CONFLICT (id) DO NOTHING;
+
+            -- Backfill the sensitivity column onto pre-existing rows. Idempotent
+            -- so re-running init_db on an already-migrated DB is a no-op.
+            ALTER TABLE app_settings
+                ADD COLUMN IF NOT EXISTS pinch_zoom_sensitivity REAL NOT NULL DEFAULT 0.25;
         """)
     logger.info("Database tables initialized")
 
@@ -370,14 +376,19 @@ async def get_file_types_for_sources(
 async def get_app_settings() -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT face_detection_enabled FROM app_settings WHERE id = 0")
+        row = await conn.fetchrow(
+            "SELECT face_detection_enabled, pinch_zoom_sensitivity FROM app_settings WHERE id = 0"
+        )
     if row is None:
-        return {"face_detection_enabled": False}
-    return {"face_detection_enabled": row["face_detection_enabled"]}
+        return {"face_detection_enabled": False, "pinch_zoom_sensitivity": 0.25}
+    return {
+        "face_detection_enabled": row["face_detection_enabled"],
+        "pinch_zoom_sensitivity": float(row["pinch_zoom_sensitivity"]),
+    }
 
 
 async def update_app_settings(updates: dict) -> dict:
-    allowed = {"face_detection_enabled"}
+    allowed = {"face_detection_enabled", "pinch_zoom_sensitivity"}
     filtered = {k: v for k, v in updates.items() if k in allowed}
     if not filtered:
         return await get_app_settings()

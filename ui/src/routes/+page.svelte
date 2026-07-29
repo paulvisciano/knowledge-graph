@@ -27,6 +27,8 @@
   import { syncClient } from '$lib/services/sync-client.svelte';
   import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, MAX_FILE_SIZE, type Attachment } from '$lib/utils/file-utils';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
+  import { isMobile } from '$lib/composables/use-breakpoint';
+  import { createSheetDrag } from '$lib/composables/use-sheet-drag';
 
   interface Conversation {
     id: string;
@@ -162,6 +164,13 @@
     isStreaming && streamingConversationId === activeConversationId
   );
 
+  // Whether any conversation (active or background) is currently streaming
+  // a response. Drives the loading indicator on the mic and lets a tap on
+  // the collapsed orb jump straight to that conversation.
+  let isStreamActive = $derived(
+    isStreaming && streamingConversationId !== null && streamingConversationId !== ''
+  );
+
   /**
    * Update a specific message in the conversation that owns the active stream.
    * If that conversation is currently displayed, updates `messages` directly
@@ -250,9 +259,11 @@
   let micTooltipMessage = $derived(
     isTranscribing
       ? 'Transcribing…'
-      : isRecording
-        ? 'Release to send'
-        : 'Hold to record'
+      : isStreamActive
+        ? 'Open conversation'
+        : isRecording
+          ? 'Release to send'
+          : 'Hold to record'
   );
   let promptEditing = $state(false);
   let promptDraft = $state('');
@@ -391,8 +402,14 @@
         micBusy = false;
       }
     } else if (elapsed < TAP_THRESHOLD_MS) {
-      // Tap → toggle the orb's sibling options (Type / Add images).
-      orbOptionsOpen = !orbOptionsOpen;
+      // Tap → if a conversation is streaming, jump to it (loading indicator
+      // on the mic signals this); otherwise toggle the orb's sibling
+      // options (Type / Add images).
+      if (isStreamActive) {
+        openStreamingConversation();
+      } else {
+        orbOptionsOpen = !orbOptionsOpen;
+      }
     }
     // Released mid-countdown (> TAP_THRESHOLD_MS but < HOLD_TO_RECORD_MS):
     // cancel silently.
@@ -675,6 +692,19 @@
     }
 
     chatExpanded = true;
+  }
+
+  /** A tap on the mic while a conversation is streaming opens that
+   *  conversation so the user can watch the in-flight response. */
+  function openStreamingConversation() {
+    const id = streamingConversationId;
+    if (!id) return;
+    // Already viewing it — just make sure the panel is open.
+    if (id === activeConversationId) {
+      chatExpanded = true;
+      return;
+    }
+    switchConversation(id);
   }
 
   function saveMessagesToConversation() {
@@ -1179,7 +1209,10 @@
 
     const conv = conversations.find((c) => c.id === activeConversationId);
     if (conv && !conv.title) {
-      conv.title = trimmed.slice(0, 50) + (trimmed.length > 50 ? '…' : '');
+      const titleSource = trimmed || (audioData ? 'Voice memo' : '');
+      if (titleSource) {
+        conv.title = titleSource.slice(0, 50) + (titleSource.length > 50 ? '…' : '');
+      }
     }
     conv?.updatedAt && (conv.updatedAt = Date.now());
 
@@ -1620,12 +1653,32 @@
     }
   }
 
+  let chatSheetClosing = $state(false);
+
   function closeChat() {
-    // Don't cancel streaming — just hide the panel. The stream continues
-    // in the background so the response is preserved when you reopen.
+    if ($isMobile && chatExpanded && !chatSheetClosing) {
+      if (chatSheetEl) chatSheetEl.style.transform = '';
+      chatSheetClosing = true;
+      saveMessagesToConversation();
+      setTimeout(() => {
+        chatExpanded = false;
+        chatSheetClosing = false;
+      }, 280);
+      return;
+    }
     saveMessagesToConversation();
     chatExpanded = false;
   }
+
+  let chatSheetEl: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (!$isMobile || !chatExpanded || !chatSheetEl) return;
+    const handler = createSheetDrag({
+      sheet: chatSheetEl,
+      onDismiss: () => closeChat(),
+    });
+    return () => handler.destroy();
+  });
 
   function formatTime(ts: number): string {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1806,7 +1859,12 @@
     </div>
 
     <!-- Inline chat overlay (game-style, bottom-right) -->
-    <div class="chat-inline-overlay" data-testid="chat-inline-overlay">
+    {#if $isMobile && chatExpanded && activeConversationId}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="chat-sheet-backdrop" class:backdrop-closing={chatSheetClosing} onclick={closeChat} role="presentation"></div>
+    {/if}
+    <div class="chat-inline-overlay" class:sheet-closing={chatSheetClosing} bind:this={chatSheetEl} data-testid="chat-inline-overlay">
       <!-- Image input: graph page "Add Image" button → EXIF pipeline only -->
       <input
         bind:this={imageFileInput}
@@ -1828,11 +1886,21 @@
       />
 
       {#if chatExpanded && activeConversationId}
+        <div class="chat-sheet-handle" data-testid="chat-sheet-handle"><div class="chat-sheet-handle-bar"></div></div>
         <div class="chat-inline-header" data-testid="chat-inline-header">
+          <button
+            onclick={closeChat}
+            class="chat-inline-close-btn"
+            title="Close conversation"
+            aria-label="Close conversation"
+            data-testid="chat-close-button"
+          >
+            <Icon name="x" size={18} color="currentColor" />
+          </button>
           <span class="chat-inline-header-title">Conversation</span>
           <button
             onclick={() => { historyPanelOpen.update((v) => !v); }}
-            class="flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
+            class="chat-history-btn flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan"
             title="Chat history"
             aria-label="Open chat history"
             data-testid="chat-history-button"
@@ -2248,7 +2316,7 @@
 
         {#if chatExpanded}
           {#if messages.length > 0}
-            <div class="mb-1 flex justify-center">
+            <div class="chat-collapse-row mb-1 flex justify-center">
               <button
                 onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
                 class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
@@ -2300,12 +2368,14 @@
                 onmouseleave={() => { micTooltipVisible = false; }}
                 disabled={isTranscribing || !recordingSupported}
                 data-testid="mic-button"
-                title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : 'Hold to record'}
-                class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+                title={isTranscribing ? 'Transcribing…' : isStreamActive ? 'Open streaming conversation' : isRecording ? 'Release to send' : 'Hold to record'}
+                class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isStreamActive ? 'bg-cyber-purple/15 text-cyber-purple animate-pulse ring-2 ring-cyber-purple/40 hover:bg-cyber-purple/25' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
               >
                 {#if isRecording}
                   <Icon name="square" size={16} />
                 {:else if isTranscribing}
+                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                {:else if isStreamActive}
                   <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
                 {:else if holdActive}
                   <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
@@ -2330,21 +2400,24 @@
             class:recording={isRecording}
             class:holding={holdActive}
             class:options-open={orbOptionsOpen}
+            class:streaming={isStreamActive}
             role="button"
             tabindex="0"
-            aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : 'Voice input'}
+            aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : isStreamActive ? 'Open streaming conversation' : 'Voice input'}
             data-od-id="chat-orb"
             data-testid="mic-button"
             onpointerdown={handleMicPointerDown}
             onpointerup={handleMicPointerUp}
             onpointerleave={handleMicPointerLeave}
             onpointercancel={handleMicPointerCancel}
-            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); orbOptionsOpen = !orbOptionsOpen; } }}
+            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (isStreamActive) { openStreamingConversation(); } else { orbOptionsOpen = !orbOptionsOpen; } } }}
             onmouseenter={() => { micTooltipVisible = true; }}
             onmouseleave={() => { micTooltipVisible = false; }}
           >
             {#if isTranscribing}
               <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+            {:else if isStreamActive}
+              <div class="h-5 w-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
             {:else if isRecording}
               <Icon name="square" size={16} />
             {:else if holdActive}
@@ -2530,6 +2603,27 @@
   @keyframes orbRecording {
     0%, 100% { border-color: oklch(62% 0.20 18 / 20%); inset: 0; }
     50% { border-color: oklch(62% 0.20 18 / 8%); inset: -12px; }
+  }
+
+  /* Loading indicator: a conversation is streaming in the background. The
+     orb tints purple and pulses so a tap can jump to that conversation. */
+  .chat-orb.streaming {
+    color: var(--color-cyber-purple);
+    border-color: oklch(60% 0.18 300 / 35%);
+    background: oklch(20% 0.04 300 / 80%);
+    box-shadow:
+      0 0 0 1px oklch(60% 0.18 300 / 15%),
+      0 0 32px oklch(60% 0.18 300 / 22%),
+      0 0 64px oklch(60% 0.18 300 / 10%),
+      0 12px 40px oklch(0% 0 0 / 50%);
+  }
+  .chat-orb.streaming::before {
+    border-color: oklch(60% 0.18 300 / 30%);
+    animation: orbStreaming 1.4s ease-in-out infinite;
+  }
+  @keyframes orbStreaming {
+    0%, 100% { border-color: oklch(60% 0.18 300 / 25%); inset: 0; }
+    50% { border-color: oklch(60% 0.18 300 / 10%); inset: -10px; }
   }
 
   .chat-orb-expand {
@@ -2784,6 +2878,30 @@
     color: var(--color-cyber-text-dim);
   }
 
+  /* Close button — only shown in the mobile bottom-sheet toolbar. */
+  .chat-inline-close-btn {
+    display: none;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: var(--color-cyber-text-dim);
+    background: transparent;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .chat-inline-close-btn:hover {
+    background: rgba(255, 120, 120, 0.12);
+    color: var(--color-cyber-text);
+  }
+
+  /* Drag handle — only shown at the top of the mobile bottom-sheet. */
+  .chat-sheet-handle {
+    display: none;
+  }
+
   .chat-inline-messages {
     border-radius: 0 0 24px 24px;
     border-top: 0;
@@ -2960,6 +3078,149 @@
       max-height: 56dvh;
     }
   }
+
+  /* Mobile: conversation panel opens as a swipeable bottom-sheet drawer,
+     matching the HistoryPanel pattern. A backdrop dims the graph; the sheet
+     anchors to the bottom with rounded top corners, a drag handle, and a
+     dismiss-on-swipe-down gesture. */
+  @media (max-width: 768px) {
+    .chat-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      animation: chat-backdrop-in 220ms ease-out;
+      transition: opacity 280ms ease-out;
+    }
+
+    .chat-sheet-backdrop.backdrop-closing {
+      opacity: 0;
+    }
+
+    .chat-inline-overlay {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: auto;
+      bottom: 0;
+      width: 100%;
+      max-width: 100%;
+      max-height: 92dvh;
+      padding: 0;
+      z-index: 61;
+      flex-direction: column;
+      background: var(--color-cyber-bg, #0a0e17);
+      border-radius: 20px 20px 0 0;
+      border-top: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+      box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.7), 0 -2px 24px rgba(0, 212, 255, 0.06);
+      animation: chat-sheet-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: transform;
+      overflow: hidden;
+    }
+
+    .chat-inline-overlay.sheet-dragging {
+      transition: none;
+    }
+
+    .chat-inline-overlay.sheet-closing {
+      transform: translateY(100%);
+    }
+
+    .chat-sheet-handle {
+      display: flex;
+      justify-content: center;
+      padding: 10px 0 6px;
+      flex-shrink: 0;
+    }
+
+    .chat-sheet-handle-bar {
+      width: 40px;
+      height: 5px;
+      border-radius: 3px;
+      background: rgba(200, 214, 229, 0.25);
+    }
+
+    .chat-inline-header {
+      max-width: 100%;
+      padding: 4px 8px 10px;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      flex-shrink: 0;
+    }
+
+    .chat-inline-header-title {
+      flex: 1;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--color-cyber-text);
+    }
+
+    .chat-inline-close-btn {
+      display: flex;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+    }
+
+    .chat-inline-header .chat-history-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+    }
+
+    .chat-inline-messages {
+      max-width: 100%;
+      max-height: none;
+      flex: 1;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      padding: 4px 16px 8px;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+
+    .chat-collapse-row {
+      display: none;
+    }
+
+    .chat-inline-input-row {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+      background: var(--color-cyber-bg, #0a0e17);
+      flex-shrink: 0;
+      border-radius: 22px;
+      min-height: 48px;
+      height: auto;
+    }
+
+    .chat-inline-input-row > textarea {
+      min-height: 40px;
+      line-height: 1.5;
+      padding: 10px 14px;
+      font-size: 16px;
+      -webkit-appearance: none;
+      border-radius: 20px;
+    }
+
+    .chat-inline-input-row > button {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+    }
+  }
+
+  @keyframes chat-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes chat-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
   .node-detail-overlay {
     position: absolute;

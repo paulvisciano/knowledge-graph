@@ -151,7 +151,7 @@ async def save_conversation(payload: ExportedConversation):
                        thinking_enabled, reasoning_effort, forked_from_conversation_id, pinned)
                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
                    ON CONFLICT (id) DO UPDATE SET
-                       name = EXCLUDED.name,
+                       name = CASE WHEN conversations.name <> '' AND (EXCLUDED.name = '' OR EXCLUDED.name IS NULL) THEN conversations.name ELSE EXCLUDED.name END,
                        last_modified = EXCLUDED.last_modified,
                        curr_node = EXCLUDED.curr_node,
                        mcp_server_overrides = EXCLUDED.mcp_server_overrides,

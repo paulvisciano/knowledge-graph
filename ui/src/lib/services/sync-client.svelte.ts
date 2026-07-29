@@ -120,6 +120,17 @@ class SyncClient {
   async saveConversation(conv: Conversation): Promise<void> {
     this.error = null;
     try {
+      // Defensive: never persist an empty title when the conversation has
+      // a user message with content (e.g. an audio transcript). Later saves
+      // would otherwise overwrite a previously-set title with ''.
+      if (!conv.title) {
+        const firstUser = conv.messages.find((m) => m.role === 'user' && m.content && !m.isStreaming);
+        if (firstUser) {
+          conv.title = firstUser.content.slice(0, 50) + (firstUser.content.length > 50 ? '…' : '');
+        } else if (conv.messages.some((m) => m.audioData)) {
+          conv.title = 'Voice memo';
+        }
+      }
       const dbConv = this.toSyncConv(conv);
       const dbMessages = conv.messages
         .filter((m) => !m.isStreaming)

@@ -22,6 +22,7 @@ import {
   MAX_VELOCITY,
   MIN_CAMERA_Z,
   RENDER_DISTANCE,
+  TOUCH_SENSITIVITY,
   VELOCITY_DECAY,
   VELOCITY_LERP,
   ZOOMING_VEL_THRESHOLD,
@@ -34,6 +35,7 @@ import {
 const DRAG_PAN_SCALE = 0.002;
 /** Pixels-equivalent moved per held-key frame — makes arrow keys pan at the same world-speed as dragging. */
 const KEYBOARD_PAN_PIXELS = 20;
+
 import { ChunkManager } from './ChunkManager';
 import type { CanvasNode } from './types';
 
@@ -66,6 +68,10 @@ export class SceneManager {
   private readonly _keys = new Set<string>();
   private readonly _raycaster = new THREE.Raycaster();
   private readonly _pointerNdc = new THREE.Vector2();
+
+  /** Active touch pointers keyed by pointerId, used for pinch + pan. */
+  private readonly _touchPointers = new Map<number, { x: number; y: number }>();
+  /** Last single-pointer drag state (mouse or first touch). */
   private readonly _pointer = {
     down: false,
     lastX: 0,
@@ -73,7 +79,19 @@ export class SceneManager {
     downStartX: 0,
     downStartY: 0,
     dragged: false,
+    isTouch: false,
   };
+  /** Snapshot of pinch distance/midpoint at the start of the current pinch gesture. */
+  private _pinchActive = false;
+  private _pinchStartDist = 0;
+  private _pinchStartZ = 0;
+
+  private _lastTapTime = 0;
+  private _lastTapX = 0;
+  private _lastTapY = 0;
+  private _pendingClickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _pendingClickX = 0;
+  private _pendingClickY = 0;
 
   private _rafId = 0;
   private _running = false;
@@ -89,6 +107,22 @@ export class SceneManager {
   // that and can zoom down toward 0 (oldest). Updated by setNodes.
   private _maxCameraZ = MAX_CAMERA_Z;
   private _minCameraZ = MIN_CAMERA_Z;
+  /**
+   * Optional tighter Z clamp for the pinch gesture only. When set (by
+   * CanvasView to the current time bucket's depth span), pinch zoom stays
+   * inside the month the user is viewing instead of scrubbing across months.
+   * null = no pinch-specific clamp (pinch uses the global min/max).
+   */
+  private _pinchMinZ: number | null = null;
+  private _pinchMaxZ: number | null = null;
+  /**
+   * Pinch-to-zoom sensitivity exponent. newZ = startZ * (startDist/dist)^s.
+   * 1.0 = a 1:1 finger-distance ratio (current/default behaviour); <1.0
+   * dampens the zoom so a large pinch moves the camera less (slower time
+   * travel); >1.0 amplifies it (faster). Set from configStore so the user
+   * can tune how quickly pinching scrubs through time buckets.
+   */
+  private _pinchSensitivity = 0.25;
   private _lastChunkX = Infinity;
   private _lastChunkY = Infinity;
   private _lastChunkZ = Infinity;
@@ -111,6 +145,9 @@ export class SceneManager {
 
   /** Fired as the pointer moves over a photo plane (or null when off-plane). */
   onHoverNode?: (nodeId: string | null) => void;
+
+  /** Fired on a confirmed double-tap (touch) with the tap screen coordinates. */
+  onDoubleTap?: (clientX: number, clientY: number) => void;
 
   /**
    * Creates the renderer, camera, scene, shared geometry, and chunk manager,
@@ -156,6 +193,13 @@ export class SceneManager {
   get camera(): THREE.PerspectiveCamera {
     return this._camera;
   }
+
+  get basePosX(): number { return this._basePos.x; }
+  get basePosY(): number { return this._basePos.y; }
+  get basePosZ(): number { return this._basePos.z; }
+  get minCameraZ(): number { return this._minCameraZ; }
+  get maxCameraZ(): number { return this._maxCameraZ; }
+  get domElement(): HTMLCanvasElement { return this._renderer.domElement; }
 
   /** Number of chunks currently mounted (debug). */
   get mountedChunkCount(): number {
@@ -229,6 +273,15 @@ export class SceneManager {
     this._chunkManager.setLayout(nodes);
   }
 
+  setPinchSensitivity(s: number): void {
+    this._pinchSensitivity = Math.max(0.1, Math.min(3.0, s));
+  }
+
+  setPinchZoomBounds(minZ: number | null, maxZ: number | null): void {
+    this._pinchMinZ = minZ;
+    this._pinchMaxZ = maxZ;
+  }
+
   /**
    * Derive dynamic camera Z bounds + far clipping plane from the layout's
    * depth (time) range. Newest photos at maxCellZ get a starting camera Z
@@ -298,6 +351,16 @@ export class SceneManager {
     this._velocity.set(0, 0, 0);
   }
 
+  flyToXYZ(x: number, y: number, z: number, durationMs = 700): void {
+    if (this._disposed) return;
+    const clampedZ = Math.max(this._minCameraZ, Math.min(this._maxCameraZ, z));
+    this._flyFrom.copy(this._basePos);
+    this._flyTo = new THREE.Vector3(x, y, clampedZ);
+    this._flyElapsed = 0;
+    this._flyDuration = durationMs;
+    this._velocity.set(0, 0, 0);
+  }
+
   /**
    * Smoothly animate the camera to center on a specific node, panning X/Y
    * and zooming Z simultaneously. Computes the node's world position from its
@@ -359,6 +422,10 @@ export class SceneManager {
     if (this._disposed) return;
     this._disposed = true;
     this.stop();
+    if (this._pendingClickTimer) {
+      clearTimeout(this._pendingClickTimer);
+      this._pendingClickTimer = null;
+    }
     this._resizeObserver.disconnect();
     this.unbindEvents();
     this._chunkManager.dispose();
@@ -468,8 +535,8 @@ export class SceneManager {
     );
     const amount = DRIFT_AMOUNT * zoomFactor;
     const lerpFactor = isZooming ? DRIFT_LERP_ZOOMING : DRIFT_LERP;
-    if (this._pointer.down) {
-      // Freeze drift during drag — keep it at its current value.
+    if (this._pointer.down || this._pinchActive) {
+      // Freeze drift during drag/pinch — keep it at its current value.
       return;
     }
     this._drift.x = this._drift.x + (this._mouse.x * amount - this._drift.x) * lerpFactor;
@@ -488,12 +555,28 @@ export class SceneManager {
 
   private onPointerDown = (e: PointerEvent): void => {
     this.cancelFly();
-    this._pointer.down = true;
-    this._pointer.lastX = e.clientX;
-    this._pointer.lastY = e.clientY;
-    this._pointer.downStartX = e.clientX;
-    this._pointer.downStartY = e.clientY;
-    this._pointer.dragged = false;
+    if (e.pointerType === 'touch') {
+      this._touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._touchPointers.size === 2) {
+        this.beginPinch();
+      } else if (this._touchPointers.size === 1) {
+        this._pointer.down = true;
+        this._pointer.isTouch = true;
+        this._pointer.lastX = e.clientX;
+        this._pointer.lastY = e.clientY;
+        this._pointer.downStartX = e.clientX;
+        this._pointer.downStartY = e.clientY;
+        this._pointer.dragged = false;
+      }
+    } else {
+      this._pointer.down = true;
+      this._pointer.isTouch = false;
+      this._pointer.lastX = e.clientX;
+      this._pointer.lastY = e.clientY;
+      this._pointer.downStartX = e.clientX;
+      this._pointer.downStartY = e.clientY;
+      this._pointer.dragged = false;
+    }
     this._userMoved = true;
     this.updateCursor();
   };
@@ -502,12 +585,24 @@ export class SceneManager {
     const rect = this._renderer.domElement.getBoundingClientRect();
     this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    if (e.pointerType === 'touch' && this._touchPointers.has(e.pointerId)) {
+      this._touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._pinchActive && this._touchPointers.size >= 2) {
+        this.applyPinch();
+        return;
+      }
+      if (this._touchPointers.size === 1 && this._pointer.down) {
+        this.applyTouchPan(e);
+      }
+      return;
+    }
+
     if (this._pointer.down) {
       const dx = e.clientX - this._pointer.lastX;
       const dy = e.clientY - this._pointer.lastY;
       this._pointer.lastX = e.clientX;
       this._pointer.lastY = e.clientY;
-      // 5px threshold distinguishes a click from a drag (report §effort/risks).
       if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
         this._pointer.dragged = true;
       }
@@ -522,12 +617,94 @@ export class SceneManager {
   };
 
   private onPointerUp = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') {
+      this._touchPointers.delete(e.pointerId);
+      if (this._touchPointers.size < 2) this._pinchActive = false;
+      if (this._touchPointers.size === 0) {
+        if (this._pointer.down && !this._pointer.dragged) {
+          this.detectDoubleTap(e.clientX, e.clientY);
+        }
+        this._pointer.down = false;
+      } else if (this._touchPointers.size === 1) {
+        // one finger lifted mid-pinch — resume single-finger pan from remaining pointer
+        const remaining = this._touchPointers.values().next().value;
+        if (remaining) {
+          this._pointer.down = true;
+          this._pointer.lastX = remaining.x;
+          this._pointer.lastY = remaining.y;
+          this._pointer.downStartX = remaining.x;
+          this._pointer.downStartY = remaining.y;
+          this._pointer.dragged = true;
+        }
+      }
+      this.updateCursor();
+      return;
+    }
     if (this._pointer.down && !this._pointer.dragged) {
       this.clickRaycast(e);
     }
     this._pointer.down = false;
     this.updateCursor();
   };
+
+  private detectDoubleTap(x: number, y: number): void {
+    const now = performance.now();
+    const TAP_GAP = 300;
+    const TAP_RADIUS = 30;
+    const isDoubleTap =
+      now - this._lastTapTime < TAP_GAP &&
+      Math.hypot(x - this._lastTapX, y - this._lastTapY) < TAP_RADIUS;
+    this._lastTapTime = now;
+    this._lastTapX = x;
+    this._lastTapY = y;
+
+    if (!isDoubleTap) {
+      this._pendingClickX = x;
+      this._pendingClickY = y;
+      if (this._pendingClickTimer) clearTimeout(this._pendingClickTimer);
+      this._pendingClickTimer = setTimeout(() => {
+        this._pendingClickTimer = null;
+        this.clickRaycastAt(this._pendingClickX, this._pendingClickY);
+      }, TAP_GAP);
+      return;
+    }
+
+    if (this._pendingClickTimer) {
+      clearTimeout(this._pendingClickTimer);
+      this._pendingClickTimer = null;
+    }
+    this._lastTapTime = 0;
+    this.onDoubleTap?.(x, y);
+  }
+
+  /** Initializes pinch snapshot from the two current touch pointers. */
+  private beginPinch(): void {
+    const pts = [...this._touchPointers.values()];
+    if (pts.length < 2) return;
+    this._pinchActive = true;
+    this._pointer.dragged = true;
+    this._pinchStartDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
+    this._pinchStartZ = this._basePos.z;
+  }
+
+  private applyPinch(): void {
+    // Pinch-to-zoom disabled; double-tap handles all time-travel zoom on touch.
+  }
+
+  /** Single-touch pan with reduced sensitivity vs mouse/trackpad. */
+  private applyTouchPan(e: PointerEvent): void {
+    const dx = e.clientX - this._pointer.lastX;
+    const dy = e.clientY - this._pointer.lastY;
+    this._pointer.lastX = e.clientX;
+    this._pointer.lastY = e.clientY;
+    if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
+      this._pointer.dragged = true;
+    }
+    const panScale = this._basePos.z * DRAG_PAN_SCALE * TOUCH_SENSITIVITY;
+    this._basePos.x -= dx * panScale;
+    this._basePos.y += dy * panScale;
+    this._userMoved = true;
+  }
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
@@ -565,18 +742,18 @@ export class SceneManager {
 
   /** Raycasts on click and fires `onSelectNode` with the hit id (or null). */
   private clickRaycast(e: PointerEvent): void {
-    const hit = this.raycast(e);
+    this.clickRaycastAt(e.clientX, e.clientY);
+  }
+
+  private clickRaycastAt(clientX: number, clientY: number): void {
+    const hit = this.raycastAt(clientX, clientY);
     this.onSelectNode?.(hit ?? null);
   }
 
-  /**
-   * Converts a pointer event to NDC and raycasts against the mounted chunk
-   * meshes. Returns the hit node id, or `undefined` on no hit.
-   */
-  private raycast(e: PointerEvent): string | undefined {
+  private raycastAt(clientX: number, clientY: number): string | undefined {
     const rect = this._renderer.domElement.getBoundingClientRect();
-    this._pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this._pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this._pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this._pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this._raycaster.setFromCamera(this._pointerNdc, this._camera);
     const meshes = this._chunkManager.getPickableMeshes();
     if (meshes.length === 0) return undefined;
@@ -584,6 +761,14 @@ export class SceneManager {
     if (hits.length === 0) return undefined;
     const nodeId = hits[0].object.userData.nodeId;
     return typeof nodeId === 'string' ? nodeId : undefined;
+  }
+
+  /**
+   * Converts a pointer event to NDC and raycasts against the mounted chunk
+   * meshes. Returns the hit node id, or `undefined` on no hit.
+   */
+  private raycast(e: PointerEvent): string | undefined {
+    return this.raycastAt(e.clientX, e.clientY);
   }
 
   private onContextLoss = (): void => {

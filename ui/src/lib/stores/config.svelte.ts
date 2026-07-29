@@ -51,6 +51,8 @@ class ConfigStore {
   private config: AppConfig = { systemPrompt: DEFAULT_SYSTEM_PROMPT };
   private loaded = $state(false);
   faceDetectionEnabled = $state(false);
+  /** Pinch-to-zoom sensitivity exponent (0.25 = slow default, lower = even slower). */
+  pinchZoomSensitivity = $state(0.25);
 
   get systemPrompt(): string {
     return this.config.systemPrompt;
@@ -79,6 +81,9 @@ class ConfigStore {
         if (typeof data.face_detection_enabled === 'boolean') {
           this.faceDetectionEnabled = data.face_detection_enabled;
         }
+        if (typeof data.pinch_zoom_sensitivity === 'number') {
+          this.pinchZoomSensitivity = data.pinch_zoom_sensitivity;
+        }
       }
     } catch {
     }
@@ -98,6 +103,27 @@ class ConfigStore {
       }
       return false;
     } catch {
+      return false;
+    }
+  }
+
+  async savePinchZoomSensitivity(sensitivity: number): Promise<boolean> {
+    const prev = this.pinchZoomSensitivity;
+    this.pinchZoomSensitivity = sensitivity;
+    try {
+      const res = await fetch('/api/kg/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          face_detection_enabled: this.faceDetectionEnabled,
+          pinch_zoom_sensitivity: sensitivity,
+        }),
+      });
+      if (res.ok) return true;
+      this.pinchZoomSensitivity = prev;
+      return false;
+    } catch {
+      this.pinchZoomSensitivity = prev;
       return false;
     }
   }

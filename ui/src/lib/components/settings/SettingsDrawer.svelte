@@ -3,6 +3,7 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import SystemPromptEditor from '$lib/components/settings/SystemPromptEditor.svelte';
   import FaceDetectionToggle from '$lib/components/settings/FaceDetectionToggle.svelte';
+  import TimeTravelSensitivity from '$lib/components/settings/TimeTravelSensitivity.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSwipeHandler } from '$lib/composables/use-swipe';
 
@@ -62,6 +63,7 @@
         <div class="flex-1 overflow-y-auto overscroll-contain p-4">
           <div class="space-y-3">
             <FaceDetectionToggle />
+            <TimeTravelSensitivity />
             <SystemPromptEditor />
           </div>
         </div>
@@ -100,6 +102,7 @@
         <div class="drawer-content">
           <div class="space-y-3">
             <FaceDetectionToggle />
+            <TimeTravelSensitivity />
             <SystemPromptEditor />
           </div>
         </div>

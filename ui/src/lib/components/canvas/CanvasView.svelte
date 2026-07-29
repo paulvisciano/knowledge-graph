@@ -11,6 +11,8 @@
   import { TIME_BUCKET_SPACING, CHUNK_SIZE, INITIAL_CAMERA_Z } from './renderer/constants';
   import { buildCanvasLayout, buildTimeIndex } from './Layout';
   import type { TimeIndex } from './Layout';
+  import { configStore } from '$lib/stores/config.svelte';
+  import { isMobile } from '$lib/composables/use-breakpoint';
   import NodeOverlay from './NodeOverlay.svelte';
   import ProcessingOverlay from './ProcessingOverlay.svelte';
   import type { CanvasNode } from './renderer/types';
@@ -48,6 +50,9 @@
   let dateLabel = $state<string | null>(null);
   let timelineOpen = $state(false);
   let currentBucketIdx = $state(-1);
+  let doubleTapPhase = $state(0);
+  let doubleTapReturnZ = $state(0);
+  let doubleTapOriginIdx = -1;
 
   let timelineEntries = $derived.by(() => {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return [];
@@ -69,6 +74,7 @@
   const THROTTLE_MS = 200;
 
   function wireSceneManager(sm: SceneManager): void {
+    sm.setPinchSensitivity(configStore.pinchZoomSensitivity);
     sm.onSelectNode = (nodeId) => {
       if (nodeId) {
         const cn = sm.getCanvasNode(nodeId);
@@ -91,30 +97,71 @@
     sm.onChunkChange = (_cx, _cy, cz) => {
       updateDateLabel(cz);
     };
+    sm.onDoubleTap = (x, y) => {
+      handleDoubleTap(x, y);
+    };
+  }
+
+  function handleDoubleTap(x: number, y: number): void {
+    if (!sceneManager || !timeIndex || currentBucketIdx < 0) return;
+    const sm = sceneManager;
+    const bucketZ = (idx: number) => idx * TIME_BUCKET_SPACING * CHUNK_SIZE + INITIAL_CAMERA_Z;
+
+    if (doubleTapPhase === 0) {
+      doubleTapReturnZ = sm.basePosZ;
+      doubleTapOriginIdx = currentBucketIdx;
+      const withinZ = Math.max(sm.minCameraZ, bucketZ(currentBucketIdx) + CHUNK_SIZE * 0.5);
+      sm.flyToXYZ(sm.basePosX, sm.basePosY, withinZ, 500);
+      doubleTapPhase = 1;
+      return;
+    }
+
+    const stepBack = doubleTapOriginIdx - doubleTapPhase;
+    if (stepBack < 0) {
+      sm.flyToXYZ(sm.basePosX, sm.basePosY, doubleTapReturnZ, 600);
+      doubleTapPhase = 0;
+      return;
+    }
+    sm.flyToXYZ(sm.basePosX, sm.basePosY, bucketZ(stepBack), 600);
+    doubleTapPhase++;
   }
 
   function updateDateLabel(camChunkZ: number): void {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) {
       currentBucketIdx = -1;
       dateLabel = null;
+      updatePinchBounds(-1);
       return;
     }
     const labels = timeIndex.indexToLabel;
-    // Time buckets are spaced TIME_BUCKET_SPACING chunks apart, so divide the
-    // camera chunk Z by the spacing to recover the dense bucket index.
     const bucketIdx = Math.round(camChunkZ / TIME_BUCKET_SPACING);
     if (bucketIdx < 0) {
       currentBucketIdx = 0;
       dateLabel = labels[0];
+      updatePinchBounds(0);
       return;
     }
     if (bucketIdx >= labels.length) {
       currentBucketIdx = labels.length - 1;
       dateLabel = labels[labels.length - 1];
+      updatePinchBounds(labels.length - 1);
       return;
     }
     currentBucketIdx = bucketIdx;
     dateLabel = labels[bucketIdx];
+    updatePinchBounds(bucketIdx);
+  }
+
+  function updatePinchBounds(bucketIdx: number): void {
+    if (!sceneManager || bucketIdx < 0) {
+      sceneManager?.setPinchZoomBounds(null, null);
+      return;
+    }
+    const bucketStartZ = bucketIdx * TIME_BUCKET_SPACING * CHUNK_SIZE + INITIAL_CAMERA_Z;
+    sceneManager.setPinchZoomBounds(
+      Math.max(sceneManager.minCameraZ, bucketStartZ + CHUNK_SIZE * 0.25),
+      bucketStartZ + TIME_BUCKET_SPACING * CHUNK_SIZE,
+    );
   }
 
   function flyToBucket(bucketIdx: number): void {
@@ -124,6 +171,7 @@
     const targetZ = bucketIdx * TIME_BUCKET_SPACING * CHUNK_SIZE + INITIAL_CAMERA_Z;
     sceneManager.flyTo(targetZ);
     timelineOpen = false;
+    doubleTapPhase = 0;
   }
 
   function toggleTimeline(): void {
@@ -269,6 +317,12 @@
     scheduleRebuild();
   });
 
+  // Push pinch sensitivity changes from configStore into the live SceneManager.
+  $effect(() => {
+    const s = configStore.pinchZoomSensitivity;
+    sceneManager?.setPinchSensitivity(s);
+  });
+
   // Separately track syncClient.conversations and re-merge conversation nodes
   // whenever the sync list changes (new conversation saved / existing one
   // deleted). `untrack` wraps the merge so the write to `graphStore.nodes`
@@ -408,7 +462,7 @@
   </div>
 {/if}
 
-{#if loaded && !isEmpty && !loadError}
+{#if loaded && !isEmpty && !loadError && !$isMobile}
   <div class="zoom-hint" data-od-id="zoom-hint">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
     <span>Scroll to zoom through time · Drag to pan</span>

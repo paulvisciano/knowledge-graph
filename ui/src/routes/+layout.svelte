@@ -81,7 +81,7 @@
     flex-direction: column;
     height: 100vh;
     height: 100dvh;
-    width: 100vw;
+    width: 100%;
     overflow: hidden;
     background: var(--color-cyber-bg, #0a0e17);
     color: var(--color-cyber-text, #c8d6e5);

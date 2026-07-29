@@ -55,6 +55,14 @@ export const ZOOM_FACTOR_DIVISOR = 50;
 /** Oposity below which a plane is considered invisible (mesh.visible = false). */
 export const INVIS_THRESHOLD = 0.01;
 
+/**
+ * Multiplier applied to `DRAG_PAN_SCALE` and `WHEEL_ZOOM_STEP` for touch
+ * pointers. Touchscreens report pixel deltas directly (no trackpad momentum),
+ * so the desktop-scale factors feel far too twitchy on a phone. 0.35 keeps
+ * the same gesture-to-world ratio at fingertip as on a trackpad.
+ */
+export const TOUCH_SENSITIVITY = 0.35;
+
 /** Per-frame camera translation when a movement key is held. */
 export const KEYBOARD_SPEED = 0.18;
 

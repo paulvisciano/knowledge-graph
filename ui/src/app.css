@@ -25,11 +25,16 @@
     color-scheme: dark;
   }
 
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   body {
     font-family: var(--font-sans);
     background-color: var(--color-cyber-bg);
     color: var(--color-cyber-text);
-    overflow: hidden;
   }
 
   ::-webkit-scrollbar {
@@ -186,7 +191,6 @@
   @media (max-width: 768px) {
     .hide-mobile { display: none !important; }
     .show-mobile { display: flex !important; }
-    body { overscroll-behavior: none; }
   }
 
   @media (min-width: 769px) {
