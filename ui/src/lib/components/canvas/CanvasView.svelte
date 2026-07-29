@@ -563,7 +563,7 @@
     align-items: stretch;
     gap: 0;
     padding: 0;
-    width: 120px;
+    width: 160px;
     background: oklch(12% 0.015 255 / 75%);
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
@@ -581,7 +581,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px;
+    padding: 14px 16px;
     cursor: pointer;
     border-bottom: 1px solid var(--canvas-hairline);
     flex-shrink: 0;
@@ -594,7 +594,7 @@
 
   .timeline-header-label {
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
+    font-size: 14px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--canvas-accent);
@@ -609,7 +609,7 @@
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .timeline-header-chevron svg { width: 16px; height: 16px; }
-  .timeline-bar.collapsed .timeline-header-chevron { transform: rotate(180deg); }
+  .timeline-bar:not(.collapsed) .timeline-header-chevron { transform: rotate(180deg); }
 
   .timeline-track {
     display: flex;
@@ -634,8 +634,8 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
-    padding: 7px 14px;
+    gap: 12px;
+    padding: 11px 16px;
     border: none;
     background: transparent;
     border-radius: 0;
@@ -644,6 +644,7 @@
     position: relative;
     flex-shrink: 0;
     text-align: left;
+    min-height: 44px;
   }
   .timeline-tick:focus-visible {
     outline: 2px solid var(--canvas-accent);
@@ -652,8 +653,8 @@
   }
 
   .timeline-tick-dot {
-    width: 7px;
-    height: 7px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     background: oklch(50% 0.03 255 / 30%);
     transition: all 0.25s;
@@ -662,7 +663,7 @@
 
   .timeline-tick-label {
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 11px;
+    font-size: 13px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--canvas-faint);
@@ -681,8 +682,8 @@
   .timeline-tick.active .timeline-tick-dot {
     background: var(--canvas-accent);
     box-shadow: 0 0 8px oklch(82% 0.14 210 / 50%);
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   .timeline-tick.active .timeline-tick-label {
     color: var(--canvas-accent);
@@ -703,11 +704,11 @@
 
   .timeline-year-label {
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--canvas-accent);
-    padding: 8px 14px 6px;
+    padding: 10px 16px 8px;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
