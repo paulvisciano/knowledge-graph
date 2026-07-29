@@ -108,6 +108,7 @@
   let chatInput = $state('');
   let panelChatInput = $state('');
   let chatExpanded = $state(false);
+  let suppressCloseChat = false;
   let availableModels = $state<string[]>([]);
   let selectedModel = $state('');
   let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -1596,6 +1597,7 @@
   }
 
   function handleSelectConversation(id: string) {
+    suppressCloseChat = true;
     switchConversation(id);
   }
 
@@ -1769,6 +1771,10 @@
   onpointerdown={(e) => { pointerDownXY = { x: e.clientX, y: e.clientY }; }}
   onclick={(e) => {
     if (!chatExpanded) return;
+    if (suppressCloseChat) {
+      suppressCloseChat = false;
+      return;
+    }
     if (pointerDownXY) {
       const dx = e.clientX - pointerDownXY.x;
       const dy = e.clientY - pointerDownXY.y;
@@ -1815,8 +1821,7 @@
         onchange={(e) => handleAttachFiles((e.target as HTMLInputElement).files)}
       />
 
-      <!-- Recent messages (faded top/bottom, no header) -->
-      {#if chatExpanded && activeConversationId && messages.length > 0}
+      {#if chatExpanded && activeConversationId}
         <div class="chat-inline-header" data-testid="chat-inline-header">
           <span class="chat-inline-header-title">Conversation</span>
           <button
@@ -1834,6 +1839,15 @@
           class="chat-inline-messages"
           data-testid="messages-container"
         >
+          {#if messages.length === 0}
+            <div class="chat-empty-state" data-testid="chat-empty-state">
+              <div class="chat-empty-state-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div class="chat-empty-state-title">New conversation</div>
+              <div class="chat-empty-state-hint">Type a message below to begin.</div>
+            </div>
+          {/if}
           {#snippet messageRow(msg: ChatMessage)}
             <div class="group mb-4" data-testid="message" data-message-id={msg.id} data-message-role={msg.role}>
               {#if msg.role === 'user'}
@@ -2361,8 +2375,8 @@
             tabindex="0"
             aria-label="Type a message"
             data-od-id="chat-orb-expand"
-            onclick={() => { chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); }}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chatExpanded = true; tick().then(() => panelTextareaEl?.focus()); } }}
+            onclick={(e) => { e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); }}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); } }}
           >
             <div class="coe-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -2772,6 +2786,40 @@
   .chat-inline-input-row {
     width: 36rem;
     max-width: 100%;
+  }
+
+  .chat-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 2rem 1rem;
+    text-align: center;
+  }
+
+  .chat-empty-state-icon {
+    color: rgba(0, 212, 255, 0.35);
+    margin-bottom: 4px;
+  }
+
+  .chat-empty-state-icon svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .chat-empty-state-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-cyber-text-dim);
+  }
+
+  .chat-empty-state-hint {
+    font-size: 12px;
+    color: rgba(145, 163, 184, 0.55);
   }
 
   .chat-conversation-divider {
