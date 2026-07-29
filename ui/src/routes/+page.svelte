@@ -2385,6 +2385,11 @@
     </div>
 
     {#if !chatExpanded}
+      {#if orbOptionsOpen}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="orb-options-backdrop" onclick={() => { orbOptionsOpen = false; }} role="presentation"></div>
+      {/if}
       <div class="chat-collapsed-orb-host" data-testid="chat-collapsed-orb">
         <div class="chat-collapsed-orb">
           <div
@@ -2521,6 +2526,21 @@
 
   .chat-inline-overlay > * {
     pointer-events: auto;
+  }
+
+  .orb-options-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: orb-backdrop-in 200ms ease-out;
+  }
+
+  @keyframes orb-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   /* ── Collapsed chat orb ── */
