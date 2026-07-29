@@ -124,7 +124,7 @@
     conversations.find((c) => c.id === activeConversationId) ?? null
   );
   let showActiveDivider = $derived(
-    !!activeConvForDivider && messages.length > 0
+    !!activeConvForDivider
   );
 
   let thinkingContent = $state('');
