@@ -617,7 +617,7 @@
     align-items: stretch;
     gap: 0;
     padding: 0;
-    width: 160px;
+    width: 140px;
     background: oklch(12% 0.015 255 / 75%);
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);

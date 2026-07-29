@@ -1337,7 +1337,7 @@
 
   .image-frame {
     position: relative;
-    max-width: 720px;
+    max-width: 840px;
     width: 100%;
     margin: 0 auto;
     border-radius: 16px;
@@ -1360,7 +1360,7 @@
     display: block;
     width: 100%;
     height: auto;
-    max-height: 55vh;
+    max-height: 65vh;
     object-fit: cover;
     cursor: zoom-in;
   }
