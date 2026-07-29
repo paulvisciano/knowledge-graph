@@ -131,6 +131,31 @@ class SyncClient {
           conv.title = 'Voice memo';
         }
       }
+
+      // Optimistic local upsert — apply BEFORE the network request so
+      // graphStore.loadConversations() (driven by a $effect watching
+      // this.conversations) picks up the new/updated node immediately and
+      // the canvas renders it without waiting for the server round-trip.
+      const idx = this.conversations.findIndex((c) => c.id === conv.id);
+      const summary: Conversation = {
+        id: conv.id,
+        title: conv.title,
+        messages: [],
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+      };
+      if (idx >= 0) {
+        summary.messages = this.conversations[idx].messages;
+        this.conversations[idx] = summary;
+      } else {
+        this.conversations.unshift(summary);
+        this.conversations.sort((a, b) => b.createdAt - a.createdAt);
+      }
+      this.loadedConversations.set(
+        conv.id,
+        conv.messages.filter((m) => !m.isStreaming),
+      );
+
       const dbConv = this.toSyncConv(conv);
       const dbMessages = conv.messages
         .filter((m) => !m.isStreaming)
@@ -152,32 +177,6 @@ class SyncClient {
         const body = await res.text().catch(() => '');
         throw new Error(`Save failed: ${res.status} ${body}`);
       }
-
-      // Optimistic local upsert — graphStore.loadConversations() reacts to
-      // this.conversations, so the node appears on the canvas immediately
-      // instead of waiting for the next 30s periodic sync. Seed
-      // loadedConversations too so a subsequent loadConversation(id) returns
-      // the current messages from cache instead of fetching an empty (or
-      // not-yet-written) row from the backend.
-      const idx = this.conversations.findIndex((c) => c.id === conv.id);
-      const summary: Conversation = {
-        id: conv.id,
-        title: conv.title,
-        messages: [],
-        createdAt: conv.createdAt,
-        updatedAt: conv.updatedAt,
-      };
-      if (idx >= 0) {
-        summary.messages = this.conversations[idx].messages;
-        this.conversations[idx] = summary;
-      } else {
-        this.conversations.unshift(summary);
-        this.conversations.sort((a, b) => b.createdAt - a.createdAt);
-      }
-      this.loadedConversations.set(
-        conv.id,
-        conv.messages.filter((m) => !m.isStreaming),
-      );
     } catch (e: any) {
       this.error = e.message ?? 'Failed to save conversation';
     }
