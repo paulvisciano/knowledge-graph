@@ -286,6 +286,7 @@
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
     if (holdStartedByTouch) return;
+    if (holdStartDelay || holdActive) return;
     startHoldTimer();
   }
 
@@ -293,6 +294,7 @@
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
     holdStartedByTouch = true;
+    if (holdStartDelay || holdActive) return;
     startHoldTimer();
   }
 
@@ -309,6 +311,8 @@
   }
 
   function startHoldTimer() {
+    if (holdStartDelay) { clearTimeout(holdStartDelay); holdStartDelay = null; }
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
     holdElapsed = 0;
     orbOptionsOpen = false;
     holdStartDelay = setTimeout(() => {
