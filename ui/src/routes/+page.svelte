@@ -2370,7 +2370,7 @@
                 {:else}
                   <Icon name="mic" size={22} />
                 {/if}
-                {#if micTooltipVisible && !holdActive && !isRecording}
+                {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile}
                   <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
                 {/if}
               </button>
@@ -2425,7 +2425,7 @@
             {#if holdActive && !isRecording}
               <span class="hold-progress" style="inset: {((holdElapsed / HOLD_TO_RECORD_MS) * 100).toFixed(1)}%;" aria-hidden="true"></span>
             {/if}
-            {#if micTooltipVisible && !holdActive && !isRecording}
+            {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile}
               <span class="mic-tooltip" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
             {/if}
           </div>
