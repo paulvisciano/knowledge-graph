@@ -56,8 +56,9 @@
 
   let timelineEntries = $derived.by(() => {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return [];
+    // timeIndex is oldest→newest; reverse so newest appears first in the dropdown.
     const labels = timeIndex.indexToLabel;
-    return labels.map((label, idx) => ({ idx, label }));
+    return labels.map((label, idx) => ({ idx, label })).reverse();
   });
 
   function clearSelection(): void {
@@ -435,17 +436,8 @@
       </span>
     </div>
 
-    <div class="timeline-track" role="listbox" aria-label="Photo timeline months" data-od-id="timeline-track" data-testid="timeline-dropdown">
+    <div class="timeline-track" role="listbox" aria-label="Photo timeline" data-od-id="timeline-track" data-testid="timeline-dropdown">
       {#each timelineEntries as entry, i (entry.idx)}
-        {#if i === 0 || entry.label.split(' ')[1] !== timelineEntries[i - 1].label.split(' ')[1]}
-          {#if i !== 0}
-            <div class="timeline-divider" aria-hidden="true" data-od-id="timeline-divider"></div>
-          {/if}
-          <div class="timeline-year-label" data-od-id="timeline-year-label">{entry.label.split(' ')[1]}</div>
-          {#if i !== 0}
-            <div class="timeline-divider" aria-hidden="true" data-od-id="timeline-divider"></div>
-          {/if}
-        {/if}
         <button
           type="button"
           class="timeline-tick has-content"
@@ -455,7 +447,7 @@
           data-od-id="timeline-tick"
         >
           <span class="timeline-tick-dot" aria-hidden="true"></span>
-          <span class="timeline-tick-label">{entry.label.split(' ')[0]}</span>
+          <span class="timeline-tick-label">{entry.label}</span>
         </button>
       {/each}
     </div>
@@ -762,18 +754,6 @@
     background: oklch(50% 0.03 255 / 12%);
     flex-shrink: 0;
     margin: 2px 0;
-  }
-
-  .timeline-year-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--canvas-accent);
-    padding: 10px 16px 8px;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-    font-weight: 600;
   }
 
   /* ── Zoom hint — glass pill (bottom-left) ── */
