@@ -286,9 +286,14 @@
   // in the chunk manager on the first frame — retry on the next frame until
   // the plane is found or a short timeout elapses.
   let activeFlyTimer: ReturnType<typeof setTimeout> | null = null;
+  let firstActiveSeen = false;
   $effect(() => {
     const activeId = graphStore.activeConversationId;
     if (!mounted || !sceneManager || !activeId) return;
+    if (!firstActiveSeen) {
+      firstActiveSeen = true;
+      return;
+    }
     if (activeFlyTimer) {
       clearTimeout(activeFlyTimer);
       activeFlyTimer = null;

@@ -657,7 +657,14 @@
         }
       } else {
         messages = [...conv.messages];
+        if (!syncClient.getCachedMessages(id)) {
+          await syncClient.loadConversation(id);
+        }
       }
+      if (!syncClient.getCachedMessages(id) && conv.messages.length > 0) {
+        syncClient.seedCachedMessages(id, conv.messages);
+      }
+      graphStore.loadConversations();
     } else {
       messages = [];
     }
@@ -1708,8 +1715,7 @@
     fetchModels();
     syncClient.init().then(() => {
       conversations = [...syncClient.conversations];
-      if (conversations.length > 0 && !activeConversationId) {
-        activeConversationId = conversations[0].id;
+      if (conversations.length > 0) {
         const conv = conversations[0];
         if (conv.messages.length === 0) {
           syncClient.loadConversation(conv.id).then((loaded) => {

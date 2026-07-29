@@ -67,6 +67,18 @@ class SyncClient {
   private periodicTimer: ReturnType<typeof setInterval> | null = null;
   private loadedConversations = new Map<string, ChatMessage[]>();
 
+  /** Returns cached messages for a conversation, or undefined if not loaded. */
+  getCachedMessages(id: string): ChatMessage[] | undefined {
+    return this.loadedConversations.get(id);
+  }
+
+  /** Seed the message cache for a conversation without a network fetch. */
+  seedCachedMessages(id: string, messages: ChatMessage[]): void {
+    if (!this.loadedConversations.has(id)) {
+      this.loadedConversations.set(id, messages);
+    }
+  }
+
   async init(): Promise<void> {
     this.isSyncing = true;
     this.error = null;

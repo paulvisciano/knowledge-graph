@@ -375,16 +375,25 @@ export class NodePlane {
     this._setLetterSpacing(ctx, '0px');
 
     const titleBottomY = titleY + titleLineH * Math.min(3, Math.ceil(title.length / 28)) + Math.round(6 * scale);
-    ctx.strokeStyle = isActive ? 'rgba(19,220,246,0.35)' : 'rgba(106,114,125,0.18)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padX, titleBottomY);
-    ctx.lineTo(canvasW - padX, titleBottomY);
-    ctx.stroke();
 
+    const preview = (p.preview as string) ?? '';
+    const bodyFont = Math.max(15, Math.round(15 * scale));
+    const bodyLineH = Math.round(bodyFont * 1.4);
+    const bodyY = titleBottomY + Math.round(12 * scale);
     const footFont = Math.max(13, Math.round(13 * scale));
     const footH = Math.round((10 + 13 + 16) * scale);
     const footY = canvasH - footH;
+    const bodyMaxY = footY - Math.round(10 * scale);
+    const maxBodyLines = Math.max(0, Math.floor((bodyMaxY - bodyY) / bodyLineH));
+    if (isActive && preview && maxBodyLines > 0) {
+      ctx.font = `400 ${bodyFont}px ${sansFamily}`;
+      ctx.fillStyle = muted;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      this._setLetterSpacing(ctx, '0px');
+      this._drawWrapped(ctx, preview, padX, bodyY, maxTextWidth, bodyLineH, maxBodyLines);
+    }
+
     ctx.strokeStyle = 'rgba(106,114,125,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();

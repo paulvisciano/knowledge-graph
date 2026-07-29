@@ -76,17 +76,26 @@ class GraphStore {
    *  repeatedly; driven by a `$effect` in CanvasView so the canvas updates
    *  whenever a conversation is saved/deleted. */
   loadConversations(): void {
-    const convNodes: KGNode[] = syncClient.conversations.map((c) => ({
-      id: c.id,
-      labels: ['Conversation'],
-      properties: {
-        entity_type: 'Conversation',
-        name: c.title,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-        isActive: c.id === this.activeConversationId,
-      },
-    }));
+    const convNodes: KGNode[] = syncClient.conversations.map((c) => {
+      const msgs = syncClient.getCachedMessages(c.id) ?? c.messages;
+      const preview = msgs
+        .filter((m) => m.role !== 'system' && !m.isStreaming && m.content)
+        .slice(0, 4)
+        .map((m) => `${m.role === 'user' ? 'You' : 'AI'}: ${m.content}`)
+        .join('\n');
+      return {
+        id: c.id,
+        labels: ['Conversation'],
+        properties: {
+          entity_type: 'Conversation',
+          name: c.title,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          isActive: c.id === this.activeConversationId,
+          preview,
+        },
+      };
+    });
     // Drop ALL existing conversation nodes (including ones no longer in the
     // sync list — i.e. deleted), then add the fresh set from syncClient.
     const kept = this.nodes.filter((n) => n.properties?.entity_type !== 'Conversation');
