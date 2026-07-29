@@ -61,13 +61,19 @@ export class AudioRecorder {
   private async init(): Promise<void> {
     if (this.initialized) return;
 
-    // Construct the AudioContext BEFORE awaiting getUserMedia. The space-bar
-    // press is the user gesture that authorizes audio playback/recording; once
-    // we await getUserMedia, Chrome considers the gesture consumed and a
-    // context constructed after the await can be created in "suspended" or
-    // even error out ("AudioContext encountered an error from the audio device
-    // or the WebAudio renderer"). Building it here keeps it inside the gesture.
-    //
+    // On iOS Safari, getUserMedia must be the first async call in the user
+    // gesture chain. Any await before it (e.g. ctx.resume()) causes Safari to
+    // drop the gesture context and the permission prompt never appears.
+    // So we call getUserMedia FIRST, then set up the AudioContext after.
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    this.stream = stream;
+
     // Pin sampleRate to 48000: macOS CoreAudio's default and the typical mic
     // hardware rate. Without this, Chrome picks the output device's rate which
     // can mismatch the input device and push the renderer into the errored
@@ -78,15 +84,6 @@ export class AudioRecorder {
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
-    this.stream = stream;
 
     if (ctx.state !== 'running') {
       throw new Error(`AudioContext not running (state: ${ctx.state}). Microphone may be unavailable.`);
@@ -107,8 +104,6 @@ export class AudioRecorder {
     };
 
     this.sourceNode.connect(workletNode);
-    // Do NOT connect workletNode to ctx.destination: that would route the
-    // microphone back to the speakers (echo/feedback) and is unnecessary for capture.
 
     this.initialized = true;
   }

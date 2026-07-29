@@ -284,6 +284,7 @@
   // holdStartedByTouch guard to prevent the pointer layer from
   // clobbering touch state.
   let holdStartedByTouch = false;
+  let suppressPointerTap = false;
   let lastTapTime = 0;
   const DOUBLE_TAP_MS = 300;
 
@@ -306,7 +307,9 @@
   function handleMicTouchEnd(e: TouchEvent) {
     if (!holdStartedByTouch) return;
     holdStartedByTouch = false;
+    suppressPointerTap = true;
     handleMicTap();
+    setTimeout(() => { suppressPointerTap = false; }, 400);
   }
 
   function handleMicTap() {
@@ -331,7 +334,7 @@
   }
 
   async function handleMicPointerUp() {
-    if (holdStartedByTouch) return;
+    if (holdStartedByTouch || suppressPointerTap) return;
     handleMicTap();
   }
 
