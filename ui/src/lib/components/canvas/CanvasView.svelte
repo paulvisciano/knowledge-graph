@@ -684,6 +684,14 @@
   }
   .timeline-bar:not(.collapsed) .timeline-track { max-height: 520px; }
 
+  /* On mobile, line up with the fixed menu trigger (top: 12px) on the right edge */
+  @media (max-width: 768px) {
+    .timeline-bar {
+      right: 12px;
+      top: 12px;
+    }
+  }
+
   .timeline-tick {
     display: flex;
     flex-direction: row;

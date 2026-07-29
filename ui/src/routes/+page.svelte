@@ -352,7 +352,6 @@
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
     if (holdStartedByTouch) return;
-    e.preventDefault();
     startHoldTimer();
   }
 
@@ -382,8 +381,42 @@
 
   function handleMicTouchEnd(e: TouchEvent) {
     if (!holdActive) return;
+    finishHold();
+  }
+
+  function finishHold() {
     holdStartedByTouch = false;
-    handleMicPointerUp();
+    const wasHolding = holdActive;
+    const elapsed = holdElapsed;
+    holdActive = false;
+    holdElapsed = 0;
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+
+    if (!wasHolding) return;
+    if (isRecording) {
+      isRecording = false;
+      micBusy = true;
+      isTranscribing = true;
+      audioRecorder!.stopRecording()
+        .then(async (wavBlob) => {
+          const audioUrl = URL.createObjectURL(wavBlob);
+          const audioData = await blobToBase64(wavBlob);
+          const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+          const text = transcript.trim();
+          if (text) await handleSend(audioUrl, audioData, 'wav', false, text);
+        })
+        .catch((err) => console.error('Push-to-talk send failed:', err))
+        .finally(() => {
+          isTranscribing = false;
+          micBusy = false;
+        });
+    } else if (elapsed < TAP_THRESHOLD_MS) {
+      if (isStreamActive) {
+        openStreamingConversation();
+      } else {
+        orbOptionsOpen = !orbOptionsOpen;
+      }
+    }
   }
 
   async function startPushToTalk() {
@@ -399,48 +432,12 @@
   }
 
   async function handleMicPointerUp() {
-    const wasHolding = holdActive;
-    const elapsed = holdElapsed;
-    holdActive = false;
-    holdElapsed = 0;
-    holdStartedByTouch = false;
-    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-
-    if (!wasHolding) return;
-    if (isRecording) {
-      // Held past the countdown → release sends the recording.
-      isRecording = false;
-      micBusy = true;
-      isTranscribing = true;
-      try {
-        const wavBlob = await audioRecorder!.stopRecording();
-        const audioUrl = URL.createObjectURL(wavBlob);
-        const audioData = await blobToBase64(wavBlob);
-        const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
-        const text = transcript.trim();
-        if (text) await handleSend(audioUrl, audioData, 'wav', false, text);
-      } catch (err) {
-        console.error('Push-to-talk send failed:', err);
-      } finally {
-        isTranscribing = false;
-        micBusy = false;
-      }
-    } else if (elapsed < TAP_THRESHOLD_MS) {
-      // Tap → if a conversation is streaming, jump to it (loading indicator
-      // on the mic signals this); otherwise toggle the orb's sibling
-      // options (Type / Add images).
-      if (isStreamActive) {
-        openStreamingConversation();
-      } else {
-        orbOptionsOpen = !orbOptionsOpen;
-      }
-    }
-    // Released mid-countdown (> TAP_THRESHOLD_MS but < HOLD_TO_RECORD_MS):
-    // cancel silently.
+    if (holdStartedByTouch) return;
+    finishHold();
   }
 
   function handleMicPointerLeave() {
-    if (!holdActive) return;
+    if (!holdActive || holdStartedByTouch) return;
     if (isRecording) {
       handleMicPointerUp();
     } else {
@@ -452,6 +449,7 @@
   }
 
   function handleMicPointerCancel() {
+    if (holdStartedByTouch) return;
     holdActive = false;
     holdElapsed = 0;
     holdStartedByTouch = false;
