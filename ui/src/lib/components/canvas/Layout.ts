@@ -749,7 +749,10 @@ export function buildCanvasLayout(
       const aspect = pw / ph;
       height = base;
       width = Math.round(base * aspect);
-    } else if (kind === 'note' || kind === 'conversation') {
+    } else if (kind === 'conversation') {
+      height = 180;
+      width = 130;
+    } else if (kind === 'note') {
       height = base;
       width = Math.round(base / 1.4);
     } else {

@@ -83,8 +83,9 @@ export class NodePlane {
       }
     } else if (textureSource === 'text' && node.textContent) {
       const isConv = this._node.kind === 'conversation';
+      const isActive = isConv && this._node.properties?.isActive === true;
       const tex = isConv
-        ? this._createConversationTexture(false)
+        ? this._createConversationTexture(false, isActive)
         : this._createTextTexture(node.textContent);
       this._noteTexture = tex;
       this._material.map = tex;
@@ -93,7 +94,7 @@ export class NodePlane {
       this._material.color.set(0xffffff);
       this._material.needsUpdate = true;
       if (isConv) {
-        this._hoverTexture = this._createConversationTexture(true);
+        this._hoverTexture = this._createConversationTexture(true, isActive);
       }
     }
   }
@@ -270,12 +271,12 @@ export class NodePlane {
     }
   }
 
-  private _createConversationTexture(hovered: boolean): THREE.CanvasTexture {
+  private _createConversationTexture(hovered: boolean, isActive = false): THREE.CanvasTexture {
     const aspect = this._node.width > 0 && this._node.height > 0
       ? this._node.width / this._node.height
       : 1 / 1.4;
-    const canvasH = 512;
-    const canvasW = Math.max(128, Math.round(canvasH * aspect));
+    const canvasH = 768;
+    const canvasW = Math.max(192, Math.round(canvasH * aspect));
     const canvas = document.createElement('canvas');
     canvas.width = canvasW;
     canvas.height = canvasH;
@@ -305,9 +306,9 @@ export class NodePlane {
     // Outer 1px ring: oklch(82% 0.14 210 / 8%) — accent at 8%
     const ringNormal = 'rgba(19,220,246,0.08)';
 
-    const padX = 16;
+    const padX = 22;
     const maxTextWidth = canvasW - padX * 2;
-    const radius = 14;
+    const radius = 18;
     const scale = canvasH / 420;
 
     ctx.fillStyle = cardBg;
@@ -324,7 +325,20 @@ export class NodePlane {
     this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
     ctx.stroke();
 
-    if (hovered) {
+    if (isActive) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(19,220,246,0.55)';
+      ctx.shadowBlur = Math.round(48 * scale);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3;
+      this._roundRect(ctx, 1.5, 1.5, canvasW - 3, canvasH - 3, radius - 1);
+      ctx.stroke();
+      ctx.shadowBlur = Math.round(110 * scale);
+      ctx.shadowColor = 'rgba(19,220,246,0.22)';
+      this._roundRect(ctx, 1.5, 1.5, canvasW - 3, canvasH - 3, radius - 1);
+      ctx.stroke();
+      ctx.restore();
+    } else if (hovered) {
       ctx.save();
       ctx.shadowColor = 'rgba(19,220,246,0.32)';
       ctx.shadowBlur = Math.round(32 * scale);
@@ -344,45 +358,33 @@ export class NodePlane {
     topGrad.addColorStop(0.5, accent);
     topGrad.addColorStop(1, 'rgba(19,220,246,0)');
     ctx.fillStyle = topGrad;
-    ctx.globalAlpha = 0.7;
-    ctx.fillRect(0, 0, canvasW, 3);
+    ctx.globalAlpha = isActive ? 1 : 0.7;
+    ctx.fillRect(0, 0, canvasW, isActive ? 5 : 3);
     ctx.globalAlpha = 1;
 
-    const kickerFont = Math.max(11, Math.round(11 * scale));
-    const kickerY = Math.round(14 * scale);
-    const dotR = 3;
-    // Glow dot
-    ctx.fillStyle = accent;
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(padX + dotR, kickerY + kickerFont * 0.5, dotR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    // Kicker text
-    const monoFamily = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace';
-    ctx.font = `600 ${kickerFont}px ${monoFamily}`;
-    ctx.fillStyle = accent;
+    const titleFont = Math.max(30, Math.round(30 * scale));
+    const titleY = Math.round(24 * scale);
+    const sansFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    ctx.font = `800 ${titleFont}px ${sansFamily}`;
+    ctx.fillStyle = fg;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
-    this._setLetterSpacing(ctx, `${Math.round(0.24 * kickerFont)}px`);
-    ctx.fillText('CONVERSATION', padX + dotR * 2 + 6, kickerY);
+    this._setLetterSpacing(ctx, `${Math.round(-0.012 * titleFont)}px`);
+    const titleLineH = Math.round(titleFont * 1.22);
+    this._drawWrapped(ctx, title, padX, titleY, maxTextWidth, titleLineH, 3);
     this._setLetterSpacing(ctx, '0px');
 
-    const queryFont = Math.max(14, Math.round(14 * scale));
-    const sansFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-    ctx.font = `700 ${queryFont}px ${sansFamily}`;
-    ctx.fillStyle = fg;
-    const queryY = kickerY + kickerFont + Math.round(6 * scale);
-    const queryLineHeight = Math.round(queryFont * 1.28);
-    this._setLetterSpacing(ctx, `${Math.round(-0.005 * queryFont)}px`);
-    this._drawWrapped(ctx, title, padX, queryY, maxTextWidth, queryLineHeight, 2);
-    this._setLetterSpacing(ctx, '0px');
+    const titleBottomY = titleY + titleLineH * Math.min(3, Math.ceil(title.length / 28)) + Math.round(6 * scale);
+    ctx.strokeStyle = isActive ? 'rgba(19,220,246,0.35)' : 'rgba(106,114,125,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padX, titleBottomY);
+    ctx.lineTo(canvasW - padX, titleBottomY);
+    ctx.stroke();
 
-    const footFont = Math.max(9, Math.round(9 * scale));
-    const footH = Math.round((8 + 9 + 12) * scale); // padding-top + font + padding-bottom
+    const footFont = Math.max(13, Math.round(13 * scale));
+    const footH = Math.round((10 + 13 + 16) * scale);
     const footY = canvasH - footH;
-    // Hairline: oklch(50% 0.03 255 / 8%) ≈ rgba(106,114,125,0.08)
     ctx.strokeStyle = 'rgba(106,114,125,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -390,12 +392,12 @@ export class NodePlane {
     ctx.lineTo(canvasW - padX, footY);
     ctx.stroke();
 
+    const monoFamily = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace';
     const footTextY = footY + Math.round(8 * scale);
-    // "Chat" — left, accent, 700
     ctx.font = `700 ${footFont}px ${monoFamily}`;
     ctx.fillStyle = accent;
     this._setLetterSpacing(ctx, `${Math.round(0.16 * footFont)}px`);
-    ctx.fillText('CHAT', padX, footTextY);
+    ctx.fillText(isActive ? 'ACTIVE CHAT' : 'CHAT', padX, footTextY);
     // Date — right, faint, regular
     if (dateLabel) {
       ctx.font = `${footFont}px ${monoFamily}`;
