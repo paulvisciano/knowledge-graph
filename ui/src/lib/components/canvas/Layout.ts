@@ -222,7 +222,7 @@ function seededRandom(seed: number): number {
  * Parse a date from any of the known photo-timestamp properties.
  * Returns `null` when no usable timestamp is present.
  */
-function parseNodeDate(node: KGNode): Date | null {
+export function parseNodeDate(node: KGNode): Date | null {
   const p = node.properties ?? {};
   const raw =
     p.date_taken_friendly ??
@@ -378,6 +378,14 @@ interface TimePlan {
   bucketLabel: Map<string, string>;
   /** Dense bucket index → bucket key (for date-indicator lookups). */
   indexToBucket: string[];
+  /** Bucket key → bucket index (reverse of indexToBucket). */
+  bucketIndex: Map<string, number>;
+  /** Special day-level bucket keys for today/yesterday, or null if not present. */
+  todayKey: string | null;
+  yesterdayKey: string | null;
+  /** Month key for today's month (YYYY-MM), used for duplicating nodes into parent bucket. */
+  todayMonthKey: string;
+  yesterdayMonthKey: string;
 }
 
 /**
@@ -406,43 +414,54 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     if (d) renderableDate.set(n.id, d);
   }
 
-  // Decide granularity for the depth (time) axis. The goal is a moderate
-  // number of depth layers (~4-16) with multiple renderable nodes per layer
-  // so the 2D within-bucket grid fills the viewport. Per-node granularity
-  // (one layer per node) would stack nodes in a narrow single-file line
-  // along Z, defeating the width spread. Prefer the FINEST granularity that
-  // keeps at least ~3 renderable nodes per layer (more layers = more zoom
-  // travel).
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const todayKey = 'today';
+  const yesterdayKey = 'yesterday';
+  const todayMonthKey = monthKey(today);
+  const yesterdayMonthKey = monthKey(yesterday);
+
   const granularity: 'month' | 'day' | 'photo' = 'month';
 
   const bucketKeyOf = (d: Date): string => {
+    if (d.getFullYear() === today.getFullYear()
+      && d.getMonth() === today.getMonth()
+      && d.getDate() === today.getDate()) return todayKey;
+    if (d.getFullYear() === yesterday.getFullYear()
+      && d.getMonth() === yesterday.getMonth()
+      && d.getDate() === yesterday.getDate()) return yesterdayKey;
     if (granularity === 'month') return monthKey(d);
     if (granularity === 'day') return dayKey(d);
     return d.getTime().toString();
   };
 
-  // Collect & sort unique bucket keys ascending (oldest→newest). Oldest gets
-  // cellZ=0 (furthest from camera); newest gets the highest cellZ (closest to
-  // camera). Zooming in (camera z decreasing) travels back in time.
   const bucketKeys = new Set<string>();
   for (const d of renderableDate.values()) {
     bucketKeys.add(bucketKeyOf(d));
   }
-  const sortedBuckets = Array.from(bucketKeys).sort();
+  const sortedBuckets = Array.from(bucketKeys).sort((a, b) => {
+    const sa = a === todayKey ? todayMonthKey + '~1' : a === yesterdayKey ? yesterdayMonthKey + '~0' : a;
+    const sb = b === todayKey ? todayMonthKey + '~1' : b === yesterdayKey ? yesterdayMonthKey + '~0' : b;
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+  });
   const bucketIndex = new Map<string, number>();
   const indexToBucket: string[] = [];
   const bucketLabel = new Map<string, string>();
   for (let i = 0; i < sortedBuckets.length; i++) {
     bucketIndex.set(sortedBuckets[i], i);
     indexToBucket.push(sortedBuckets[i]);
-    bucketLabel.set(
-      sortedBuckets[i],
-      sortedBuckets[i].length === 7
-        ? sortedBuckets[i] // month key YYYY-MM
-        : sortedBuckets[i].length === 10
-          ? sortedBuckets[i] // day key YYYY-MM-DD
-          : new Date(Number(sortedBuckets[i])).toISOString().slice(0, 10),
-    );
+    if (sortedBuckets[i] === todayKey) {
+      bucketLabel.set(sortedBuckets[i], 'Today');
+    } else if (sortedBuckets[i] === yesterdayKey) {
+      bucketLabel.set(sortedBuckets[i], 'Yesterday');
+    } else if (sortedBuckets[i] === todayMonthKey) {
+      bucketLabel.set(sortedBuckets[i], 'This Month');
+    } else if (sortedBuckets[i] === yesterdayMonthKey) {
+      bucketLabel.set(sortedBuckets[i], 'Last Month');
+    } else {
+      bucketLabel.set(sortedBuckets[i], sortedBuckets[i]);
+    }
   }
 
   // Build adjacency (nodeId → neighbor nodeIds) for photo-inheritance.
@@ -503,7 +522,16 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
     fallbackIdx++;
   }
 
-  return { cellZOf, bucketLabel, indexToBucket };
+  return {
+    cellZOf,
+    bucketLabel,
+    indexToBucket,
+    bucketIndex,
+    todayKey: bucketKeys.has(todayKey) ? todayKey : null,
+    yesterdayKey: bucketKeys.has(yesterdayKey) ? yesterdayKey : null,
+    todayMonthKey,
+    yesterdayMonthKey,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -670,12 +698,27 @@ export function buildCanvasLayout(
     if (arr) arr.push(node);
     else photosByBucket.set(z, [node]);
   }
+  // Also add today/yesterday nodes to their parent month bucket so "This Month"
+  // includes all month content.
+  for (const [key, bucketIdx] of timePlan.bucketIndex) {
+    if (key !== 'today' && key !== 'yesterday') continue;
+    const dayNodes = photosByBucket.get(bucketIdx * TIME_BUCKET_SPACING);
+    if (!dayNodes) continue;
+    const mk = key === 'today' ? timePlan.todayMonthKey : timePlan.yesterdayMonthKey;
+    const monthBucketIdx = timePlan.bucketIndex.get(mk);
+    if (monthBucketIdx === undefined) continue;
+    const monthZ = monthBucketIdx * TIME_BUCKET_SPACING;
+    const monthArr = photosByBucket.get(monthZ);
+    if (monthArr) monthArr.push(...dayNodes);
+    else photosByBucket.set(monthZ, [...dayNodes]);
+  }
   // Assign each node a 2D grid cell (gridX, gridY) within its time bucket,
   // centered on (0, 0) so each layer fills the viewport width AND height
   // without exceeding RENDER_DISTANCE. A 1D line would push most nodes
-  // thousands of chunks outside the visible window.
+  // thousands of chunks outside the visible window. Nodes can appear in
+  // multiple buckets (e.g. today + this month), so the key includes cellZ.
   const gridPosOf = new Map<string, { x: number; y: number }>();
-  for (const [, bucketNodes] of photosByBucket) {
+  for (const [cellZ, bucketNodes] of photosByBucket) {
     bucketNodes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const count = bucketNodes.length;
     const side = Math.max(1, Math.ceil(Math.sqrt(count)));
@@ -683,7 +726,7 @@ export function buildCanvasLayout(
     for (let i = 0; i < count; i++) {
       const gx = i % side;
       const gy = Math.floor(i / side);
-      gridPosOf.set(bucketNodes[i].id, {
+      gridPosOf.set(`${bucketNodes[i].id}@${cellZ}`, {
         x: Math.round(gx - half),
         y: Math.round(gy - half),
       });
@@ -705,16 +748,36 @@ export function buildCanvasLayout(
     const provider = getProvider(kind);
     if (!provider || !provider.shouldRender(node, ctx)) continue;
     const depth = depthPlan.depthOf.get(node.id) ?? 0;
-    const grid = gridPosOf.get(node.id) ?? { x: 0, y: 0 };
-    // Relationship depth is a minor parallax offset layered on top of the
-    // within-bucket grid so focusing still pulls neighbors closer.
+    const cellZ = timePlan.cellZOf.get(node.id) ?? i;
+    const grid = gridPosOf.get(`${node.id}@${cellZ}`) ?? { x: 0, y: 0 };
     const cellX = grid.x + depth * 3;
     const cellY = grid.y;
-
-    const cellZ = timePlan.cellZOf.get(node.id) ?? i;
-
     const cellKey = `${cellX},${cellY},${cellZ}`;
     provisional.push({ node, kind, cellX, cellY, cellZ, cellKey });
+
+    // If this node is in a today/yesterday bucket, also place it in the
+    // parent month bucket so "This Month" contains all month content.
+    const nodeBucketZ = timePlan.cellZOf.get(node.id);
+    if (nodeBucketZ !== undefined && (timePlan.todayKey || timePlan.yesterdayKey)) {
+      const todayIdx = timePlan.todayKey ? timePlan.bucketIndex.get(timePlan.todayKey) : undefined;
+      const yesterdayIdx = timePlan.yesterdayKey ? timePlan.bucketIndex.get(timePlan.yesterdayKey) : undefined;
+      const todayZ = todayIdx !== undefined ? todayIdx * TIME_BUCKET_SPACING : -1;
+      const yesterdayZ = yesterdayIdx !== undefined ? yesterdayIdx * TIME_BUCKET_SPACING : -1;
+      let parentMonthKey: string | null = null;
+      if (nodeBucketZ === todayZ) parentMonthKey = timePlan.todayMonthKey;
+      else if (nodeBucketZ === yesterdayZ) parentMonthKey = timePlan.yesterdayMonthKey;
+      if (parentMonthKey) {
+        const monthIdx = timePlan.bucketIndex.get(parentMonthKey);
+        if (monthIdx !== undefined) {
+          const monthZ = monthIdx * TIME_BUCKET_SPACING;
+          const monthGrid = gridPosOf.get(`${node.id}@${monthZ}`) ?? { x: 0, y: 0 };
+          const monthCellX = monthGrid.x + depth * 3;
+          const monthCellY = monthGrid.y;
+          const monthCellKey = `${monthCellX},${monthCellY},${monthZ}`;
+          provisional.push({ node, kind, cellX: monthCellX, cellY: monthCellY, cellZ: monthZ, cellKey: monthCellKey });
+        }
+      }
+    }
   }
 
   const out: CanvasNode[] = new Array(provisional.length);
