@@ -351,9 +351,13 @@
     if (isTranscribing || micBusy) return;
     // Stop the browser from starting a text-selection drag / context menu.
     e.preventDefault();
+    startHoldTimer();
+  }
+
+  function startHoldTimer() {
     holdActive = true;
     holdElapsed = 0;
-    orbOptionsOpen = false; // hide options while counting/recording
+    orbOptionsOpen = false;
     holdTimer = setInterval(() => {
       holdElapsed += HOLD_TICK_MS;
       if (holdElapsed >= HOLD_TO_RECORD_MS) {
@@ -361,6 +365,23 @@
         startPushToTalk();
       }
     }, HOLD_TICK_MS);
+  }
+
+  function handleMicTouchStart(e: TouchEvent) {
+    if (!audioRecorder || !recordingSupported) return;
+    if (isTranscribing || micBusy) return;
+    e.preventDefault();
+    startHoldTimer();
+  }
+
+  function handleMicTouchMove(e: TouchEvent) {
+    if (holdActive) e.preventDefault();
+  }
+
+  function handleMicTouchEnd(e: TouchEvent) {
+    if (!holdActive) return;
+    e.preventDefault();
+    handleMicPointerUp();
   }
 
   async function startPushToTalk() {
@@ -2364,6 +2385,9 @@
                 onpointerup={handleMicPointerUp}
                 onpointerleave={handleMicPointerLeave}
                 onpointercancel={handleMicPointerCancel}
+                ontouchstart={handleMicTouchStart}
+                ontouchmove={handleMicTouchMove}
+                ontouchend={handleMicTouchEnd}
                 oncontextmenu={(e) => e.preventDefault()}
                 onmouseenter={() => { micTooltipVisible = true; }}
                 onmouseleave={() => { micTooltipVisible = false; }}
@@ -2411,6 +2435,9 @@
             onpointerup={handleMicPointerUp}
             onpointerleave={handleMicPointerLeave}
             onpointercancel={handleMicPointerCancel}
+            ontouchstart={handleMicTouchStart}
+            ontouchmove={handleMicTouchMove}
+            ontouchend={handleMicTouchEnd}
             oncontextmenu={(e) => e.preventDefault()}
             onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (isStreamActive) { openStreamingConversation(); } else { orbOptionsOpen = !orbOptionsOpen; } } }}
             onmouseenter={() => { micTooltipVisible = true; }}
