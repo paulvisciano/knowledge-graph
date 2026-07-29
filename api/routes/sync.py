@@ -124,41 +124,49 @@ async def save_conversation(payload: ExportedConversation):
     now = time.time()
 
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow("SELECT id, last_modified FROM conversations WHERE id = $1", conv.id)
-        if existing:
-            if conv.lastModified and existing["last_modified"] is not None:
-                existing_ts = existing["last_modified"]
-                incoming_ts = conv.lastModified / 1000 if conv.lastModified > 1e12 else conv.lastModified
-                if incoming_ts <= existing_ts:
-                    raise HTTPException(status_code=409, detail="Server version is newer")
+        async with conn.transaction():
+            # Lock the conversation row for the duration of this transaction so
+            # a concurrent DELETE /conversations/{id} cannot cascade-remove the
+            # row (and thus invalidate messages_conv_id_fkey) between the
+            # conversation upsert and the message inserts below.
+            existing = await conn.fetchrow(
+                "SELECT id, last_modified FROM conversations WHERE id = $1 FOR UPDATE",
+                conv.id,
+            )
+            if existing:
+                if conv.lastModified and existing["last_modified"] is not None:
+                    existing_ts = existing["last_modified"]
+                    incoming_ts = conv.lastModified / 1000 if conv.lastModified > 1e12 else conv.lastModified
+                    if incoming_ts <= existing_ts:
+                        raise HTTPException(status_code=409, detail="Server version is newer")
 
-        last_mod = conv.lastModified if conv.lastModified else now
-        if last_mod > 1e12:
-            last_mod = last_mod / 1000
+            last_mod = conv.lastModified if conv.lastModified else now
+            if last_mod > 1e12:
+                last_mod = last_mod / 1000
 
-        mcp_overrides = json.dumps([o.model_dump() for o in conv.mcpServerOverrides]) if conv.mcpServerOverrides else None
+            mcp_overrides = json.dumps([o.model_dump() for o in conv.mcpServerOverrides]) if conv.mcpServerOverrides else None
 
-        await conn.execute(
-            """INSERT INTO conversations (id, name, last_modified, curr_node, mcp_server_overrides,
-                   thinking_enabled, reasoning_effort, forked_from_conversation_id, pinned)
-               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
-               ON CONFLICT (id) DO UPDATE SET
-                   name = EXCLUDED.name,
-                   last_modified = EXCLUDED.last_modified,
-                   curr_node = EXCLUDED.curr_node,
-                   mcp_server_overrides = EXCLUDED.mcp_server_overrides,
-                   thinking_enabled = EXCLUDED.thinking_enabled,
-                   reasoning_effort = EXCLUDED.reasoning_effort,
-                   forked_from_conversation_id = EXCLUDED.forked_from_conversation_id,
-                   pinned = EXCLUDED.pinned""",
-            conv.id, conv.name or "", last_mod,
-            conv.currNode, mcp_overrides,
-            conv.thinkingEnabled, conv.reasoningEffort,
-            conv.forkedFromConversationId, conv.pinned,
-        )
+            await conn.execute(
+                """INSERT INTO conversations (id, name, last_modified, curr_node, mcp_server_overrides,
+                       thinking_enabled, reasoning_effort, forked_from_conversation_id, pinned)
+                   VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+                   ON CONFLICT (id) DO UPDATE SET
+                       name = EXCLUDED.name,
+                       last_modified = EXCLUDED.last_modified,
+                       curr_node = EXCLUDED.curr_node,
+                       mcp_server_overrides = EXCLUDED.mcp_server_overrides,
+                       thinking_enabled = EXCLUDED.thinking_enabled,
+                       reasoning_effort = EXCLUDED.reasoning_effort,
+                       forked_from_conversation_id = EXCLUDED.forked_from_conversation_id,
+                       pinned = EXCLUDED.pinned""",
+                conv.id, conv.name or "", last_mod,
+                conv.currNode, mcp_overrides,
+                conv.thinkingEnabled, conv.reasoningEffort,
+                conv.forkedFromConversationId, conv.pinned,
+            )
 
-        await conn.execute("DELETE FROM messages WHERE conv_id = $1", conv.id)
-        for msg in payload.messages:
+            await conn.execute("DELETE FROM messages WHERE conv_id = $1", conv.id)
+            for msg in payload.messages:
             extra_json = json.dumps(msg.extra) if msg.extra else None
             children_json = json.dumps(msg.children) if msg.children else "[]"
             msg_ts = msg.timestamp if msg.timestamp < 1e12 else msg.timestamp / 1000
@@ -190,9 +198,17 @@ async def save_conversation(payload: ExportedConversation):
 async def delete_conversation(conv_id: str):
     pool = await db_module.get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)
-        if result == "DELETE 0":
-            raise HTTPException(status_code=404, detail="Conversation not found")
+        async with conn.transaction():
+            # Lock the conversation row first so a concurrent save_conversation
+            # transaction cannot insert messages that reference a conv_id about
+            # to be cascade-deleted. If the conversation does not exist, no lock
+            # is held and we 404 without side effects.
+            existing = await conn.fetchrow(
+                "SELECT id FROM conversations WHERE id = $1 FOR UPDATE", conv_id
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)
     return {"status": "ok"}
 
 

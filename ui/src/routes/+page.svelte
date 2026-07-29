@@ -1461,7 +1461,6 @@
   }
 
   async function deleteConversation(id: string) {
-    cancelStreaming();
     conversations = conversations.filter((c) => c.id !== id);
     syncClient.deleteConversation(id);
     if (activeConversationId === id) {
