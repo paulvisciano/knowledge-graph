@@ -609,14 +609,14 @@
     align-items: stretch;
     gap: 0;
     padding: 0;
-    width: 140px;
+    width: 180px;
     background: oklch(12% 0.015 255 / 75%);
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
     border-radius: 16px;
-    border: 1px solid oklch(50% 0.03 255 / 10%);
+    border: 1px solid oklch(50% 0.03 255 / 25%);
     box-shadow:
-      0 0 0 1px oklch(50% 0.03 255 / 6%),
+      0 0 0 1px oklch(50% 0.03 255 / 10%),
       0 12px 40px oklch(0% 0 0 / 40%);
     pointer-events: auto;
     transition: opacity 0.3s, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
