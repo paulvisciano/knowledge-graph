@@ -52,11 +52,11 @@ download \
     "$MODEL_DIR/bge-reranker-v2-m3/bge-reranker-v2-m3-Q4_K_M.gguf" \
     "BGE-Reranker-v2-m3 Q4_K_M"
 
-# ─── Whisper: ggml-large-v3-turbo (multilingual transcription) ──────────────────
+# ─── Whisper: ggml-medium (balanced accuracy/speed, multilingual transcription) ─
 download \
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin" \
-    "$MODEL_DIR/whisper/ggml-large-v3-turbo.bin" \
-    "Whisper ggml-large-v3-turbo (multilingual transcription)"
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin" \
+    "$MODEL_DIR/whisper/ggml-medium.bin" \
+    "Whisper ggml-medium (multilingual transcription)"
 
 echo ""
 echo "═══ All models downloaded to $MODEL_DIR ═══"
