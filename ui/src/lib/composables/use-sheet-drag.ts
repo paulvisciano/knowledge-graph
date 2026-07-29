@@ -35,6 +35,25 @@ export function createSheetDrag(options: SheetDragOptions) {
     return el.scrollTop <= 1;
   }
 
+  function isInteractive(target: EventTarget | null): boolean {
+    let node = target as HTMLElement | null;
+    while (node && node !== sheet) {
+      const tag = node.tagName;
+      if (
+        tag === 'BUTTON' ||
+        tag === 'TEXTAREA' ||
+        tag === 'INPUT' ||
+        tag === 'SELECT' ||
+        tag === 'A' ||
+        node.isContentEditable
+      ) {
+        return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+
   function findScrollableAncestor(target: EventTarget | null): HTMLElement | null {
     let node = target as HTMLElement | null;
     while (node && node !== sheet) {
@@ -52,6 +71,10 @@ export function createSheetDrag(options: SheetDragOptions) {
 
   function onTouchStart(e: TouchEvent) {
     if (e.touches.length !== 1) return;
+    if (isInteractive(e.target)) {
+      dragging = false;
+      return;
+    }
     startY = e.touches[0].clientY;
     currentY = startY;
     startTime = Date.now();

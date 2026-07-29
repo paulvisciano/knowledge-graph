@@ -2364,6 +2364,7 @@
                 onpointerup={handleMicPointerUp}
                 onpointerleave={handleMicPointerLeave}
                 onpointercancel={handleMicPointerCancel}
+                oncontextmenu={(e) => e.preventDefault()}
                 onmouseenter={() => { micTooltipVisible = true; }}
                 onmouseleave={() => { micTooltipVisible = false; }}
                 disabled={isTranscribing || !recordingSupported}
@@ -2410,6 +2411,7 @@
             onpointerup={handleMicPointerUp}
             onpointerleave={handleMicPointerLeave}
             onpointercancel={handleMicPointerCancel}
+            oncontextmenu={(e) => e.preventDefault()}
             onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (isStreamActive) { openStreamingConversation(); } else { orbOptionsOpen = !orbOptionsOpen; } } }}
             onmouseenter={() => { micTooltipVisible = true; }}
             onmouseleave={() => { micTooltipVisible = false; }}
@@ -2546,6 +2548,10 @@
     color: var(--color-cyber-cyan);
     transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
     flex-shrink: 0;
   }
   .chat-orb svg {
@@ -3216,6 +3222,14 @@
       width: 44px;
       height: 44px;
       border-radius: 50%;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    .chat-inline-input-row > textarea {
+      touch-action: auto;
     }
   }
 
