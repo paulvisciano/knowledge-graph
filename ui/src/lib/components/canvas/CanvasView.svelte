@@ -614,10 +614,10 @@
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
     border-radius: 16px;
-    border: 1px solid oklch(50% 0.03 255 / 25%);
+    border: 1px solid oklch(65% 0.04 250 / 35%);
     box-shadow:
-      0 0 0 1px oklch(50% 0.03 255 / 10%),
-      0 12px 40px oklch(0% 0 0 / 40%);
+      0 0 0 1px oklch(50% 0.06 250 / 20%),
+      0 8px 32px oklch(0% 0 0 / 50%);
     pointer-events: auto;
     transition: opacity 0.3s, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     overflow: hidden;
