@@ -12,8 +12,10 @@ FROM nginx:alpine
 
 COPY --from=builder /app/build /usr/share/nginx/html
 COPY docker/nginx/nginx.conf /etc/nginx/templates/default.conf.template
+COPY docker/nginx/certs/nexus.crt /etc/nginx/certs/nexus.crt
+COPY docker/nginx/certs/nexus.key /etc/nginx/certs/nexus.key
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:3000/ || exit 1
+    CMD curl -sf https://localhost:3443/ --insecure || exit 1

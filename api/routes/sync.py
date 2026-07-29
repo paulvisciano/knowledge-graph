@@ -167,11 +167,11 @@ async def save_conversation(payload: ExportedConversation):
 
             await conn.execute("DELETE FROM messages WHERE conv_id = $1", conv.id)
             for msg in payload.messages:
-            extra_json = json.dumps(msg.extra) if msg.extra else None
-            children_json = json.dumps(msg.children) if msg.children else "[]"
-            msg_ts = msg.timestamp if msg.timestamp < 1e12 else msg.timestamp / 1000
+                extra_json = json.dumps(msg.extra) if msg.extra else None
+                children_json = json.dumps(msg.children) if msg.children else "[]"
+                msg_ts = msg.timestamp if msg.timestamp < 1e12 else msg.timestamp / 1000
 
-            await conn.execute(
+                await conn.execute(
                 """INSERT INTO messages (id, conv_id, type, timestamp, role, content, parent,
                        children, extra, reasoning_content, tool_calls, completion_id,
                        tool_call_id, timings, model)

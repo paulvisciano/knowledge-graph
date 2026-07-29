@@ -243,6 +243,7 @@ services:
       WHISPER_HOST: "${WHISPER_HOST:-host.docker.internal}"
     ports:
       - "${NEXUS_PORT:-3000}:3000"
+      - "${NEXUS_HTTPS_PORT:-3443}:3443"
     depends_on:
       api:
         condition: service_healthy

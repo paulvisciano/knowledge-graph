@@ -29,8 +29,8 @@ LLM_DRY_BASE="${LLM_DRY_BASE:-1.75}"
 LLM_DRY_ALLOWED_LENGTH="${LLM_DRY_ALLOWED_LENGTH:-2}"
 LLM_XTC_PROBABILITY="${LLM_XTC_PROBABILITY:-0.1}"
 LLM_XTC_THRESHOLD="${LLM_XTC_THRESHOLD:-0.1}"
-# Single slot gets the full context window (set LLM_SLOTS=2 to split for concurrency).
-LLM_SLOTS="${LLM_SLOTS:-1}"
+# Two slots: one for chat, one for VLM image processing (override via LLM_SLOTS env var).
+LLM_SLOTS="${LLM_SLOTS:-2}"
 for model_path in "$LLM_MODEL_PATH" "$EMBED_MODEL_PATH"; do
     if [[ ! -f "$model_path" ]]; then
         echo "ERROR: Model file not found: $model_path"

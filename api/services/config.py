@@ -65,12 +65,11 @@ def vlm_api_key() -> str:
 def vlm_max_concurrent() -> int:
     """Max in-flight VLM chat-completion requests.
 
-    Default 2 — the expensive AI description step (~88s/call) was serialized by
-    a hardcoded ``Semaphore(1)``, making a 5-image upload take ~7 minutes.  2
-    parallelizes the slow step while keeping GPU memory pressure reasonable on
-    a single GPU.  Operators with more GPU headroom can raise this.
+    Default 1 — the LLM server runs 2 slots so VLM and chat can run
+    concurrently.  Capping VLM at 1 request reserves the other slot for
+    interactive chat.  Operators with more GPU headroom can raise this.
     """
-    return max(1, _env_int("VLM_MAX_CONCURRENT", 2))
+    return max(1, _env_int("VLM_MAX_CONCURRENT", 1))
 
 
 def vlm_timeout() -> int:
