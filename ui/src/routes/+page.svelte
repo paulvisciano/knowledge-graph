@@ -233,13 +233,14 @@
   let micBusy = $state(false);
   const HOLD_TO_RECORD_MS = 3000;
   const HOLD_TICK_MS = 50;
-  const TAP_THRESHOLD_MS = 350;
+  const HOLD_START_DELAY_MS = 300;
   let holdActive = $state(false);
   let holdElapsed = $state(0);
   let holdCountdown = $derived(
     Math.max(1, Math.ceil((HOLD_TO_RECORD_MS - holdElapsed) / 1000))
   );
   let holdTimer: ReturnType<typeof setInterval> | null = null;
+  let holdStartDelay: ReturnType<typeof setTimeout> | null = null;
   let orbOptionsOpen = $state(false);
   let micTooltipVisible = $state(false);
   let micTooltipMessage = $derived(
@@ -308,16 +309,18 @@
   }
 
   function startHoldTimer() {
-    holdActive = true;
     holdElapsed = 0;
     orbOptionsOpen = false;
-    holdTimer = setInterval(() => {
-      holdElapsed += HOLD_TICK_MS;
-      if (holdElapsed >= HOLD_TO_RECORD_MS) {
-        if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-        startPushToTalk();
-      }
-    }, HOLD_TICK_MS);
+    holdStartDelay = setTimeout(() => {
+      holdActive = true;
+      holdTimer = setInterval(() => {
+        holdElapsed += HOLD_TICK_MS;
+        if (holdElapsed >= HOLD_TO_RECORD_MS) {
+          if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+          startPushToTalk();
+        }
+      }, HOLD_TICK_MS);
+    }, HOLD_START_DELAY_MS);
   }
 
   async function startPushToTalk() {
@@ -376,16 +379,15 @@
 
   function finishHold() {
     const wasHolding = holdActive;
-    const elapsed = holdElapsed;
     holdActive = false;
     holdElapsed = 0;
     if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+    if (holdStartDelay) { clearTimeout(holdStartDelay); holdStartDelay = null; }
 
-    if (!wasHolding) return;
-    if (isRecording) {
-      stopAndSendRecording();
-    } else if (elapsed < TAP_THRESHOLD_MS) {
-      if (isStreamActive) {
+    if (!wasHolding) {
+      if (isRecording) {
+        stopAndSendRecording();
+      } else if (isStreamActive) {
         openStreamingConversation();
       } else {
         orbOptionsOpen = !orbOptionsOpen;
@@ -399,14 +401,12 @@
   }
 
   function handleMicPointerLeave() {
-    if (!holdActive || holdStartedByTouch) return;
-    if (isRecording) {
-      handleMicPointerUp();
-    } else {
-      holdActive = false;
-      holdElapsed = 0;
-      if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-    }
+    if (!holdActive && !holdStartDelay) return;
+    if (holdStartedByTouch) return;
+    holdActive = false;
+    holdElapsed = 0;
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+    if (holdStartDelay) { clearTimeout(holdStartDelay); holdStartDelay = null; }
   }
 
   function handleMicPointerCancel() {
@@ -414,11 +414,7 @@
     holdActive = false;
     holdElapsed = 0;
     if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
-    if (isRecording) {
-      isRecording = false;
-      micBusy = true;
-      audioRecorder?.stopRecording().finally(() => { micBusy = false; });
-    }
+    if (holdStartDelay) { clearTimeout(holdStartDelay); holdStartDelay = null; }
   }
 
   async function handleAttachFiles(fileList: FileList | null) {
@@ -2337,11 +2333,11 @@
               disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
               onPickDocument={openDocumentPicker}
             />
-            {#if isActiveConversationStreaming}
+            {#if isActiveConversationStreaming || isRecording}
               <button
-                onclick={cancelStreaming}
+                onclick={() => { if (isRecording) stopAndSendRecording(); else cancelStreaming(); }}
                 class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
-                title="Stop generating"
+                title={isRecording ? 'Stop & send recording' : 'Stop generating'}
                 data-testid="stop-button"
               >
                 <Icon name="square" size={14} />
