@@ -295,7 +295,6 @@
   }
 
   function handleMicTouchStart(e: TouchEvent) {
-    console.log('[mic] touchstart', { audioRecorder: !!audioRecorder, recordingSupported, isTranscribing, micBusy });
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
     holdStartedByTouch = true;
@@ -306,7 +305,6 @@
   }
 
   function handleMicTouchEnd(e: TouchEvent) {
-    console.log('[mic] touchend', { holdStartedByTouch, suppressPointerTap });
     if (!holdStartedByTouch) return;
     holdStartedByTouch = false;
     suppressPointerTap = true;
@@ -315,7 +313,6 @@
   }
 
   function handleMicTap() {
-    console.log('[mic] handleMicTap called', { audioRecorder: !!audioRecorder, recordingSupported, isTranscribing, micBusy, isStreamActive, isRecording, lastTapTime, now: Date.now() });
     if (!audioRecorder || !recordingSupported) return;
     if (isTranscribing || micBusy) return;
     if (isStreamActive) {
@@ -337,7 +334,6 @@
   }
 
   async function handleMicPointerUp() {
-    console.log('[mic] pointerup', { holdStartedByTouch, suppressPointerTap });
     if (holdStartedByTouch || suppressPointerTap) return;
     handleMicTap();
   }

@@ -26,6 +26,7 @@
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/svelte": "^5.4.2",
     "@types/node": "^26.1.1",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.0",
