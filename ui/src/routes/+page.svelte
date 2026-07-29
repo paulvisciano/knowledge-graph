@@ -793,6 +793,7 @@
           model: selectedModel || undefined,
           messages: apiMessages,
           stream: true,
+          reasoning_format: 'deepseek',
           // At Q1 quant the model sometimes never emits <|im_end|> on long
           // open-ended turns, falling into paraphrase loops until externally
           // truncated. max_tokens caps generation so the stream always
@@ -917,6 +918,12 @@
               }
 
               if (delta.reasoning_content) {
+                if (!gotFirstToken) {
+                  gotFirstToken = true;
+                  if (streamingConversationId === activeConversationId) {
+                    isProcessing = false;
+                  }
+                }
                 accumulatedThinking += delta.reasoning_content;
                 // Only update global thinking display if viewing the stream's conversation
                 if (streamingConversationId === activeConversationId) {
@@ -1946,16 +1953,13 @@
                 <div class="flex justify-start">
                   <div class="max-w-[95%] space-y-1.5">
                     {#if msg.thinkingContent}
-                      <details class="group" open={msg.isStreaming}>
+                      <details class="group" open>
                         <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-cyber-purple/25 bg-cyber-purple/5 px-2.5 py-1.5 text-[11px] text-cyber-purple hover:bg-cyber-purple/10 transition-colors">
                           <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m0 16v1m-8-9H3m18 0h-1M5.636 5.636l-.707-.707M18.364 18.364l-.707-.707M5.636 18.364l-.707.707M18.364 5.636l-.707.707" stroke-linecap="round" stroke-linejoin="round"/></svg>
                           <span class="font-medium">Thinking</span>
-                          {#if msg.isStreaming}
-                            <span class="text-cyber-text-dim/50 animate-pulse">...</span>
-                          {/if}
                           <svg class="ml-auto h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </summary>
-                        <div class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-cyber-purple/10 bg-cyber-bg/50 p-2.5 text-[11px] leading-relaxed text-cyber-text-dim/80 whitespace-pre-wrap font-mono">{msg.thinkingContent}</div>
+                        <div class="mt-1 max-h-96 overflow-y-auto rounded-lg border border-cyber-purple/10 bg-cyber-bg/50 p-2.5 text-[12px] leading-relaxed text-cyber-text-dim/80 whitespace-pre-wrap font-mono">{msg.thinkingContent}</div>
                       </details>
                     {/if}
 
@@ -1973,15 +1977,9 @@
                         </div>
                       {:else if msg.isStreaming && !msg.content}
                         <div class="flex items-center gap-2 py-1" data-testid="generating-indicator">
-                          <div class="flex gap-1">
-                            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 0ms"></span>
-                            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 150ms"></span>
-                            <span class="inline-block h-2 w-2 animate-bounce rounded-full bg-cyber-cyan" style="animation-delay: 300ms"></span>
-                          </div>
-                          <span class="text-xs text-cyber-text-dim">Writing...</span>
                           <button
                             onclick={cancelStreaming}
-                            class="ml-1 flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10"
+                            class="flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10"
                             title="Stop generating"
                             data-testid="stop-button-inline"
                           >
@@ -2290,16 +2288,6 @@
 
       <!-- Input row (always visible when a conversation exists) -->
       {#if activeConversationId}
-        {#if thinkingContent}
-          <div class="mb-2 rounded-lg border border-cyber-purple/20 bg-cyber-purple/5 px-3 py-1.5">
-            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-cyber-purple">
-              <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyber-purple"></span>
-              Thinking...
-            </div>
-            <div class="mt-1 max-h-16 overflow-y-auto text-[11px] text-cyber-text-dim/70 whitespace-pre-wrap">{thinkingContent.slice(-200)}</div>
-          </div>
-        {/if}
-
         <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
 
         {#if chatExpanded}
