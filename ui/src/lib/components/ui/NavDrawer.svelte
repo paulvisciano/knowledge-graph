@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navDrawerOpen, activeTab, settingsDrawerOpen, lightragStatus, llamaStatus, type TabId } from '$lib/stores/ui';
+  import { navDrawerOpen, activeTab, settingsDrawerOpen, historyPanelOpen, lightragStatus, llamaStatus, type TabId } from '$lib/stores/ui';
   import Icon from '$lib/components/ui/Icon.svelte';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
@@ -25,6 +25,11 @@
 
   function openSettings() {
     settingsDrawerOpen.set(true);
+    close();
+  }
+
+  function openHistory() {
+    historyPanelOpen.set(true);
     close();
   }
 
@@ -104,6 +109,14 @@
           </div>
           <span data-testid="version" class="text-[10px] text-cyber-text-dim/50 ml-auto" title="App version">v0.2.0</span>
         </div>
+        <button
+          onclick={openHistory}
+          class="nav-icon-btn"
+          title="History"
+          aria-label="Open chat history"
+        >
+          <Icon name="clock" size={14} color="currentColor" />
+        </button>
         <button
           onclick={openSettings}
           class="nav-icon-btn"
