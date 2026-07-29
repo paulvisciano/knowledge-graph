@@ -93,12 +93,12 @@ export class SceneManager {
   private _lastChunkY = Infinity;
   private _lastChunkZ = Infinity;
 
-  // --- fly-to (animated camera Z travel) state -----------------------------
-  // null when idle; otherwise lerps _basePos.z from _flyFromZ to _flyToZ over
-  // _flyElapsed/_flyDuration ms. We only animate Z — the time axis — because X/Y
-  // are always centered (0,0) for the time-travel navigation the date pill uses.
-  private _flyToZ: number | null = null;
-  private _flyFromZ = 0;
+  // --- fly-to (animated camera travel) state ------------------------------
+  // null when idle; otherwise lerps _basePos from _flyFrom to _flyTo over
+  // _flyElapsed/_flyDuration ms. Animates all three axes so the camera can
+  // pan (X/Y) and zoom (Z) simultaneously toward a specific node.
+  private _flyTo: THREE.Vector3 | null = null;
+  private readonly _flyFrom = new THREE.Vector3();
   private _flyElapsed = 0;
   private _flyDuration = 700;
   private _lastFrameMs = 0;
@@ -291,28 +291,50 @@ export class SceneManager {
   flyTo(targetZ: number): void {
     if (this._disposed) return;
     const clampedZ = Math.max(this._minCameraZ, Math.min(this._maxCameraZ, targetZ));
-    this._flyFromZ = this._basePos.z;
-    this._flyToZ = clampedZ;
+    this._flyFrom.copy(this._basePos);
+    this._flyTo = new THREE.Vector3(0, 0, clampedZ);
     this._flyElapsed = 0;
+    this._flyDuration = 700;
+    this._velocity.set(0, 0, 0);
+  }
+
+  /**
+   * Smoothly animate the camera to center on a specific node, panning X/Y
+   * and zooming Z simultaneously. Computes the node's world position from its
+   * chunk cell + local offset and targets a comfortable viewing distance.
+   * Slower than `flyTo` (1.6s) for a deliberate, cinematic focus.
+   */
+  flyToNode(nodeId: string): void {
+    if (this._disposed) return;
+    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
+    if (!plane) return;
+    const node = plane.node;
+    const worldX = node.cellX * CHUNK_SIZE + node.localX;
+    const worldY = node.cellY * CHUNK_SIZE + node.localY;
+    const worldZ = node.cellZ * CHUNK_SIZE + node.localZ;
+    const targetZ = Math.max(this._minCameraZ, worldZ + INITIAL_CAMERA_Z * 0.5);
+    this._flyFrom.copy(this._basePos);
+    this._flyTo = new THREE.Vector3(worldX, worldY, targetZ);
+    this._flyElapsed = 0;
+    this._flyDuration = 1600;
     this._velocity.set(0, 0, 0);
   }
 
   /** Cancels any active fly-to, leaving the camera wherever it currently sits. */
   cancelFly(): void {
-    this._flyToZ = null;
+    this._flyTo = null;
   }
 
   /** Advances the fly-to tween by `deltaMs`. Returns true while flying. */
   private tickFly(deltaMs: number): boolean {
-    if (this._flyToZ === null) return false;
+    if (this._flyTo === null) return false;
     this._flyElapsed += deltaMs;
     const t = Math.min(1, this._flyElapsed / this._flyDuration);
-    // easeInOutCubic — slow start/end, fast middle, feels right for travel.
     const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    this._basePos.x = 0;
-    this._basePos.y = 0;
-    this._basePos.z = this._flyFromZ + (this._flyToZ - this._flyFromZ) * eased;
-    if (t >= 1) this._flyToZ = null;
+    this._basePos.x = this._flyFrom.x + (this._flyTo.x - this._flyFrom.x) * eased;
+    this._basePos.y = this._flyFrom.y + (this._flyTo.y - this._flyFrom.y) * eased;
+    this._basePos.z = this._flyFrom.z + (this._flyTo.z - this._flyFrom.z) * eased;
+    if (t >= 1) this._flyTo = null;
     return true;
   }
 

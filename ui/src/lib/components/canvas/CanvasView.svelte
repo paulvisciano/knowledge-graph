@@ -228,6 +228,10 @@
       clearTimeout(pendingTimer);
       pendingTimer = null;
     }
+    if (activeFlyTimer) {
+      clearTimeout(activeFlyTimer);
+      activeFlyTimer = null;
+    }
     containerEl?.removeEventListener('pointermove', onContainerPointerMove);
     sceneManager?.stop();
     sceneManager?.dispose();
@@ -275,6 +279,33 @@
     void syncClient.conversations;
     if (!mounted) return;
     untrack(() => graphStore.loadConversations());
+  });
+
+  // Fly the camera to the active conversation node whenever the active id
+  // changes. The layout rebuild is throttled, so the node may not be mounted
+  // in the chunk manager on the first frame — retry on the next frame until
+  // the plane is found or a short timeout elapses.
+  let activeFlyTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const activeId = graphStore.activeConversationId;
+    if (!mounted || !sceneManager || !activeId) return;
+    if (activeFlyTimer) {
+      clearTimeout(activeFlyTimer);
+      activeFlyTimer = null;
+    }
+    const sm = sceneManager;
+    let attempts = 0;
+    const tryFly = () => {
+      activeFlyTimer = null;
+      if (sm.getCanvasNode(activeId)) {
+        sm.flyToNode(activeId);
+        return;
+      }
+      if (attempts++ < 20) {
+        activeFlyTimer = setTimeout(tryFly, 100);
+      }
+    };
+    activeFlyTimer = setTimeout(tryFly, 220);
   });
 
   let isEmpty = $derived(graphStore.nodes.length === 0);
