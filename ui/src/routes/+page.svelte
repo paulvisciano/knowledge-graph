@@ -2488,6 +2488,25 @@
       <IngestionPanel />
     </div>
   {/if}
+
+  {#if holdActive && !isRecording}
+    <div class="record-countdown-overlay" data-testid="record-countdown">
+      <div class="record-countdown-ring">
+        <svg viewBox="0 0 120 120" class="record-countdown-svg">
+          <circle class="record-countdown-track" cx="60" cy="60" r="54" />
+          <circle
+            class="record-countdown-progress"
+            cx="60"
+            cy="60"
+            r="54"
+            style="stroke-dashoffset: {339.292 * (1 - holdElapsed / HOLD_TO_RECORD_MS)}"
+          />
+        </svg>
+        <span class="record-countdown-number">{holdCountdown}</span>
+      </div>
+      <span class="record-countdown-label">Hold to record</span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -3254,5 +3273,76 @@
       max-height: 50dvh;
       overflow-y: auto;
     }
+  }
+
+  /* ── Press-and-hold countdown overlay ── */
+  .record-countdown-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: record-countdown-fade-in 150ms ease-out;
+  }
+
+  @keyframes record-countdown-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .record-countdown-ring {
+    position: relative;
+    width: 140px;
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .record-countdown-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .record-countdown-track {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.12);
+    stroke-width: 4;
+  }
+
+  .record-countdown-progress {
+    fill: none;
+    stroke: var(--color-cyber-cyan, #00d4ff);
+    stroke-width: 4;
+    stroke-linecap: round;
+    stroke-dasharray: 339.292;
+    transition: stroke-dashoffset 0.1s linear;
+    filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.5));
+  }
+
+  .record-countdown-number {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--color-cyber-text, #c8d6e5);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .record-countdown-label {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-cyber-text-dim, #6b7d94);
   }
 </style>
