@@ -1415,10 +1415,11 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-    padding: 4px 0;
+    padding: 8px 0;
   }
   .filmstrip-nav {
-    width: 34px; height: 34px;
+    width: 54px; height: 54px;
+    margin-top: 10px;
     flex-shrink: 0;
     border-radius: 50%;
     background: var(--glass);
@@ -1436,7 +1437,7 @@
   }
   .filmstrip-nav:active:not(:disabled) { transform: scale(0.92); }
   .filmstrip-nav:disabled { opacity: 0.3; cursor: default; }
-  .filmstrip-nav svg { width: 16px; height: 16px; }
+  .filmstrip-nav svg { width: 26px; height: 26px; }
 
   .filmstrip-track {
     flex: 1;
@@ -1454,7 +1455,7 @@
 
   .filmstrip-thumb {
     flex-shrink: 0;
-    width: 52px; height: 52px;
+    width: 82px; height: 82px;
     border-radius: 8px;
     overflow: hidden;
     border: 2px solid transparent;
@@ -1493,7 +1494,7 @@
   .filmstrip-day-label {
     flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 14px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -2119,7 +2120,7 @@
     .spatial-scene { padding: 2vh 4vw; perspective: none; }
     .scene-inner { transform: none !important; }
     .image-frame { border-radius: 12px; }
-    .image-frame .photo { max-height: 40vh; }
+    .image-frame .photo { min-height: 45vh; max-height: 45vh; }
     .description-panel { padding: 14px 18px; border-radius: 12px; }
     .description-text { font-size: 13px; line-height: 1.65; }
     .data-row { flex-direction: column; gap: 8px; }
