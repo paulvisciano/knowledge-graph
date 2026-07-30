@@ -169,7 +169,9 @@ if [[ $FAIL -gt 0 ]]; then
 fi
 
 # Start whisper watchdog to prevent Metal GPU residency set eviction after idle.
-# Pings /health every 90s (Metal evicts after 180s) and auto-restarts on 3 consecutive failures.
+# Sends a real inference request every 90s (Metal evicts after 180s) to keep GPU
+# buffers warm. A /health ping only touches the CPU — it does NOT reset the GPU
+# eviction timer. Auto-restarts whisper-server on 3 consecutive inference failures.
 if [[ $WHISPER_HEALTHY -eq 1 ]]; then
     echo "Starting whisper watchdog..."
     "$SCRIPT_DIR/whisper-watchdog.sh" &>/dev/null &

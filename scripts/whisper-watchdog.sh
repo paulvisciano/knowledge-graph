@@ -3,10 +3,17 @@
 # Whisper Server Watchdog
 # ═══════════════════════════════════════════════════════════════════════════════
 # Keeps the whisper-server healthy by:
-#   1. Pinging /health every KEEPALIVE_INTERVAL seconds (default: 90s)
-#      — prevents Metal GPU residency sets from being evicted after 180s idle
-#   2. Auto-restarting whisper-server if /health fails consecutively
-#      — recovers from the known idle-hang bug (ggml-org/whisper.cpp#1991)
+#   1. Sending a tiny inference request every KEEPALIVE_INTERVAL seconds
+#      — forces Metal GPU to touch compute buffers, preventing residency-set
+#        eviction after 180s idle (ggml-org/whisper.cpp#1991).
+#      — A bare /health ping is NOT enough: macOS evicts Metal residency sets
+#        when no GPU compute commands have been submitted for 180s. The HTTP
+#        handler in whisper-server is CPU-only and never touches the GPU, so
+#        /health returns 200 while the GPU silently loses its buffers. The next
+#        real inference then hangs or returns empty/garbage text.
+#   2. Auto-restarting whisper-server if inference fails consecutively
+#      — recovers from hang, crash, or GPU eviction that inference alone
+#        couldn't recover from.
 #
 # Usage:
 #   ./scripts/whisper-watchdog.sh          # foreground (Ctrl+C to stop)
@@ -35,6 +42,29 @@ MAX_RETRIES="${WHISPER_WATCHDOG_RETRIES:-3}"          # 3 consecutive failures =
 LOG="${WHISPER_WATCHDOG_LOG:-/tmp/whisper-watchdog.log}"
 
 WHISPER_SERVER="$(which whisper-server 2>/dev/null || echo /opt/homebrew/bin/whisper-server)"
+
+# ─── Generate a minimal WAV for keepalive inference ───────────────────────────
+# 1 second of silence at 16kHz mono 16-bit. Small enough that inference is fast
+# (~0.5s on medium model), but forces the GPU to run the full encode+decode
+# pipeline, keeping Metal residency sets warm.
+KEEPALIVE_WAV="/tmp/whisper-watchdog-keepalive.wav"
+generate_keepalive_wav() {
+    # 44 bytes of WAV header + 32000 bytes of silence (1s @ 16kHz, 16-bit, mono)
+    python3 -c "
+import struct, sys
+sr, ch, bw = 16000, 1, 2
+n = sr * ch * bw  # 32000 bytes of data
+sys.stdout.buffer.write(b'RIFF')
+sys.stdout.buffer.write(struct.pack('<I', 36 + n))
+sys.stdout.buffer.write(b'WAVEfmt ')
+sys.stdout.buffer.write(struct.pack('<IHHIIHH', 16, 1, ch, sr, sr*ch*bw, ch*bw, bw*8))
+sys.stdout.buffer.write(b'data')
+sys.stdout.buffer.write(struct.pack('<I', n))
+sys.stdout.buffer.write(b'\x00' * n)
+" > "$KEEPALIVE_WAV"
+}
+
+generate_keepalive_wav
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [watchdog] $*" | tee -a "$LOG"; }
 
@@ -90,19 +120,28 @@ restart_whisper() {
 
 # ─── Main loop ────────────────────────────────────────────────────────────────
 log "Whisper watchdog started (interval=${INTERVAL}s, max_retries=${MAX_RETRIES})"
-log "Monitoring http://localhost:${WHISPER_PORT}/health"
+log "Keeping warm with inference on http://localhost:${WHISPER_PORT}/inference"
 
 consecutive_failures=0
 
 while true; do
-    if curl -sf --max-time 5 "http://localhost:${WHISPER_PORT}/health" &>/dev/null; then
+    # Send a real inference request to keep Metal residency sets warm.
+    # /health only touches the CPU — the GPU eviction timer keeps ticking.
+    # A 1s silence WAV runs the full encode+decode on the GPU in ~0.5s.
+    inference_response="$(curl -sf --max-time 15 \
+        -F "file=@${KEEPALIVE_WAV}" \
+        -F "temperature=0.0" \
+        -F "response_format=json" \
+        "http://localhost:${WHISPER_PORT}/inference" 2>/dev/null || echo "__CURL_FAILED__")"
+
+    if [[ "$inference_response" != "__CURL_FAILED__" ]]; then
         if [[ $consecutive_failures -gt 0 ]]; then
-            log "Health check recovered (was failing for ${consecutive_failures} cycle(s))"
+            log "Inference recovered (was failing for ${consecutive_failures} cycle(s))"
         fi
         consecutive_failures=0
     else
         consecutive_failures=$((consecutive_failures + 1))
-        log "Health check FAILED ($consecutive_failures/$MAX_RETRIES)"
+        log "Inference FAILED ($consecutive_failures/$MAX_RETRIES)"
 
         if [[ $consecutive_failures -ge $MAX_RETRIES ]]; then
             log "Max retries reached — restarting whisper-server"
