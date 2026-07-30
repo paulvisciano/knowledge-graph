@@ -563,6 +563,17 @@
 
   let promptTokens = $state<number | null>(null);
 
+  function cleanLoopedContent(content: string): string {
+    // Q1 quant models with --reasoning on can emit </think> as literal content
+    // (instead of using the reasoning_content SSE field) and then restart
+    // their answer as a paraphrase. Strip the tag and everything after it.
+    const tagEnd = content.indexOf('</think>');
+    if (tagEnd !== -1) {
+      return content.slice(0, tagEnd).trimEnd();
+    }
+    return content;
+  }
+
   function generateId(): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
@@ -801,6 +812,11 @@
           // case the chat-template EOS isn't honored in streaming.
           max_tokens: 2048,
           stop: ['<|im_end|>'],
+          // Anti-repetition for Q1 quant paraphrase-loop degeneration
+          temperature: 0.7,
+          frequency_penalty: 0.3,
+          presence_penalty: 0.2,
+          repeat_penalty: 1.15,
         };
 
         if (tools.length > 0) {
@@ -999,7 +1015,7 @@
 
         updateStreamMessage(assistantId, (m) => ({
           ...m,
-          content: accumulatedContent || '',
+          content: cleanLoopedContent(accumulatedContent || ''),
           isStreaming: finishReason === 'tool_calls' && toolCalls.length > 0,
           thinkingContent: accumulatedThinking || undefined,
           timings: msgTimings,
