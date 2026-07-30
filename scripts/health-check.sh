@@ -7,12 +7,12 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-NEXUS_URL="${NEXUS_URL:-http://localhost:3000}"
+NEXUS_URL="${NEXUS_URL:-https://localhost:3443}"
 
 for _ in $(seq 1 15); do
-    code="$(curl -s -o /dev/null -w "%{http_code}" "$NEXUS_URL/" 2>/dev/null || echo "000")"
+    code="$(curl -sk -o /dev/null -w "%{http_code}" "$NEXUS_URL/" 2>/dev/null || echo "000")"
     if [[ "$code" == "200" ]]; then
-        ctype="$(curl -s -D - -o /dev/null "$NEXUS_URL/" | grep -i '^content-type:' | tr -d '\r' || true)"
+        ctype="$(curl -sk -D - -o /dev/null "$NEXUS_URL/" | grep -i '^content-type:' | tr -d '\r' || true)"
         if echo "$ctype" | grep -qi "text/html"; then
             echo "  ✓ GET $NEXUS_URL/ → 200 text/html"
             exit 0
