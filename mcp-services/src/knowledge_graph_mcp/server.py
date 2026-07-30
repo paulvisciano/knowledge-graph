@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import zoneinfo
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from starlette.middleware.cors import CORSMiddleware
 
 _LIGHTRAG_API_URL = os.getenv("LIGHTRAG_API_URL", "http://localhost:9621")
@@ -35,10 +35,8 @@ asyncio_sleep = asyncio.sleep
 asyncio_monotonic = time.monotonic
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "KnowledgeGraph",
-    stateless_http=True,
-    json_response=True,
     instructions=(
         "This server exposes two tools for a personal knowledge graph (LightRAG-backed): "
         "save_to_knowledge_graph and query_knowledge_graph.\n"
@@ -1215,13 +1213,20 @@ async def save_to_knowledge_graph(text: str, file_source: str = "") -> str:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    mcp.settings.host = "0.0.0.0"
-    mcp.settings.port = _MCP_PORT
-    mcp.settings.transport_security.enable_dns_rebinding_protection = False
     logger.info("Starting Knowledge Graph MCP facade on port %d (streamable-http)", _MCP_PORT)
     logger.info("Proxying KG calls to %s", _LIGHTRAG_API_URL)
 
-    app = mcp.streamable_http_app()
+    from mcp.server.mcpserver.server import TransportSecuritySettings
+
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    )
+    app = mcp.streamable_http_app(
+        json_response=True,
+        stateless_http=True,
+        streamable_http_path="/mcp",
+        transport_security=transport_security,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
