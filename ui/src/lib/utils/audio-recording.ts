@@ -335,6 +335,8 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+const WHISPER_TIMEOUT_MS = 30_000;
+
 export async function transcribeAudio(
   audioBlob: Blob,
   endpoint: string,
@@ -347,17 +349,30 @@ export async function transcribeAudio(
   formData.append('temperature', '0.0');
   formData.append('response_format', 'json');
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WHISPER_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`Transcription failed: ${response.status} ${response.statusText}`);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Transcription failed: ${response.status} ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    return (result.text ?? '').trim();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Transcription timed out — the server may be unresponsive. Try again in a moment.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const result = await response.json();
-  return (result.text ?? '').trim();
 }
 
 export function isAudioRecordingSupported(): boolean {
