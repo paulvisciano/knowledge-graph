@@ -22,11 +22,12 @@ WHISPER_MODEL_PATH="${WHISPER_MODEL_PATH:-$MODEL_DIR/whisper/ggml-medium.bin}"
 # LLM sampler settings — anti-repetition (fixes verbatim phrase-loop degeneration at Q1 quant).
 # DRY sampler targets phrase-level repetition; repeat_penalty is a token-level backstop.
 # XTC disrupts repetitive token selection on heavily-quantized models (stopgap for Q1).
-LLM_REPEAT_PENALTY="${LLM_REPEAT_PENALTY:-1.1}"
+# Values are tuned aggressively for the 1-bit quant — the model paraphrase-loops without them.
+LLM_REPEAT_PENALTY="${LLM_REPEAT_PENALTY:-1.15}"
 LLM_REPEAT_LAST_N="${LLM_REPEAT_LAST_N:-128}"
-LLM_DRY_MULTIPLIER="${LLM_DRY_MULTIPLIER:-0.5}"
+LLM_DRY_MULTIPLIER="${LLM_DRY_MULTIPLIER:-0.8}"
 LLM_DRY_BASE="${LLM_DRY_BASE:-1.75}"
-LLM_DRY_ALLOWED_LENGTH="${LLM_DRY_ALLOWED_LENGTH:-2}"
+LLM_DRY_ALLOWED_LENGTH="${LLM_DRY_ALLOWED_LENGTH:-3}"
 LLM_XTC_PROBABILITY="${LLM_XTC_PROBABILITY:-0.1}"
 LLM_XTC_THRESHOLD="${LLM_XTC_THRESHOLD:-0.1}"
 # Two slots: one for chat, one for VLM image processing (override via LLM_SLOTS env var).
@@ -154,12 +155,25 @@ echo "Waiting for all endpoints..."
 FAIL=0
 health_check "$LLM_PORT" 90 || FAIL=$((FAIL+1))
 health_check "$EMBED_PORT" 45 || FAIL=$((FAIL+1))
+WHISPER_HEALTHY=0
 if [[ -f "$WHISPER_MODEL_PATH" ]] && [[ -x "${WHISPER_SERVER:-/opt/homebrew/bin/whisper-server}" ]]; then
-    health_check "$WHISPER_PORT" 30 || FAIL=$((FAIL+1))
+    if health_check "$WHISPER_PORT" 30; then
+        WHISPER_HEALTHY=1
+    else
+        FAIL=$((FAIL+1))
+    fi
 fi
 
 if [[ $FAIL -gt 0 ]]; then
     echo "WARNING: $FAIL endpoint(s) failed. Check /tmp/llama-server-*.log and /tmp/whisper-server.log"
+fi
+
+# Start whisper watchdog to prevent Metal GPU residency set eviction after idle.
+# Pings /health every 90s (Metal evicts after 180s) and auto-restarts on 3 consecutive failures.
+if [[ $WHISPER_HEALTHY -eq 1 ]]; then
+    echo "Starting whisper watchdog..."
+    "$SCRIPT_DIR/whisper-watchdog.sh" &>/dev/null &
+    PIDS+=($!)
 fi
 
 echo ""
