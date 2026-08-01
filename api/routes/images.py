@@ -7,6 +7,7 @@ import os
 import re
 import time
 import asyncio
+import asyncpg
 import tempfile
 from dataclasses import asdict
 from functools import lru_cache
@@ -1070,8 +1071,12 @@ async def stream_job_events(job_id: str, after: int = 0):
         if job.status in ("complete", "failed", "cancelled"):
             return
 
-        pool = await db_module.get_pool()
-        conn = await pool.acquire()
+        # Use a dedicated connection (not from the pool) for the LISTEN/NOTIFY
+        # listener. asyncpg listeners require their own connection, and using a
+        # pooled connection risks exhausting the shared pool if client
+        # disconnects prevent proper cleanup — the pool's max_size cap would
+        # then block all DB-dependent endpoints (graphs, conversations, etc.).
+        conn = await asyncpg.connect(db_module.DATABASE_URL)
         notify_queue: asyncio.Queue = asyncio.Queue()
 
         def _on_notify(c, pid, channel, payload):
@@ -1138,6 +1143,9 @@ async def stream_job_events(job_id: str, after: int = 0):
                 await conn.remove_listener(channel, _on_notify)
             except Exception:
                 pass
-            await pool.release(conn)
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
     return EventSourceResponse(event_stream())

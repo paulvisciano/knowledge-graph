@@ -31,6 +31,7 @@ stream the API's SSE endpoints LISTEN on. No Redis, no Celery.
 from __future__ import annotations
 
 import asyncio
+import asyncpg
 import datetime
 import json
 import logging
@@ -249,7 +250,7 @@ async def _control_listener() -> None:
     {"action": "run_overnight_vlm_batch"} here; we run the batch on receipt.
     """
     pool = await get_pool()
-    conn = await pool.acquire()
+    conn = await asyncpg.connect(db_module.DATABASE_URL)
     trigger_queue: asyncio.Queue = asyncio.Queue()
 
     def _on_control(c, pid, channel, payload):
@@ -280,7 +281,10 @@ async def _control_listener() -> None:
             await conn.remove_listener("worker_control", _on_control)
         except Exception:
             pass
-        await pool.release(conn)
+        try:
+            await conn.close()
+        except Exception:
+            pass
 
 
 async def main() -> None:
