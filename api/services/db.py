@@ -27,6 +27,16 @@ async def get_pool() -> asyncpg.Pool:
             DATABASE_URL,
             min_size=2,
             max_size=10,
+            # Docker networking silently drops idle TCP connections; without
+            # these settings the pool retains dead sockets and every
+            # acquire() on one blocks forever (the recurring "stale conn" bug).
+            command_timeout=30,
+            max_inactive_connection_lifetime=300,
+            server_settings={
+                "tcp_keepalives_idle": "30",
+                "tcp_keepalives_interval": "10",
+                "tcp_keepalives_count": "3",
+            },
         )
     return _pool
 
