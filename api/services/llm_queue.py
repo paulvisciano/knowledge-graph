@@ -107,6 +107,7 @@ async def append_llm_job_event(
             "job_id": job_id,
             "conv_id": conv_id,
             "event_type": event_type,
+            "data": event_data,
         })
         await conn.execute("SELECT pg_notify($1, $2)", "llm_job_events", payload)
 
@@ -140,7 +141,7 @@ async def cancel_llm_job(job_id: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            "UPDATE llm_jobs SET status = 'cancelled', updated_at = $2 WHERE id = $1 AND status = 'pending'",
+            "UPDATE llm_jobs SET status = 'cancelled', updated_at = $2 WHERE id = $1 AND status IN ('pending', 'streaming')",
             job_id, time.time(),
         )
     return result == "UPDATE 1"

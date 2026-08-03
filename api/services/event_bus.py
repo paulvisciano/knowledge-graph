@@ -136,6 +136,10 @@ class EventBus:
                         logger.warning("EventBus: invalid JSON payload: %s", payload)
                         continue
 
+                    # Normalize pg_notify payloads: event_type -> type
+                    if "event_type" in event and "type" not in event:
+                        event["type"] = event.pop("event_type")
+
                     await self._fan_out(event)
             except asyncio.CancelledError:
                 logger.info("EventBus listener task cancelled — shutting down")

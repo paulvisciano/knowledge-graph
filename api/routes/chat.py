@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Any
 
+import uuid
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
@@ -35,10 +37,19 @@ router = APIRouter(tags=["chat"])
 # ---------------------------------------------------------------------------
 
 
-class SubmitMessageRequest(BaseModel):
-    """Payload for POST /conversations/{conv_id}/messages."""
+class AttachmentPayload(BaseModel):
+    name: str
+    mimeType: str
+    dataUrl: str
 
-    message: DBMessage
+
+class SubmitMessageRequest(BaseModel):
+    content: str = ""
+    attachments: list[AttachmentPayload] | None = None
+    audioUrl: str | None = None
+    audioData: str | None = None
+    audioFormat: str | None = None
+    message: DBMessage | None = None
     conversation: DBConversation | None = None
     model: str | None = None
     system_prompt: str | None = None
@@ -65,13 +76,31 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
     """Save a user message, upsert the conversation, create an LLM job, and
     publish a ``new_message`` event to the event bus."""
 
-    # Ensure path param matches payload
-    if payload.message.convId != conv_id:
-        payload.message.convId = conv_id
+    # Build the DBMessage from the simple payload if not provided directly
+    if payload.message:
+        msg = payload.message
+        if msg.convId != conv_id:
+            msg.convId = conv_id
+    else:
+        extra = None
+        if payload.attachments:
+            extra = [{"name": a.name, "mimeType": a.mimeType, "dataUrl": a.dataUrl} for a in payload.attachments]
+        if payload.audioUrl:
+            extra = (extra or []) + [{"audioUrl": payload.audioUrl}]
+        if payload.audioData:
+            extra = (extra or []) + [{"audioData": payload.audioData, "audioFormat": payload.audioFormat or "wav"}]
+        msg = DBMessage(
+            id=str(uuid.uuid4()),
+            convId=conv_id,
+            type="message",
+            timestamp=time.time(),
+            role="user",
+            content=payload.content,
+            extra=extra or None,
+        )
 
     pool = await db_module.get_pool()
 
-    # --- Upsert conversation & save messages (mirrors sync.py save pattern) ---
     conv = payload.conversation or DBConversation(id=conv_id)
     if conv.id != conv_id:
         conv = conv.model_copy(update={"id": conv_id})
@@ -121,7 +150,6 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
             )
 
             # Save the message
-            msg = payload.message
             extra_json = json.dumps(msg.extra) if msg.extra else None
             children_json = json.dumps(msg.children) if msg.children else "[]"
             msg_ts = msg.timestamp if msg.timestamp < 1e12 else msg.timestamp / 1000
@@ -163,7 +191,17 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
         system_prompt=payload.system_prompt,
     )
 
-    # --- Publish new_message event ---
+    if not existing:
+        await event_bus.publish(
+            conv_id,
+            {
+                "type": "new_conversation",
+                "conv_id": conv_id,
+                "name": conv.name or "",
+                "created_at": last_mod,
+            },
+        )
+
     await event_bus.publish(
         conv_id,
         {
@@ -171,6 +209,18 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
             "conv_id": conv_id,
             "job_id": job["id"],
             "message_id": msg.id,
+            "role": msg.role,
+            "content": msg.content,
+        },
+    )
+
+    await event_bus.publish(
+        conv_id,
+        {
+            "type": "status_change",
+            "conv_id": conv_id,
+            "status": "pending" if job["status"] == "pending" else "streaming",
+            "job_id": job["id"],
         },
     )
 
@@ -194,7 +244,6 @@ async def stream_events(request: Request):
                 missed = await event_bus.get_missed_events(after_id)
                 for evt in missed:
                     yield ServerSentEvent(
-                        event=evt.get("type", "message"),
                         data=json.dumps(evt),
                         id=str(evt["id"]),
                     )
@@ -208,7 +257,6 @@ async def stream_events(request: Request):
                 # Heartbeat / keep-alive events may not have an id
                 evt_id = evt.get("id")
                 yield ServerSentEvent(
-                    event=evt.get("type", "message"),
                     data=json.dumps(evt),
                     id=str(evt_id) if evt_id is not None else None,
                 )

@@ -137,7 +137,7 @@ async def save_conversation(payload: ExportedConversation):
                 if conv.lastModified and existing["last_modified"] is not None:
                     existing_ts = existing["last_modified"]
                     incoming_ts = conv.lastModified / 1000 if conv.lastModified > 1e12 else conv.lastModified
-                    if incoming_ts <= existing_ts:
+                    if incoming_ts < existing_ts:
                         raise HTTPException(status_code=409, detail="Server version is newer")
 
             last_mod = conv.lastModified if conv.lastModified else now
