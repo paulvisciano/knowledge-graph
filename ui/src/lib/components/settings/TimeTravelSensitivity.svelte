@@ -5,27 +5,24 @@
   const MIN = 0.1;
   const MAX = 2.0;
   const STEP = 0.05;
-  const DEFAULT = 0.5;
+  const DEFAULT = 1.0;
 
   let saving = $state(false);
   let saveStatus = $state<'idle' | 'saved' | 'error'>('idle');
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Local draft so the slider is responsive while the debounced PUT fires.
   let draft = $state(configStore.pinchZoomSensitivity);
 
-  // Keep draft in sync if the store changes elsewhere (e.g. another tab).
   $effect(() => {
     void configStore.pinchZoomSensitivity;
     draft = configStore.pinchZoomSensitivity;
   });
 
   function labelFor(v: number): string {
-    if (v <= 0.2) return 'Very slow';
-    if (v < 0.45) return 'Slower';
-    if (v <= 0.6) return 'Default (slow)';
-    if (v < 1.0) return 'Medium';
-    if (v <= 1.4) return 'Fast';
+    if (v <= 0.3) return 'Very slow';
+    if (v < 0.7) return 'Slower';
+    if (v <= 1.2) return 'Default';
+    if (v < 1.6) return 'Fast';
     return 'Very fast';
   }
 

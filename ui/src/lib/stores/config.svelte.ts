@@ -53,8 +53,8 @@ class ConfigStore {
   private config: AppConfig = { systemPrompt: DEFAULT_SYSTEM_PROMPT };
   private loaded = $state(false);
   faceDetectionEnabled = $state(false);
-  /** Pinch-to-zoom sensitivity exponent (0.25 = slow default, lower = even slower). */
-  pinchZoomSensitivity = $state(0.25);
+  /** Pinch-to-zoom sensitivity multiplier (1.0 = reference speed). */
+  pinchZoomSensitivity = $state(1.0);
 
   get systemPrompt(): string {
     return this.config.systemPrompt;

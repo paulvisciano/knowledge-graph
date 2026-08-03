@@ -21,20 +21,20 @@ import {
   MAX_CAMERA_Z,
   MAX_VELOCITY,
   MIN_CAMERA_Z,
+  MOUSE_PAN_FACTOR,
   RENDER_DISTANCE,
-  TOUCH_SENSITIVITY,
+  SCROLL_DECAY,
+  TOUCH_PAN_FACTOR,
   VELOCITY_DECAY,
   VELOCITY_LERP,
   ZOOMING_VEL_THRESHOLD,
+  ZOOM_FACTOR,
   ZOOM_FACTOR_DIVISOR,
   ZOOM_FACTOR_MAX,
   ZOOM_FACTOR_MIN,
 } from './constants';
 
-/** Drag-to-keyboard pan scale factor (matches drag panScale of z*0.002 per pixel). */
-const DRAG_PAN_SCALE = 0.002;
-/** Pixels-equivalent moved per held-key frame — makes arrow keys pan at the same world-speed as dragging. */
-const KEYBOARD_PAN_PIXELS = 20;
+
 
 import { ChunkManager } from './ChunkManager';
 import type { CanvasNode } from './types';
@@ -47,8 +47,6 @@ const CAMERA_NEAR = 0.1;
 const CAMERA_FAR_MIN = 2000;
 /** Dark canvas background. */
 const BACKGROUND_COLOR = 0x0a0e17;
-/** Wheel zoom step (world units per click, applied directly to camera Z). */
-const WHEEL_ZOOM_STEP = 0.8;
 /**
  * Top-level renderer façade. Construct with a container element, call
  * `setNodes` with a `CanvasNode[]` layout, then `start()`.
@@ -62,6 +60,8 @@ export class SceneManager {
   private readonly _chunkManager: ChunkManager;
   private readonly _resizeObserver: ResizeObserver;
   private readonly _velocity = new THREE.Vector3();
+  private readonly _targetVel = new THREE.Vector3();
+  private _scrollAccum = 0;
   private readonly _basePos = new THREE.Vector3();
   private readonly _drift = new THREE.Vector2();
   private readonly _mouse = new THREE.Vector2();
@@ -122,7 +122,7 @@ export class SceneManager {
    * travel); >1.0 amplifies it (faster). Set from configStore so the user
    * can tune how quickly pinching scrubs through time buckets.
    */
-  private _pinchSensitivity = 0.25;
+  private _pinchSensitivity = 1.0;
   private _lastChunkX = Infinity;
   private _lastChunkY = Infinity;
   private _lastChunkZ = Infinity;
@@ -349,6 +349,8 @@ export class SceneManager {
     this._flyElapsed = 0;
     this._flyDuration = 700;
     this._velocity.set(0, 0, 0);
+    this._targetVel.set(0, 0, 0);
+    this._scrollAccum = 0;
   }
 
   flyToXYZ(x: number, y: number, z: number, durationMs = 700): void {
@@ -359,6 +361,8 @@ export class SceneManager {
     this._flyElapsed = 0;
     this._flyDuration = durationMs;
     this._velocity.set(0, 0, 0);
+    this._targetVel.set(0, 0, 0);
+    this._scrollAccum = 0;
   }
 
   /**
@@ -381,6 +385,8 @@ export class SceneManager {
     this._flyElapsed = 0;
     this._flyDuration = 1600;
     this._velocity.set(0, 0, 0);
+    this._targetVel.set(0, 0, 0);
+    this._scrollAccum = 0;
   }
 
   /** Cancels any active fly-to, leaving the camera wherever it currently sits. */
@@ -495,35 +501,43 @@ export class SceneManager {
   /** Applies held keyboard keys to the velocity vector. */
   private applyKeyboard(): void {
     const k = this._keys;
-    const panStep = KEYBOARD_PAN_PIXELS * this._basePos.z * DRAG_PAN_SCALE;
-    const zoomStep = KEYBOARD_SPEED;
     let moved = false;
-    if (k.has('ArrowLeft') || k.has('a')) { this._velocity.x -= panStep; moved = true; }
-    if (k.has('ArrowRight') || k.has('d')) { this._velocity.x += panStep; moved = true; }
-    if (k.has('ArrowUp') || k.has('w')) { this._velocity.y += panStep; moved = true; }
-    if (k.has('ArrowDown') || k.has('s')) { this._velocity.y -= panStep; moved = true; }
-    if (k.has('q')) { this._velocity.z += zoomStep; moved = true; }
-    if (k.has('e')) { this._velocity.z -= zoomStep; moved = true; }
+    if (k.has('ArrowLeft') || k.has('a')) { this._targetVel.x -= KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowRight') || k.has('d')) { this._targetVel.x += KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowUp') || k.has('w')) { this._targetVel.y += KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowDown') || k.has('s')) { this._targetVel.y -= KEYBOARD_SPEED; moved = true; }
+    if (k.has('q')) { this._targetVel.z += KEYBOARD_SPEED; moved = true; }
+    if (k.has('e')) { this._targetVel.z -= KEYBOARD_SPEED; moved = true; }
     if (moved) {
       this._userMoved = true;
       this.cancelFly();
     }
   }
 
-  /** Lerps basePos toward velocity, decays velocity, clamps basePos Z. */
+  /** Integrates targetVel + scrollAccum into velocity, then velocity into basePos. */
   private applyVelocity(): void {
-    if (this._velocity.length() > MAX_VELOCITY) {
-      this._velocity.normalize().multiplyScalar(MAX_VELOCITY);
-    }
-    this._basePos.x += this._velocity.x * VELOCITY_LERP;
-    this._basePos.y += this._velocity.y * VELOCITY_LERP;
-    this._basePos.z += this._velocity.z * VELOCITY_LERP;
+    this._targetVel.z += this._scrollAccum;
+    this._scrollAccum *= SCROLL_DECAY;
+
+    this._targetVel.clampLength(0, MAX_VELOCITY);
+
+    this._velocity.x = this._velocity.x + (this._targetVel.x - this._velocity.x) * VELOCITY_LERP;
+    this._velocity.y = this._velocity.y + (this._targetVel.y - this._velocity.y) * VELOCITY_LERP;
+    this._velocity.z = this._velocity.z + (this._targetVel.z - this._velocity.z) * VELOCITY_LERP;
+
+    this._basePos.x += this._velocity.x;
+    this._basePos.y += this._velocity.y;
+    this._basePos.z += this._velocity.z;
 
     if (this._basePos.z < this._minCameraZ) this._basePos.z = this._minCameraZ;
     if (this._basePos.z > this._maxCameraZ) this._basePos.z = this._maxCameraZ;
+    if (this._pinchActive && this._pinchMinZ !== null && this._pinchMaxZ !== null) {
+      if (this._basePos.z < this._pinchMinZ) this._basePos.z = this._pinchMinZ;
+      if (this._basePos.z > this._pinchMaxZ) this._basePos.z = this._pinchMaxZ;
+    }
 
-    this._velocity.multiplyScalar(VELOCITY_DECAY);
-    if (this._velocity.lengthSq() < 1e-6) this._velocity.set(0, 0, 0);
+    this._targetVel.multiplyScalar(VELOCITY_DECAY);
+    if (this._targetVel.lengthSq() < 1e-6) this._targetVel.set(0, 0, 0);
   }
 
   /** Smooths drift toward mouse * driftAmount (zoom-scaled parallax). */
@@ -606,9 +620,9 @@ export class SceneManager {
       if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
         this._pointer.dragged = true;
       }
-      const panScale = this._basePos.z * DRAG_PAN_SCALE;
-      this._basePos.x -= dx * panScale;
-      this._basePos.y += dy * panScale;
+      const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+      this._targetVel.x -= dx * MOUSE_PAN_FACTOR * zScale;
+      this._targetVel.y += dy * MOUSE_PAN_FACTOR * zScale;
       this._userMoved = true;
       this.updateCursor();
     } else {
@@ -688,10 +702,15 @@ export class SceneManager {
   }
 
   private applyPinch(): void {
-    // Pinch-to-zoom disabled; double-tap handles all time-travel zoom on touch.
+    const pts = [...this._touchPointers.values()];
+    if (pts.length < 2) return;
+    const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
+    const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+    this._scrollAccum += (this._pinchStartDist - dist) * ZOOM_FACTOR * zScale * this._pinchSensitivity;
+    this._pinchStartDist = dist;
+    this._userMoved = true;
   }
 
-  /** Single-touch pan with reduced sensitivity vs mouse/trackpad. */
   private applyTouchPan(e: PointerEvent): void {
     const dx = e.clientX - this._pointer.lastX;
     const dy = e.clientY - this._pointer.lastY;
@@ -700,19 +719,17 @@ export class SceneManager {
     if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
       this._pointer.dragged = true;
     }
-    const panScale = this._basePos.z * DRAG_PAN_SCALE * TOUCH_SENSITIVITY;
-    this._basePos.x -= dx * panScale;
-    this._basePos.y += dy * panScale;
+    const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+    this._targetVel.x -= dx * TOUCH_PAN_FACTOR * zScale;
+    this._targetVel.y += dy * TOUCH_PAN_FACTOR * zScale;
     this._userMoved = true;
   }
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     this.cancelFly();
-    // Inverted: scroll up (deltaY < 0) zooms in (z decreases), scroll down zooms out.
-    this._basePos.z += e.deltaY * WHEEL_ZOOM_STEP;
-    if (this._basePos.z < this._minCameraZ) this._basePos.z = this._minCameraZ;
-    if (this._basePos.z > this._maxCameraZ) this._basePos.z = this._maxCameraZ;
+    const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+    this._scrollAccum += e.deltaY * ZOOM_FACTOR * zScale;
     this._pointer.dragged = true;
     this._userMoved = true;
   };
@@ -776,6 +793,10 @@ export class SceneManager {
     this.stop();
   };
 
+  private onDoubleClick = (e: MouseEvent): void => {
+    this.onDoubleTap?.(e.clientX, e.clientY);
+  };
+
   private onVisibilityChange = (): void => {
     this._visible = document.visibilityState === 'visible';
     if (this._visible && this._running && !this._rafId) {
@@ -810,6 +831,7 @@ export class SceneManager {
     el.addEventListener('pointerup', this.onPointerUp);
     el.addEventListener('pointerleave', this.onPointerUp);
     el.addEventListener('wheel', this.onWheel, { passive: false });
+    el.addEventListener('dblclick', this.onDoubleClick);
     el.addEventListener('webglcontextlost', this.onContextLoss);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
@@ -823,6 +845,7 @@ export class SceneManager {
     el.removeEventListener('pointerup', this.onPointerUp);
     el.removeEventListener('pointerleave', this.onPointerUp);
     el.removeEventListener('wheel', this.onWheel);
+    el.removeEventListener('dblclick', this.onDoubleClick);
     el.removeEventListener('webglcontextlost', this.onContextLoss);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }

@@ -56,12 +56,33 @@ export const ZOOM_FACTOR_DIVISOR = 50;
 export const INVIS_THRESHOLD = 0.01;
 
 /**
- * Multiplier applied to `DRAG_PAN_SCALE` and `WHEEL_ZOOM_STEP` for touch
- * pointers. Touchscreens report pixel deltas directly (no trackpad momentum),
- * so the desktop-scale factors feel far too twitchy on a phone. 0.35 keeps
- * the same gesture-to-world ratio at fingertip as on a trackpad.
+ * Mouse-drag pan factor: each pixel of pointer delta adds this much to
+ * `targetVel.x/y`, then scaled by `basePos.z / ZOOM_FACTOR_DIVISOR` so
+ * panning stays proportional on-screen regardless of zoom level.
+ * Ported from the reference's `0.025` multiplier.
  */
-export const TOUCH_SENSITIVITY = 0.35;
+export const MOUSE_PAN_FACTOR = 0.025;
+
+/**
+ * Single-touch pan factor: each pixel of touch delta adds this much to
+ * `targetVel.x/y`, then z-scaled like MOUSE_PAN_FACTOR.
+ * Ported from the reference's `0.02` multiplier.
+ */
+export const TOUCH_PAN_FACTOR = 0.02;
+
+/**
+ * Wheel / pinch-zoom factor: each pixel of `deltaY` (or pinch distance
+ * change) accumulates this much into `scrollAccum`, then z-scaled by
+ * `basePos.z / ZOOM_FACTOR_DIVISOR`. Ported from the reference's `0.006`.
+ */
+export const ZOOM_FACTOR = 0.006;
+
+/**
+ * Per-frame decay applied to `scrollAccum` (wheel/pinch momentum).
+ * 0.8 means 20 % of accumulated scroll is consumed each frame, creating
+ * the smooth zoom-out coast in the reference implementation.
+ */
+export const SCROLL_DECAY = 0.8;
 
 /** Per-frame camera translation when a movement key is held. */
 export const KEYBOARD_SPEED = 0.18;
