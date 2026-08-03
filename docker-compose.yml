@@ -1,25 +1,3 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# Knowledge Graph — Docker Compose
-# ═══════════════════════════════════════════════════════════════════════════════
-# Usage:
-#   docker compose up -d          — start full stack
-#   docker compose logs -f        — follow logs
-#   docker compose down           — stop
-#
-# Config:
-#   Single .env file at project root — no separate lightrag/.env needed.
-#   cp .env.example .env   then customize.
-#
-# Prerequisites:
-#   llama-server processes running on host (ports 8080, 8081)
-#
-# Storage:
-#   PostgreSQL for KV, Vector, and DocStatus stores.
-#   NetworkX for Graph storage (no AGE extension needed).
-#   To switch to file-based storage, remove the LIGHTRAG_*_STORAGE vars
-#   from .env and the defaults (JsonKVStorage, NanoVectorDBStorage, etc.) apply.
-# ═══════════════════════════════════════════════════════════════════════════════
-
 services:
   lightrag:
     build:
@@ -32,80 +10,73 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${LIGHTRAG_PORT:-9621}:9621"
+    - ${LIGHTRAG_PORT:-9621}:9621
     volumes:
-      - lightrag_data:/app/data
+    - lightrag_data:/app/data
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     environment:
-      HOST: "${LIGHTRAG_HOST:-0.0.0.0}"
-      PORT: "9621"
-      WEBUI_TITLE: "${LIGHTRAG_WEBUI_TITLE:-My Graph KB}"
-      WEBUI_DESCRIPTION: "${LIGHTRAG_WEBUI_DESCRIPTION:-Simple and Fast Graph Based RAG System}"
-      WORKING_DIR: "${WORKING_DIR:-/app/data/rag_storage}"
-      INPUT_DIR: "${INPUT_DIR:-/app/data/inputs}"
-      LLM_BINDING: "${LLM_BINDING:-openai}"
-      LLM_MODEL: "${LLM_MODEL:-Bonsai-27B-Q1_0}"
-      LLM_BINDING_HOST: "${LLM_BINDING_HOST:-http://host.docker.internal:8080}"
-      LLM_BINDING_API_KEY: "${LLM_BINDING_API_KEY:-llama-server}"
-      QUERY_LLM_MODEL: "${QUERY_LLM_MODEL:-Bonsai-27B-Q1_0}"
-      QUERY_LLM_BINDING: "${QUERY_LLM_BINDING:-openai}"
-      QUERY_LLM_BINDING_HOST: "${QUERY_LLM_BINDING_HOST:-http://host.docker.internal:8080}"
-      QUERY_LLM_BINDING_API_KEY: "${QUERY_LLM_BINDING_API_KEY:-llama-server}"
-      EXTRACT_OPENAI_LLM_TEMPERATURE: "${EXTRACT_OPENAI_LLM_TEMPERATURE:-0.1}"
-      EXTRACT_OPENAI_LLM_MAX_TOKENS: "${EXTRACT_OPENAI_LLM_MAX_TOKENS:-2048}"
-      QUERY_OPENAI_LLM_TEMPERATURE: "${QUERY_OPENAI_LLM_TEMPERATURE:-0.7}"
-      QUERY_OPENAI_LLM_MAX_TOKENS: "${QUERY_OPENAI_LLM_MAX_TOKENS:-1024}"
-      ENTITY_EXTRACTION_USE_JSON: "${ENTITY_EXTRACTION_USE_JSON:-true}"
-      OLLAMA_EMULATING_MODEL_TAG: "${OLLAMA_EMULATING_MODEL_TAG:-latest}"
-      EMBEDDING_BINDING: "${EMBEDDING_BINDING:-openai}"
-      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-bge-m3-Q4_K_M}"
-      EMBEDDING_DIM: "${EMBEDDING_DIM:-1024}"
-      EMBEDDING_BINDING_HOST: "${EMBEDDING_BINDING_HOST:-http://host.docker.internal:8081}"
-      EMBEDDING_BINDING_API_KEY: "${EMBEDDING_BINDING_API_KEY:-llama-server}"
-      # Reranker disabled — RERANK_BY_DEFAULT=false in .env. To re-enable,
-      # uncomment these and restore the reranker in scripts/start-llama-servers.sh.
-      # RERANK_BINDING: "${RERANK_BINDING:-jina}"
-      # RERANK_MODEL: "${RERANK_MODEL:-bge-reranker-v2-m3-Q4_K_M}"
-      # RERANK_BINDING_HOST: "${RERANK_BINDING_HOST:-http://host.docker.internal:8082/v1/rerank}"
-      # RERANK_BINDING_API_KEY: "${RERANK_BINDING_API_KEY:-llama-server}"
-      RERANK_BY_DEFAULT: "${RERANK_BY_DEFAULT:-false}"
-      # MIN_RERANK_SCORE: "${MIN_RERANK_SCORE:--1}"
-      VLM_PROCESS_ENABLE: "${VLM_PROCESS_ENABLE:-true}"
-      VLM_LLM_BINDING: "${VLM_LLM_BINDING:-openai}"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
-      VLM_LLM_BINDING_HOST: "${VLM_LLM_BINDING_HOST:-http://host.docker.internal:8080}"
-      VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
-      LIGHTRAG_KV_STORAGE: "${LIGHTRAG_KV_STORAGE:-PGKVStorage}"
-      LIGHTRAG_VECTOR_STORAGE: "${LIGHTRAG_VECTOR_STORAGE:-PGVectorStorage}"
-      LIGHTRAG_GRAPH_STORAGE: "${LIGHTRAG_GRAPH_STORAGE:-NetworkXStorage}"
-      LIGHTRAG_DOC_STATUS_STORAGE: "${LIGHTRAG_DOC_STATUS_STORAGE:-PGDocStatusStorage}"
-      POSTGRES_HOST: "${POSTGRES_HOST:-postgres}"
-      POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
-      POSTGRES_USER: "${POSTGRES_USER:-lightrag}"
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-lightrag}"
-      POSTGRES_DATABASE: "${POSTGRES_DATABASE:-lightrag}"
-      POSTGRES_VECTOR_INDEX_TYPE: "${POSTGRES_VECTOR_INDEX_TYPE:-HNSW}"
-      CHUNK_SIZE: "${CHUNK_SIZE:-1500}"
-      CHUNK_OVERLAP_SIZE: "${CHUNK_OVERLAP_SIZE:-150}"
-      LLM_TIMEOUT: "${LLM_TIMEOUT:-900}"
-      # Override LightRAG defaults (TOP_K=40, CHUNK_TOP_K=20, MAX_TOTAL_TOKENS=30000).
-      # TOP_K=5 keeps retrieval breadth tight; MAX_*_TOKENS raised so retrieved
-      # entities/relationships aren't truncated before reaching the LLM.
-      TOP_K: "${TOP_K:-5}"
-      CHUNK_TOP_K: "${CHUNK_TOP_K:-5}"
-      MAX_ENTITY_TOKENS: "${MAX_ENTITY_TOKENS:-3000}"
-      MAX_RELATION_TOKENS: "${MAX_RELATION_TOKENS:-3000}"
-      MAX_TOTAL_TOKENS: "${MAX_TOTAL_TOKENS:-8000}"
+      HOST: ${LIGHTRAG_HOST:-0.0.0.0}
+      PORT: '9621'
+      WEBUI_TITLE: ${LIGHTRAG_WEBUI_TITLE:-My Graph KB}
+      WEBUI_DESCRIPTION: ${LIGHTRAG_WEBUI_DESCRIPTION:-Simple and Fast Graph Based
+        RAG System}
+      WORKING_DIR: ${WORKING_DIR:-/app/data/rag_storage}
+      INPUT_DIR: ${INPUT_DIR:-/app/data/inputs}
+      LLM_BINDING: ${LLM_BINDING:-openai}
+      LLM_MODEL: ${LLM_MODEL:-Bonsai-27B-Q1_0}
+      LLM_BINDING_HOST: ${LLM_BINDING_HOST:-http://host.docker.internal:8080}
+      LLM_BINDING_API_KEY: ${LLM_BINDING_API_KEY:-llama-server}
+      QUERY_LLM_MODEL: ${QUERY_LLM_MODEL:-Bonsai-27B-Q1_0}
+      QUERY_LLM_BINDING: ${QUERY_LLM_BINDING:-openai}
+      QUERY_LLM_BINDING_HOST: ${QUERY_LLM_BINDING_HOST:-http://host.docker.internal:8080}
+      QUERY_LLM_BINDING_API_KEY: ${QUERY_LLM_BINDING_API_KEY:-llama-server}
+      EXTRACT_OPENAI_LLM_TEMPERATURE: ${EXTRACT_OPENAI_LLM_TEMPERATURE:-0.1}
+      EXTRACT_OPENAI_LLM_MAX_TOKENS: ${EXTRACT_OPENAI_LLM_MAX_TOKENS:-2048}
+      QUERY_OPENAI_LLM_TEMPERATURE: ${QUERY_OPENAI_LLM_TEMPERATURE:-0.7}
+      QUERY_OPENAI_LLM_MAX_TOKENS: ${QUERY_OPENAI_LLM_MAX_TOKENS:-1024}
+      ENTITY_EXTRACTION_USE_JSON: ${ENTITY_EXTRACTION_USE_JSON:-true}
+      OLLAMA_EMULATING_MODEL_TAG: ${OLLAMA_EMULATING_MODEL_TAG:-latest}
+      EMBEDDING_BINDING: ${EMBEDDING_BINDING:-openai}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3-Q4_K_M}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      EMBEDDING_BINDING_HOST: ${EMBEDDING_BINDING_HOST:-http://host.docker.internal:8081}
+      EMBEDDING_BINDING_API_KEY: ${EMBEDDING_BINDING_API_KEY:-llama-server}
+      RERANK_BY_DEFAULT: ${RERANK_BY_DEFAULT:-false}
+      VLM_PROCESS_ENABLE: ${VLM_PROCESS_ENABLE:-true}
+      VLM_LLM_BINDING: ${VLM_LLM_BINDING:-openai}
+      VLM_LLM_MODEL: ${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}
+      VLM_LLM_BINDING_HOST: ${VLM_LLM_BINDING_HOST:-http://host.docker.internal:8080}
+      VLM_LLM_BINDING_API_KEY: ${VLM_LLM_BINDING_API_KEY:-llama-server}
+      LIGHTRAG_KV_STORAGE: ${LIGHTRAG_KV_STORAGE:-PGKVStorage}
+      LIGHTRAG_VECTOR_STORAGE: ${LIGHTRAG_VECTOR_STORAGE:-PGVectorStorage}
+      LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-NetworkXStorage}
+      LIGHTRAG_DOC_STATUS_STORAGE: ${LIGHTRAG_DOC_STATUS_STORAGE:-PGDocStatusStorage}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-lightrag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-lightrag}
+      POSTGRES_VECTOR_INDEX_TYPE: ${POSTGRES_VECTOR_INDEX_TYPE:-HNSW}
+      CHUNK_SIZE: ${CHUNK_SIZE:-1500}
+      CHUNK_OVERLAP_SIZE: ${CHUNK_OVERLAP_SIZE:-150}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-900}
+      TOP_K: ${TOP_K:-5}
+      CHUNK_TOP_K: ${CHUNK_TOP_K:-5}
+      MAX_ENTITY_TOKENS: ${MAX_ENTITY_TOKENS:-3000}
+      MAX_RELATION_TOKENS: ${MAX_RELATION_TOKENS:-3000}
+      MAX_TOTAL_TOKENS: ${MAX_TOTAL_TOKENS:-8000}
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9621/health')\" || exit 1"]
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:9621/health')"
+        || exit 1
       interval: 15s
       timeout: 10s
       start_period: 30s
       retries: 5
     networks:
-      - internal
-
+    - internal
   knowledge-graph-mcp:
     build:
       context: .
@@ -115,25 +86,27 @@ services:
     restart: unless-stopped
     mem_limit: 128m
     env_file:
-      - .env
+    - .env
     environment:
-      MEMORY_SEARCH_MCP_PORT: "${MEMORY_SEARCH_MCP_PORT:-9653}"
-      LIGHTRAG_API_URL: "http://lightrag:${LIGHTRAG_PORT:-9621}"
-      LIGHTRAG_API_KEY: "${LIGHTRAG_BINDING_API_KEY:-}"
+      MEMORY_SEARCH_MCP_PORT: ${MEMORY_SEARCH_MCP_PORT:-9653}
+      LIGHTRAG_API_URL: http://lightrag:${LIGHTRAG_PORT:-9621}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_BINDING_API_KEY:-}
     ports:
-      - "${MEMORY_SEARCH_MCP_PORT:-9653}:${MEMORY_SEARCH_MCP_PORT:-9653}"
+    - ${MEMORY_SEARCH_MCP_PORT:-9653}:${MEMORY_SEARCH_MCP_PORT:-9653}
     depends_on:
       lightrag:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('localhost',9653)); s.close()\" || exit 1"]
+      test:
+      - CMD-SHELL
+      - python -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('localhost',9653));
+        s.close()" || exit 1
       interval: 15s
       timeout: 5s
       start_period: 20s
       retries: 3
     networks:
-      - internal
-
+    - internal
   postgres:
     image: pgvector/pgvector:pg18
     container_name: knowledge-graph-postgres
@@ -144,15 +117,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lightrag}
       POSTGRES_DB: ${POSTGRES_DATABASE:-lightrag}
     volumes:
-      - postgres_data:/var/lib/postgresql
+    - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lightrag}"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-lightrag}
       interval: 5s
       timeout: 5s
       retries: 10
     networks:
-      - internal
-
+    - internal
   api:
     build:
       context: .
@@ -165,38 +139,35 @@ services:
       lightrag:
         condition: service_healthy
     environment:
-      LIGHTRAG_URL: "http://lightrag:9621"
-      KNOWN_FACES_PATH: "/app/known_faces"
-      VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
-      VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
-      FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-mtcnn}"
-      FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
-      DATABASE_URL: "postgresql://lightrag:lightrag@postgres:5432/lightrag"
+      LIGHTRAG_URL: http://lightrag:9621
+      KNOWN_FACES_PATH: /app/known_faces
+      VLM_LLM_BINDING_HOST: http://host.docker.internal:8080
+      VLM_LLM_MODEL: ${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}
+      VLM_LLM_BINDING_API_KEY: ${VLM_LLM_BINDING_API_KEY:-llama-server}
+      FACE_DETECTOR_BACKEND: ${FACE_DETECTOR_BACKEND:-mtcnn}
+      FACE_ATTRIBUTES: ${FACE_ATTRIBUTES:-age,gender,emotion}
+      DATABASE_URL: postgresql://lightrag:lightrag@postgres:5432/lightrag
     volumes:
-      - ./known_faces:/app/known_faces:rw
-      - ./inputs:/app/inputs
-      - face_crops:/app/face_crops
-      - deepface_weights:/root/.deepface
+    - ./known_faces:/app/known_faces:rw
+    - ./inputs:/app/inputs
+    - face_crops:/app/face_crops
+    - deepface_weights:/root/.deepface
     ports:
-      - "${API_PORT:-8000}:8000"
+    - ${API_PORT:-8000}:8000
     extra_hosts:
-      - "host.docker.internal:host-gateway"
-    # PIL thumbnail generation for a 3MB RAW JPEG needs ~400MB native RSS per
-    # image; the thumbnail semaphore (api/routes/images.py) caps concurrency at
-    # 2, so peak native RSS alone is ~800MB before counting the event loop,
-    # deepface, and connection pools. 512m OOM-kills the worker mid-stream
-    # (ERR_INCOMPLETE_CHUNKED_ENCODING / 502 from nginx). 1.5g leaves headroom.
+    - host.docker.internal:host-gateway
     mem_limit: 1536m
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        || exit 1
       interval: 10s
       timeout: 5s
       start_period: 15s
       retries: 3
     networks:
-      - internal
-
+    - internal
   processor:
     build:
       context: .
@@ -209,28 +180,30 @@ services:
       lightrag:
         condition: service_healthy
     environment:
-      LIGHTRAG_URL: "http://lightrag:9621"
-      KNOWN_FACES_PATH: "/app/known_faces"
-      VLM_LLM_BINDING_HOST: "http://host.docker.internal:8080"
-      VLM_LLM_MODEL: "${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}"
-      VLM_LLM_BINDING_API_KEY: "${VLM_LLM_BINDING_API_KEY:-llama-server}"
-      FACE_DETECTOR_BACKEND: "${FACE_DETECTOR_BACKEND:-mtcnn}"
-      FACE_ATTRIBUTES: "${FACE_ATTRIBUTES:-age,gender,emotion}"
-      DATABASE_URL: "postgresql://lightrag:lightrag@postgres:5432/lightrag"
-      MAX_CONCURRENT_JOBS: "${MAX_CONCURRENT_JOBS:-1}"
-      VLM_MAX_CONCURRENT: "${VLM_MAX_CONCURRENT:-1}"
+      LIGHTRAG_URL: http://lightrag:9621
+      KNOWN_FACES_PATH: /app/known_faces
+      VLM_LLM_BINDING_HOST: http://host.docker.internal:8080
+      VLM_LLM_MODEL: ${VLM_LLM_MODEL:-Bonsai-27B-Q1_0}
+      VLM_LLM_BINDING_API_KEY: ${VLM_LLM_BINDING_API_KEY:-llama-server}
+      FACE_DETECTOR_BACKEND: ${FACE_DETECTOR_BACKEND:-mtcnn}
+      FACE_ATTRIBUTES: ${FACE_ATTRIBUTES:-age,gender,emotion}
+      DATABASE_URL: postgresql://lightrag:lightrag@postgres:5432/lightrag
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-1}
+      VLM_MAX_CONCURRENT: ${VLM_MAX_CONCURRENT:-1}
     volumes:
-      - ./known_faces:/app/known_faces:rw
-      - ./inputs:/app/inputs
-      - face_crops:/app/face_crops
-      - deepface_weights:/root/.deepface
+    - ./known_faces:/app/known_faces:rw
+    - ./inputs:/app/inputs
+    - face_crops:/app/face_crops
+    - deepface_weights:/root/.deepface
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     mem_limit: 1536m
-    command: ["python", "-m", "api.worker"]
+    command:
+    - python
+    - -m
+    - api.worker
     networks:
-      - internal
-
+    - internal
   nexus:
     build:
       context: .
@@ -239,27 +212,50 @@ services:
     restart: unless-stopped
     mem_limit: 256m
     environment:
-      LLAMA_HOST: "${LLAMA_HOST:-host.docker.internal}"
-      WHISPER_HOST: "${WHISPER_HOST:-host.docker.internal}"
+      LLAMA_HOST: ${LLAMA_HOST:-host.docker.internal}
+      WHISPER_HOST: ${WHISPER_HOST:-host.docker.internal}
     ports:
-      - "${NEXUS_PORT:-3000}:3000"
-      - "${NEXUS_HTTPS_PORT:-3443}:3443"
+    - ${NEXUS_PORT:-3000}:3000
+    - ${NEXUS_HTTPS_PORT:-3443}:3443
     depends_on:
       api:
         condition: service_healthy
       lightrag:
         condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+    - host.docker.internal:host-gateway
     networks:
-      - internal
-
+    - internal
+  llm-worker:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: knowledge-graph-llm-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://lightrag:lightrag@postgres:5432/lightrag
+      LLAMA_API: ${LLAMA_API:-http://host.docker.internal:8080}
+      MCP_API: ${MCP_API:-http://knowledge-graph-mcp:9653}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-Bonsai-27B-Q1_0}
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    mem_limit: 512m
+    command:
+    - python
+    - -m
+    - api.llm_worker
+    networks:
+    - internal
 networks:
   internal:
     driver: bridge
-
 volumes:
-  lightrag_data:
-  postgres_data:
-  deepface_weights:
-  face_crops:
+  lightrag_data: null
+  postgres_data: null
+  deepface_weights: null
+  face_crops: null

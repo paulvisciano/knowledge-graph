@@ -44,6 +44,10 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/sync/, ''),
         ws: true
       },
+      '/api/chat': {
+        target: kgApiHost,
+        ws: true
+      },
       '/mcp': {
         target: mcpHost,
         rewrite: (path) => path.replace(/^\/mcp/, '/mcp')
