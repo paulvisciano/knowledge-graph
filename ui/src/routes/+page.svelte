@@ -231,6 +231,14 @@
   let isTranscribing = $state(false);
   let recordingSupported = $state(false);
   let micBusy = $state(false);
+  // Queue of AI responses waiting to be streamed. When a user sends a message
+  // while a stream is already active, we create the user message immediately
+  // (so it appears in the conversation) and queue the AI response here.
+  // When the current stream ends, we drain the queue automatically.
+  let pendingStreams = $state<Array<{
+    conversationId: string;
+    attachments: Attachment[];
+  }>>([]);
   const HOLD_TO_RECORD_MS = 3000;
   const HOLD_TICK_MS = 50;
   const HOLD_START_DELAY_MS = 300;
@@ -246,11 +254,9 @@
   let micTooltipMessage = $derived(
     isTranscribing
       ? 'Transcribing…'
-      : isStreamActive
-        ? 'Open conversation'
-        : isRecording
-          ? 'Release to send'
-          : 'Hold to record'
+      : isRecording
+        ? 'Release to send'
+        : 'Hold to record'
   );
   let promptEditing = $state(false);
   let promptDraft = $state('');
@@ -270,7 +276,7 @@
       if (e.key !== ' ' && e.code !== 'Space') return;
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
-      if (isActiveConversationStreaming || isTranscribing || micBusy) return;
+      if (isTranscribing || micBusy) return;
       e.preventDefault();
       handleMicTap();
     }
@@ -342,10 +348,6 @@
   function handleMicTap() {
     if (!audioRecorder || !recordingSupported) return;
     if (micBusy) return;
-    if (isStreamActive) {
-      openStreamingConversation();
-      return;
-    }
     if (isRecording) {
       stopAndSendRecording();
     } else {
@@ -363,6 +365,9 @@
 
   function stopAndSendRecording() {
     if (!audioRecorder) return;
+    // Capture whether the recording started from the collapsed orb.
+    // If so, the message should start a new conversation and not open the panel.
+    const fromOrb = !chatExpanded;
     isRecording = false;
     micBusy = true;
     isTranscribing = true;
@@ -371,11 +376,15 @@
         const audioUrl = URL.createObjectURL(wavBlob);
         const audioData = await blobToBase64(wavBlob);
         const transcript = await transcribeAudio(wavBlob, API.llama.transcriptions);
+        // Unblock the mic as soon as transcription is done — the AI response
+        // streams in the background so the user can record again immediately.
+        isTranscribing = false;
+        micBusy = false;
         const text = transcript.trim();
-        if (text) await handleSend(audioUrl, audioData, 'wav', false, text);
+        if (text) void handleSend(audioUrl, audioData, 'wav', fromOrb, text, fromOrb);
       })
-      .catch((err) => console.error('Push-to-talk send failed:', err))
-      .finally(() => {
+      .catch((err) => {
+        console.error('Push-to-talk send failed:', err);
         isTranscribing = false;
         micBusy = false;
       });
@@ -644,6 +653,7 @@
       promptTokens = null;
     }
     streamingConversationId = null;
+    graphStore.setStreamingConversations(new Set());
     saveMessagesToConversation();
   }
 
@@ -799,6 +809,7 @@
         pushStreamMessage(assistantMsg);
         isStreaming = true;
         thinkingContent = '';
+        graphStore.setStreamingConversations(new Set([streamingConversationId!]));
 
         const requestBody: Record<string, unknown> = {
           model: selectedModel || undefined,
@@ -1184,23 +1195,39 @@
         }
       }
       streamingConversationId = null;
-
-      // If currently viewing the stream's conversation, scroll to bottom
+      graphStore.setStreamingConversations(new Set());
       requestAnimationFrame(scrollToBottom);
+
+      // Drain any AI responses queued while this stream was active.
+      // Each queued entry targets a specific conversation — switch to it
+      // and start the stream.
+      const queued = [...pendingStreams];
+      pendingStreams = [];
+      for (const entry of queued) {
+        // Switch to the conversation that queued this response
+        if (entry.conversationId !== activeConversationId) {
+          saveMessagesToConversation();
+          activeConversationId = entry.conversationId;
+          const conv = conversations.find((c) => c.id === entry.conversationId);
+          if (conv) {
+            messages = [...conv.messages];
+          }
+        }
+        await streamAssistantResponse(entry.attachments);
+      }
     }
   }
 
-  async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false, transcript?: string) {
+  async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false, transcript?: string, fromOrb = false) {
     const messageText = transcript ?? chatInput.trim();
     const trimmed = messageText.trim();
     if ((!trimmed && attachments.length === 0) && !audioData) return;
-    if (isActiveConversationStreaming) return;
 
-    // Capture whether the chat was already open before this send: a send from
-    // the main page (collapsed chat) should start a new conversation, while a
-    // send from inside an open conversation should append to it.
+    // Capture whether the chat was already open before this send.
     const wasChatExpanded = chatExpanded;
-    chatExpanded = true;
+    // When recording from the collapsed orb, don't force the chat panel open.
+    // The user can click the conversation node to view it.
+    if (!fromOrb) chatExpanded = true;
     isProcessing = true;
     processingLabel = 'Sending...';
 
@@ -1238,6 +1265,17 @@
       if (textareaEl) textareaEl.style.height = 'auto';
       scrollToBottom();
     });
+
+    // If a stream is already running, queue this AI response to start
+    // once the current one finishes. The user message has already been
+    // created and saved above, so it's visible in the conversation.
+    if (isStreamActive) {
+      pendingStreams = [...pendingStreams, {
+        conversationId: activeConversationId,
+        attachments: sentAttachments,
+      }];
+      return;
+    }
 
     await streamAssistantResponse(sentAttachments);
   }
@@ -1623,7 +1661,7 @@
 
   function handlePanelSend() {
     const trimmed = panelChatInput.trim();
-    if ((!trimmed && attachments.length === 0) || isActiveConversationStreaming) return;
+    if (!trimmed && attachments.length === 0) return;
     chatInput = trimmed;
     panelChatInput = '';
     requestAnimationFrame(() => {
@@ -2341,48 +2379,38 @@
               disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
               onPickDocument={openDocumentPicker}
             />
-            {#if isActiveConversationStreaming || isRecording}
-              <button
-                onclick={() => { if (isRecording) stopAndSendRecording(); else cancelStreaming(); }}
-                class="flex h-full aspect-square shrink-0 items-center justify-center rounded-full bg-cyber-red/20 text-cyber-red transition-all duration-200 hover:bg-cyber-red/30 ring-2 ring-cyber-red/40"
-                title={isRecording ? 'Stop & send recording' : 'Stop generating'}
-                data-testid="stop-button"
-              >
+            <button
+              onclick={() => { if (isActiveConversationStreaming) cancelStreaming(); }}
+              onpointerdown={handleMicPointerDown}
+              onpointerup={handleMicPointerUp}
+              onpointerleave={handleMicPointerLeave}
+              onpointercancel={handleMicPointerCancel}
+              ontouchstart={handleMicTouchStart}
+              ontouchmove={handleMicTouchMove}
+              ontouchend={handleMicTouchEnd}
+              oncontextmenu={(e) => e.preventDefault()}
+              onmouseenter={() => { micTooltipVisible = true; }}
+              onmouseleave={() => { micTooltipVisible = false; }}
+              disabled={(isTranscribing || !recordingSupported) && !isActiveConversationStreaming}
+              data-testid="mic-button"
+              title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : isActiveConversationStreaming ? 'Stop generating' : 'Hold to record'}
+              class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isActiveConversationStreaming ? 'bg-cyber-red/20 text-cyber-red hover:bg-cyber-red/30 ring-2 ring-cyber-red/40' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+            >
+              {#if isRecording}
                 <Icon name="square" size={14} />
-              </button>
-            {:else}
-              <button
-                onpointerdown={handleMicPointerDown}
-                onpointerup={handleMicPointerUp}
-                onpointerleave={handleMicPointerLeave}
-                onpointercancel={handleMicPointerCancel}
-                ontouchstart={handleMicTouchStart}
-                ontouchmove={handleMicTouchMove}
-                ontouchend={handleMicTouchEnd}
-                oncontextmenu={(e) => e.preventDefault()}
-                onmouseenter={() => { micTooltipVisible = true; }}
-                onmouseleave={() => { micTooltipVisible = false; }}
-                disabled={isTranscribing || !recordingSupported}
-                data-testid="mic-button"
-                title={isTranscribing ? 'Transcribing…' : isStreamActive ? 'Open streaming conversation' : isRecording ? 'Release to send' : 'Hold to record'}
-                class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isStreamActive ? 'bg-cyber-purple/15 text-cyber-purple animate-pulse ring-2 ring-cyber-purple/40 hover:bg-cyber-purple/25' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
-              >
-                {#if isRecording}
-                  <Icon name="square" size={16} />
-                {:else if isTranscribing}
-                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                {:else if isStreamActive}
-                  <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-                {:else if holdActive}
-                  <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
-                {:else}
-                  <Icon name="mic" size={22} />
-                {/if}
-                {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile}
-                  <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
-                {/if}
-              </button>
-            {/if}
+              {:else if isTranscribing}
+                <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+              {:else if isActiveConversationStreaming}
+                <Icon name="square" size={14} />
+              {:else if holdActive}
+                <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
+              {:else}
+                <Icon name="mic" size={22} />
+              {/if}
+              {#if micTooltipVisible && !holdActive && !$isMobile}
+                <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
+              {/if}
+            </button>
             </div>
         {/if}
       {/if}
@@ -2401,10 +2429,9 @@
             class:recording={isRecording}
             class:holding={holdActive}
             class:options-open={orbOptionsOpen}
-            class:streaming={isStreamActive}
             role="button"
             tabindex="0"
-            aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : isStreamActive ? 'Open streaming conversation' : 'Voice input'}
+            aria-label={isRecording ? 'Stop recording' : holdActive ? 'Hold to record' : 'Voice input'}
             data-od-id="chat-orb"
             data-testid="mic-button"
             onpointerdown={handleMicPointerDown}
@@ -2415,14 +2442,12 @@
             ontouchmove={handleMicTouchMove}
             ontouchend={handleMicTouchEnd}
             oncontextmenu={(e) => e.preventDefault()}
-            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (isStreamActive) { openStreamingConversation(); } else { handleMicTap(); } } }}
+            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleMicTap(); } }}
             onmouseenter={() => { micTooltipVisible = true; }}
             onmouseleave={() => { micTooltipVisible = false; }}
           >
             {#if isTranscribing}
               <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
-            {:else if isStreamActive}
-              <div class="h-5 w-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
             {:else if isRecording}
               <Icon name="square" size={16} />
             {:else if holdActive}
