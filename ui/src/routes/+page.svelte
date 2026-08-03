@@ -1850,7 +1850,7 @@
       const dy = e.clientY - pointerDownXY.y;
       if (dx * dx + dy * dy > CLICK_MAX_DRIFT * CLICK_MAX_DRIFT) return;
     }
-    if (!(e.target as Node).closest('[data-testid="chat-inline-overlay"]')) {
+    if (!(e.target as HTMLElement).closest('[data-testid="chat-inline-overlay"]')) {
       closeChat();
     }
   }}
@@ -1939,7 +1939,7 @@
                 <div class="flex justify-end">
                   <div class="max-w-[95%] space-y-1">
                     {#if msg.imageUrls && msg.imageUrls.length > 0}
-                      <ImageGallery images={msg.imageUrls} alt="Uploaded image" />
+                      <ImageGallery images={msg.imageUrls ?? []} alt="Uploaded image" />
                     {/if}
                     {#if msg.audioUrl}
                       <AudioPlayer src={msg.audioUrl} label="Voice message" />
@@ -2126,7 +2126,7 @@
                                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                                     Photos
                                   </div>
-                                  <ImageGallery images={msg.imageUrls} alt="Knowledge graph photo" />
+                                  <ImageGallery images={msg.imageUrls ?? []} alt="Knowledge graph photo" />
                                 </div>
                               {/if}
                               {#if parsed.relationships.length > 0}
