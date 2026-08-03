@@ -85,6 +85,7 @@ export class SceneManager {
   private _pinchActive = false;
   private _pinchStartDist = 0;
   private _pinchStartZ = 0;
+  private _pinchDirty = false;
 
   private _lastTapTime = 0;
   private _lastTapX = 0;
@@ -466,6 +467,10 @@ export class SceneManager {
       this._drift.set(0, 0);
     } else {
       this.applyKeyboard();
+      if (this._pinchDirty) {
+        this.applyPinch();
+        this._pinchDirty = false;
+      }
       this.applyVelocity();
       this.applyDrift();
     }
@@ -603,7 +608,7 @@ export class SceneManager {
     if (e.pointerType === 'touch' && this._touchPointers.has(e.pointerId)) {
       this._touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this._pinchActive && this._touchPointers.size >= 2) {
-        this.applyPinch();
+        this._pinchDirty = true;
         return;
       }
       if (this._touchPointers.size === 1 && this._pointer.down) {
