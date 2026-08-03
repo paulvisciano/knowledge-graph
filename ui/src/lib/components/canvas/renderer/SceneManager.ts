@@ -87,6 +87,10 @@ export class SceneManager {
   private _pinchStartZ = 0;
   private _pinchDirty = false;
 
+  private static readonly IS_TOUCH_DEVICE =
+    ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) ||
+    (window.matchMedia?.('(pointer: coarse)').matches ?? false);
+
   private _lastTapTime = 0;
   private _lastTapX = 0;
   private _lastTapY = 0;
@@ -555,11 +559,15 @@ export class SceneManager {
     const amount = DRIFT_AMOUNT * zoomFactor;
     const lerpFactor = isZooming ? DRIFT_LERP_ZOOMING : DRIFT_LERP;
     if (this._pointer.down || this._pinchActive) {
-      // Freeze drift during drag/pinch — keep it at its current value.
       return;
     }
-    this._drift.x = this._drift.x + (this._mouse.x * amount - this._drift.x) * lerpFactor;
-    this._drift.y = this._drift.y + (this._mouse.y * amount - this._drift.y) * lerpFactor;
+    if (SceneManager.IS_TOUCH_DEVICE) {
+      this._drift.x = this._drift.x + (0 - this._drift.x) * lerpFactor;
+      this._drift.y = this._drift.y + (0 - this._drift.y) * lerpFactor;
+    } else {
+      this._drift.x = this._drift.x + (this._mouse.x * amount - this._drift.x) * lerpFactor;
+      this._drift.y = this._drift.y + (this._mouse.y * amount - this._drift.y) * lerpFactor;
+    }
   }
 
   // --- input handlers --------------------------------------------------
