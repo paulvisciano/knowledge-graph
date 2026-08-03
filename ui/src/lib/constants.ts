@@ -74,6 +74,12 @@ export const API = {
     conversation: (id: string) => `/conversations/${id}`,
     conversationsSince: '/conversations/since',
   },
+  chat: {
+    messages: (convId: string) => `/api/chat/conversations/${convId}/messages`,
+    events: '/api/chat/events',
+    statuses: '/api/chat/conversations/statuses',
+    cancel: (convId: string) => `/api/chat/conversations/${convId}/cancel`,
+  },
 } as const;
 
 export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass';

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChatMessage, MCPToolCall, OllamaMessage } from '$lib/constants';
+  import type { ChatMessage, MCPToolCall } from '$lib/constants';
   import { API } from '$lib/constants';
   import { tick, onMount } from 'svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
@@ -16,7 +16,6 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import { AudioRecorder, blobToBase64, isAudioRecordingSupported, transcribeAudio } from '$lib/utils/audio-recording';
-  import { parseKGResult } from '$lib/utils/parse-kg-result';
   import ImageGallery from '$lib/components/ui/ImageGallery.svelte';
   import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
@@ -25,7 +24,8 @@
   import { lightragClient } from '$lib/services/lightrag-client';
   import { kgApiClient, type JobInfo } from '$lib/services/kg-api-client';
   import { syncClient } from '$lib/services/sync-client.svelte';
-  import { fileToAttachment, buildMessageContent, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, MAX_FILE_SIZE, type Attachment } from '$lib/utils/file-utils';
+  import { sseClient, type LlmEvent } from '$lib/services/sse-client.svelte';
+  import { fileToAttachment, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, MAX_FILE_SIZE, type Attachment } from '$lib/utils/file-utils';
   import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
@@ -103,6 +103,259 @@
 
   onMount(() => {
     resumeInProgressJobs();
+
+    // ── SSE connection for real-time LLM events ──
+    sseClient.connect();
+
+    // On new conversation created on the server (e.g. by another client)
+    sseClient.on('new_conversation', (event: LlmEvent) => {
+      const data = event.data as { id: string; title?: string; created_at?: number };
+      if (!data?.id) return;
+      // Don't duplicate if we already have it locally
+      if (conversations.find((c) => c.id === data.id)) return;
+      const conv: Conversation = {
+        id: data.id,
+        title: data.title ?? '',
+        messages: [],
+        createdAt: data.created_at ?? Date.now(),
+        updatedAt: data.created_at ?? Date.now(),
+      };
+      conversations = [conv, ...conversations];
+      graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
+    });
+
+    // On new message in a conversation (user or assistant)
+    sseClient.on('new_message', (event: LlmEvent) => {
+      const data = event.data as { id: string; conv_id: string; role: string; content: string; timestamp?: number; is_streaming?: boolean };
+      if (!data?.conv_id) return;
+      const conv = conversations.find((c) => c.id === data.conv_id);
+      if (!conv) return;
+      // Don't duplicate if we already have this message
+      if (conv.messages.find((m) => m.id === data.id)) return;
+      // Also check the active messages array
+      if (data.conv_id === activeConversationId && messages.find((m) => m.id === data.id)) return;
+
+      const msg: ChatMessage = {
+        id: data.id,
+        role: data.role as 'user' | 'assistant' | 'system',
+        content: data.content ?? '',
+        timestamp: data.timestamp ?? Date.now(),
+        isStreaming: data.is_streaming ?? false,
+      };
+
+      if (data.conv_id === activeConversationId) {
+        messages = [...messages, msg];
+      } else {
+        conv.messages = [...conv.messages, msg];
+        unreadConversations = new Set([...unreadConversations, data.conv_id]);
+      }
+      conv.updatedAt = Date.now();
+      requestAnimationFrame(scrollToBottom);
+    });
+
+    // On token from a streaming assistant response
+    sseClient.on('token', (event: LlmEvent) => {
+      const data = event.data as { token: string; conv_id?: string; job_id?: string; message_id?: string; thinking?: boolean };
+      const convId = data.conv_id ?? event.convId ?? sseStreamingConvId;
+      const msgId = data.message_id ?? sseStreamingMsgId;
+      if (!convId || !msgId) return;
+
+      // Track which conversation/message we're streaming into
+      if (sseStreamingConvId !== convId) {
+        sseStreamingConvId = convId;
+      }
+      if (sseStreamingMsgId !== msgId) {
+        sseStreamingMsgId = msgId;
+      }
+
+      isStreaming = true;
+      if (convId === activeConversationId) {
+        processingLabel = 'Streaming...';
+      }
+
+      const isActive = convId === activeConversationId;
+      const targetMessages = isActive ? messages : conversations.find((c) => c.id === convId)?.messages;
+
+      if (!targetMessages) return;
+
+      const tokenText = data.token ?? '';
+      if (data.thinking) {
+        thinkingContent = (thinkingContent ?? '') + tokenText;
+        if (isActive) {
+          const msgIdx = messages.findIndex((m) => m.id === msgId);
+          if (msgIdx !== -1) {
+            messages[msgIdx] = { ...messages[msgIdx], thinkingContent: (messages[msgIdx].thinkingContent ?? '') + tokenText };
+            messages = [...messages];
+          }
+        }
+      } else {
+        if (isActive) {
+          const msgIdx = messages.findIndex((m) => m.id === msgId);
+          if (msgIdx !== -1) {
+            messages[msgIdx] = { ...messages[msgIdx], content: (messages[msgIdx].content ?? '') + tokenText };
+            messages = [...messages];
+          }
+        } else {
+          const conv = conversations.find((c) => c.id === convId);
+          if (conv) {
+            const msgIdx = conv.messages.findIndex((m) => m.id === msgId);
+            if (msgIdx !== -1) {
+              conv.messages[msgIdx] = { ...conv.messages[msgIdx], content: (conv.messages[msgIdx].content ?? '') + tokenText };
+              conv.messages = [...conv.messages];
+              unreadConversations = new Set([...unreadConversations, convId]);
+            }
+          }
+        }
+      }
+      requestAnimationFrame(scrollToBottom);
+    });
+
+    // On stream complete
+    sseClient.on('complete', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; job_id?: string; message_id?: string } ;
+      const convId = data.conv_id ?? event.convId ?? sseStreamingConvId;
+      const msgId = data.message_id ?? sseStreamingMsgId;
+
+      isStreaming = false;
+      isProcessing = false;
+      processingLabel = '';
+      thinkingContent = '';
+      tokensPerSecond = null;
+      promptTokens = null;
+
+      // Finalize the streaming assistant message
+      if (msgId) {
+        if (convId === activeConversationId) {
+          messages = messages.map((m) =>
+            m.id === msgId ? { ...m, isStreaming: false } : m
+          );
+        } else {
+          const conv = conversations.find((c) => c.id === convId);
+          if (conv) {
+            conv.messages = conv.messages.map((m) =>
+              m.id === msgId ? { ...m, isStreaming: false } : m
+            );
+          }
+        }
+      }
+
+      // Save conversation
+      if (convId) {
+        const conv = conversations.find((c) => c.id === convId);
+        if (conv) {
+          if (convId === activeConversationId) {
+            conv.messages = [...messages];
+          }
+          conv.updatedAt = Date.now();
+          syncClient.saveConversation(conv);
+        }
+        // Remove from streaming set
+        streamingConvIds = new Set([...streamingConvIds].filter((id) => id !== convId));
+        graphStore.setStreamingConversations(streamingConvIds);
+
+        // Mark as unread if completed in background
+        if (convId !== activeConversationId) {
+          unreadConversations = new Set([...unreadConversations, convId]);
+        }
+      }
+
+      sseStreamingConvId = null;
+      sseStreamingMsgId = null;
+
+      requestAnimationFrame(scrollToBottom);
+    });
+
+    // On status change (streaming → pending → complete etc.)
+    sseClient.on('status_change', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; status?: string; job_id?: string };
+      const convId = data?.conv_id ?? event.convId;
+      if (!convId) return;
+
+      if (data?.status === 'streaming' || data?.status === 'pending') {
+        streamingConvIds = new Set([...streamingConvIds, convId]);
+      } else {
+        streamingConvIds = new Set([...streamingConvIds].filter((id) => id !== convId));
+      }
+      graphStore.setStreamingConversations(streamingConvIds);
+
+      // If a conversation we're viewing just started streaming, show the indicator
+      if (convId === activeConversationId && (data?.status === 'streaming' || data?.status === 'pending')) {
+        isProcessing = true;
+        processingLabel = 'Thinking...';
+      }
+    });
+
+    // On error from the server
+    sseClient.on('error', (event: LlmEvent) => {
+      const data = event.data as { message?: string; conv_id?: string };
+      console.error('SSE error:', data?.message ?? 'Unknown error');
+      const convId = data?.conv_id ?? event.convId;
+      if (convId) {
+        streamingConvIds = new Set([...streamingConvIds].filter((id) => id !== convId));
+        graphStore.setStreamingConversations(streamingConvIds);
+      }
+      isStreaming = false;
+      isProcessing = false;
+      processingLabel = '';
+
+      // Show error in the streaming message if we have one
+      if (convId && sseStreamingMsgId) {
+        if (convId === activeConversationId) {
+          messages = messages.map((m) =>
+            m.id === sseStreamingMsgId
+              ? { ...m, content: `**Error:** ${data?.message ?? 'Unknown error'}`, isStreaming: false }
+              : m
+          );
+        } else {
+          const conv = conversations.find((c) => c.id === convId);
+          if (conv) {
+            conv.messages = conv.messages.map((m) =>
+              m.id === sseStreamingMsgId
+                ? { ...m, content: `**Error:** ${data?.message ?? 'Unknown error'}`, isStreaming: false }
+                : m
+            );
+          }
+        }
+        sseStreamingConvId = null;
+        sseStreamingMsgId = null;
+      }
+    });
+
+    // Restore streaming/pending statuses from the server for refresh resilience
+    const convIds = conversations.map((c) => c.id);
+    if (convIds.length > 0) {
+      sseClient.fetchStatuses(convIds).then((statuses) => {
+        const streamingIds = new Set<string>();
+        for (const s of statuses) {
+          if (s.status === 'streaming' || s.status === 'pending') {
+            streamingIds.add(s.conv_id);
+            // Create a placeholder streaming assistant message if needed
+            const conv = conversations.find((c) => c.id === s.conv_id);
+            if (conv && !conv.messages.find((m) => m.isStreaming)) {
+              const placeholderMsg: ChatMessage = {
+                id: generateId(),
+                role: 'assistant',
+                content: '',
+                timestamp: Date.now(),
+                isStreaming: true,
+              };
+              conv.messages = [...conv.messages, placeholderMsg];
+              if (s.conv_id === activeConversationId) {
+                messages = [...messages, placeholderMsg];
+              }
+            }
+          }
+        }
+        streamingConvIds = streamingIds;
+        graphStore.setStreamingConversations(streamingConvIds);
+      }).catch((err) => {
+        console.warn('Failed to fetch conversation statuses on mount:', err);
+      });
+    }
+
+    return () => {
+      sseClient.disconnect();
+    };
   });
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
@@ -144,16 +397,17 @@
   let pointerDownXY: { x: number; y: number } | null = null;
   const CLICK_MAX_DRIFT = 6;
 
-  // Stream cancellation support — allows navigation during streaming
-  let streamAbortController: AbortController | null = null;
+  // Tracks which conversation the local SSE token handler is currently
+  // appending tokens to, so conversation switches during streaming don't
+  // redirect writes to the wrong messages array.
+  let sseStreamingConvId: string | null = null;
+  // Tracks the assistant message ID that SSE tokens are being appended to.
+  let sseStreamingMsgId: string | null = null;
 
-  // Throttled streaming state — buffers tokens and flushes to UI on animation frames
-  let streamingBuffer: { content: string; thinking: string; assistantId: string } | null = null;
-  let streamingRafId: number | null = null;
-
-  // Tracks which conversation owns the active stream, so that conversation
-  // switches during streaming don't redirect writes to the wrong messages array.
-  let streamingConversationId: string | null = null;
+  // Set of conversation IDs that the SSE server reports as streaming/pending.
+  // Driven by `status_change` events from the server — replaces the old
+  // local `streamingConversationId` + `pendingStreams` approach.
+  let streamingConvIds = $state<Set<string>>(new Set());
 
   // Unread activity indicators — set when a background stream produces new content
   let unreadConversations = $state<Set<string>>(new Set());
@@ -161,18 +415,18 @@
   // Whether the currently-viewed conversation is the one being streamed to.
   // Used to gate input controls — you can still type in other conversations.
   let isActiveConversationStreaming = $derived(
-    isStreaming && streamingConversationId === activeConversationId
+    streamingConvIds.has(activeConversationId)
   );
 
   // Whether any conversation (active or background) is currently streaming
   // a response. Drives the loading indicator on the mic and lets a tap on
   // the collapsed orb jump straight to that conversation.
   let isStreamActive = $derived(
-    isStreaming && streamingConversationId !== null && streamingConversationId !== ''
+    streamingConvIds.size > 0
   );
 
   /**
-   * Update a specific message in the conversation that owns the active stream.
+   * Update a specific message in the conversation that owns the active SSE stream.
    * If that conversation is currently displayed, updates `messages` directly
    * (so Svelte reacts and re-renders). If the stream is in the background,
    * updates `conversations[i].messages` and marks it as unread.
@@ -181,24 +435,24 @@
     assistantId: string,
     updater: (m: ChatMessage) => ChatMessage
   ) {
-    if (!streamingConversationId) {
+    if (!sseStreamingConvId) {
       // No stream context — update messages directly
       messages = messages.map((m) => m.id === assistantId ? updater(m) : m);
       return;
     }
 
-    const isActive = streamingConversationId === activeConversationId;
+    const isActive = sseStreamingConvId === activeConversationId;
 
     if (isActive) {
       // Stream's conversation is on screen — update reactive state
       messages = messages.map((m) => m.id === assistantId ? updater(m) : m);
     } else {
       // Stream is in the background — update the conversation object directly
-      const conv = conversations.find((c) => c.id === streamingConversationId);
+      const conv = conversations.find((c) => c.id === sseStreamingConvId);
       if (conv) {
         conv.messages = conv.messages.map((m) => m.id === assistantId ? updater(m) : m);
         // Mark as unread so the user sees a badge
-        unreadConversations = new Set([...unreadConversations, streamingConversationId]);
+        unreadConversations = new Set([...unreadConversations, sseStreamingConvId]);
       }
     }
   }
@@ -208,20 +462,20 @@
    * Works like updateStreamMessage — targets the right conversation.
    */
   function pushStreamMessage(msg: ChatMessage) {
-    if (!streamingConversationId) {
+    if (!sseStreamingConvId) {
       messages = [...messages, msg];
       return;
     }
 
-    const isActive = streamingConversationId === activeConversationId;
+    const isActive = sseStreamingConvId === activeConversationId;
 
     if (isActive) {
       messages = [...messages, msg];
     } else {
-      const conv = conversations.find((c) => c.id === streamingConversationId);
+      const conv = conversations.find((c) => c.id === sseStreamingConvId);
       if (conv) {
         conv.messages = [...conv.messages, msg];
-        unreadConversations = new Set([...unreadConversations, streamingConversationId]);
+        unreadConversations = new Set([...unreadConversations, sseStreamingConvId]);
       }
     }
   }
@@ -231,22 +485,6 @@
   let isTranscribing = $state(false);
   let recordingSupported = $state(false);
   let micBusy = $state(false);
-  // Queue of AI responses waiting to be streamed. When a user sends a message
-  // while a stream is already active, we create the user message immediately
-  // (so it appears in the conversation) and queue the AI response here.
-  // When the current stream ends, we drain the queue automatically.
-  let pendingStreams = $state<Array<{
-    conversationId: string;
-    attachments: Attachment[];
-  }>>([]);
-  /** Sync the union of streaming + pending conversation IDs to the graph store
-   *  so that ALL conversations awaiting an AI response show the thinking indicator. */
-  function syncConversationIndicators() {
-    const ids = new Set<string>();
-    if (streamingConversationId) ids.add(streamingConversationId);
-    for (const entry of pendingStreams) ids.add(entry.conversationId);
-    graphStore.setStreamingConversations(ids);
-  }
   const HOLD_TO_RECORD_MS = 3000;
   const HOLD_TICK_MS = 50;
   const HOLD_START_DELAY_MS = 300;
@@ -580,17 +818,6 @@
 
   let promptTokens = $state<number | null>(null);
 
-  function cleanLoopedContent(content: string): string {
-    // Q1 quant models with --reasoning on can emit </think> as literal content
-    // (instead of using the reasoning_content SSE field) and then restart
-    // their answer as a paraphrase. Strip the tag and everything after it.
-    const tagEnd = content.indexOf('</think>');
-    if (tagEnd !== -1) {
-      return content.slice(0, tagEnd).trimEnd();
-    }
-    return content;
-  }
-
   function generateId(): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
@@ -617,40 +844,30 @@
     return id;
   }
 
-  function cancelStreaming() {
-    // Cancel the active stream if any
-    if (streamAbortController) {
-      streamAbortController.abort();
-      streamAbortController = null;
+  async function cancelStreaming() {
+    // Find the conversation(s) currently streaming and cancel them via the server API
+    const convIdsToCancel = [...streamingConvIds];
+    for (const convId of convIdsToCancel) {
+      try {
+        await fetch(API.chat.cancel(convId), { method: 'POST' });
+      } catch (err) {
+        console.warn('Failed to cancel streaming for conversation', convId, err);
+      }
     }
-    // Flush any buffered content BEFORE cancelling the frame,
-    // otherwise tokens accumulated since the last frame are lost.
-    if (streamingBuffer) {
-      const { content, thinking, assistantId } = streamingBuffer;
-      updateStreamMessage(assistantId, (m) => ({
-        ...m,
-        content,
-        ...(thinking ? { thinkingContent: thinking } : {}),
-      }));
-      if (thinking) thinkingContent = thinking;
-      streamingBuffer = null;
-    }
-    if (streamingRafId !== null) {
-      cancelAnimationFrame(streamingRafId);
-      streamingRafId = null;
-    }
-    // Finalize any in-flight streaming message — keep whatever content arrived
+    // Finalize any in-flight streaming messages locally
     if (isStreaming) {
       messages = messages.map((m) =>
         m.isStreaming ? { ...m, isStreaming: false } : m
       );
-      // Also finalize in background conversation if different from active
-      if (streamingConversationId && streamingConversationId !== activeConversationId) {
-        const conv = conversations.find((c) => c.id === streamingConversationId);
-        if (conv) {
-          conv.messages = conv.messages.map((m) =>
-            m.isStreaming ? { ...m, isStreaming: false } : m
-          );
+      // Also finalize in background conversations
+      for (const convId of convIdsToCancel) {
+        if (convId !== activeConversationId) {
+          const conv = conversations.find((c) => c.id === convId);
+          if (conv) {
+            conv.messages = conv.messages.map((m) =>
+              m.isStreaming ? { ...m, isStreaming: false } : m
+            );
+          }
         }
       }
       isStreaming = false;
@@ -660,24 +877,16 @@
       tokensPerSecond = null;
       promptTokens = null;
     }
-    streamingConversationId = null;
-    pendingStreams = [];
-    syncConversationIndicators();
+    sseStreamingConvId = null;
+    sseStreamingMsgId = null;
+    streamingConvIds = new Set();
+    graphStore.setStreamingConversations(new Set());
     saveMessagesToConversation();
   }
 
   async function switchConversation(id: string) {
-    // Save current messages (including any in-flight stream content)
+    // Save current messages
     saveMessagesToConversation();
-
-    // If we're leaving a conversation with an active stream, save its state
-    // so the stream can continue writing to it in the background.
-    if (isStreaming && activeConversationId && activeConversationId !== id) {
-      const currentConv = conversations.find((c) => c.id === activeConversationId);
-      if (currentConv) {
-        currentConv.messages = [...messages];
-      }
-    }
 
     activeConversationId = id;
     const conv = conversations.find((c) => c.id === id);
@@ -715,7 +924,8 @@
   /** A tap on the mic while a conversation is streaming opens that
    *  conversation so the user can watch the in-flight response. */
   function openStreamingConversation() {
-    const id = streamingConversationId;
+    // Pick the first streaming conversation
+    const id = [...streamingConvIds][0];
     if (!id) return;
     // Already viewing it — just make sure the panel is open.
     if (id === activeConversationId) {
@@ -734,498 +944,7 @@
     }
   }
 
-  /**
-   * Stream an assistant response from the LLM based on the current `messages` state.
-   * This is the core streaming loop — called by both handleSend (new messages) and
-   * resendMessage (re-processing).
-   */
-   /**
-    * Resolve image file paths to renderable URLs concurrently and attach them
-    * to the streaming assistant message as they become available, so the gallery
-    * renders incrementally while the next LLM turn is in flight.
-    */
-   function resolveImagePaths(
-     paths: string[],
-     assistantId: string,
-     collected: string[],
-   ) {
-     for (const p of paths) {
-       const directUrl = lightragClient.photoImageUrl(p);
-       collected.push(directUrl);
-       updateStreamMessage(assistantId, (m) => ({
-         ...m,
-         imageUrls: [...(m.imageUrls || []), directUrl],
-       }));
-     }
-   }
 
-   async function streamAssistantResponse(sentAttachments: Attachment[] = []) {
-     // Pin which conversation this stream belongs to, so it keeps writing
-     // to the right place even if the user switches conversations.
-     streamingConversationId = activeConversationId;
-
-     const tools = mcpClient.enabledOpenAITools;
-     const maxTurns = 3;
-     let turn = 0;
-
-       type ContentPart = { type: string; text?: string; image_url?: { url: string } };
-       type ApiMessage = { role: string; content: string | ContentPart[] | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } | { role: 'tool'; tool_call_id: string; content: string };
-       let apiMessages: ApiMessage[] = [
-         { role: 'system', content: configStore.systemPrompt.replaceAll('{{CURRENT_DATE}}', new Date().toISOString().slice(0, 10)) },
-         ...messages
-           .filter((m) => !m.isStreaming)
-           .map((m) => {
-             return { role: m.role, content: m.content } as ApiMessage;
-           })
-       ];
-
-      if (sentAttachments.length > 0) {
-        let lastUserMsg = -1;
-        for (let i = apiMessages.length - 1; i >= 0; i--) {
-          if ('role' in apiMessages[i] && apiMessages[i].role === 'user') { lastUserMsg = i; break; }
-        }
-        if (lastUserMsg !== -1) {
-          const existing = apiMessages[lastUserMsg];
-          const textContent = typeof existing.content === 'string' ? existing.content : '';
-          const userContent = buildMessageContent(textContent, sentAttachments);
-          if (typeof userContent !== 'string') {
-            apiMessages[lastUserMsg] = { ...existing, content: userContent } as ApiMessage;
-          }
-        }
-      }
-
-    // Create abort controller for this request cycle
-    streamAbortController = new AbortController();
-
-    try {
-      while (turn < maxTurns) {
-        // If the stream was cancelled between turns, bail out
-        if (!streamAbortController) break;
-        turn++;
-        if (streamingConversationId === activeConversationId) {
-          processingLabel = 'Thinking...';
-        }
-
-        const assistantId = generateId();
-        const assistantMsg: ChatMessage = {
-          id: assistantId,
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          isStreaming: true,
-          mcpToolCalls: [],
-        };
-        pushStreamMessage(assistantMsg);
-        isStreaming = true;
-        thinkingContent = '';
-        syncConversationIndicators();
-
-        const requestBody: Record<string, unknown> = {
-          model: selectedModel || undefined,
-          messages: apiMessages,
-          stream: true,
-          reasoning_format: 'deepseek',
-          // At Q1 quant the model sometimes never emits <|im_end|> on long
-          // open-ended turns, falling into paraphrase loops until externally
-          // truncated. max_tokens caps generation so the stream always
-          // terminates; stop strings are a belt-and-suspenders backstop in
-          // case the chat-template EOS isn't honored in streaming.
-          max_tokens: 2048,
-          stop: ['<|im_end|>'],
-          // Anti-repetition for Q1 quant paraphrase-loop degeneration
-          temperature: 0.7,
-          frequency_penalty: 0.3,
-          presence_penalty: 0.2,
-          repeat_penalty: 1.15,
-        };
-
-        if (tools.length > 0) {
-          // Turn 1: force a tool call. The model (Bonsai-27B-Q1_0) reliably
-          // skips tool calls under tool_choice='auto' and emits the literal
-          // confirmation string ("Saved.") from the system prompt instead.
-          // 'required' makes llama-server apply a grammar that guarantees a
-          // tool_call is produced, so logging/retrieval always hits the graph.
-          // Turn 2+: only offer query tools — the model was calling
-          // save_to_knowledge_graph during retrieval queries and re-querying,
-          // both wasteful. Strip save + query tools after turn 1 so the model
-          // can only produce its final conversational answer.
-          const turnTools = turn === 1 ? tools : tools.filter(
-            (t: { function: { name: string } }) => {
-              const name = t.function?.name;
-              return name !== 'save_to_knowledge_graph' && name !== 'query_knowledge_graph' && name !== 'query_knowledge_graph_stream';
-            }
-          );
-          requestBody.tools = turnTools.length > 0 ? turnTools : undefined;
-          requestBody.tool_choice = turn === 1 ? 'required' : 'auto';
-        }
-
-        // If the stream was cancelled between turns, bail out
-        if (!streamAbortController) break;
-
-        const response = await fetch(API.llama.chatCompletions, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-          signal: streamAbortController.signal,
-        });
-
-        if (!response.ok) {
-          const errBody = await response.text().catch(() => '');
-          throw new Error(`API ${response.status}: ${errBody.slice(0, 200)}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let accumulatedContent = '';
-        let accumulatedThinking = '';
-        let gotFirstToken = false;
-        let toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
-        let finishReason = '';
-        let msgTimings: { promptN?: number; promptMs?: number; predictedN?: number; predictedMs?: number; predictedPerSecond?: number } = {};
-
-        if (streamingConversationId === activeConversationId) {
-          processingLabel = 'Writing...';
-        }
-
-        // Throttled flush: batches streaming updates to avoid freezing the UI.
-        // Instead of updating messages on every single SSE token, we buffer
-        // content and flush to state on requestAnimationFrame (~60fps max).
-        function scheduleFlush() {
-          if (streamingRafId !== null) return; // already scheduled
-          streamingRafId = requestAnimationFrame(() => {
-            streamingRafId = null;
-            if (!streamingBuffer) return;
-            const { content, thinking, assistantId: aid } = streamingBuffer;
-            streamingBuffer = null;
-            updateStreamMessage(aid, (m) => ({
-              ...m,
-              content,
-              ...(thinking ? { thinkingContent: thinking } : {}),
-            }));
-            // Only update thinkingContent if the stream's conversation is active
-            if (thinking && streamingConversationId === activeConversationId) {
-              thinkingContent = thinking;
-            }
-          });
-        }
-
-        function updateStreamingState(content: string, thinking: string, aid: string) {
-          // Always update the buffer with latest content
-          streamingBuffer = { content, thinking, assistantId: aid };
-          scheduleFlush();
-        }
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
-
-            const data = trimmedLine.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              const choice = parsed.choices?.[0];
-              if (!choice) continue;
-
-              const delta = choice.delta;
-              if (!delta) continue;
-
-              if (delta.content) {
-                if (!gotFirstToken) {
-                  gotFirstToken = true;
-                  if (streamingConversationId === activeConversationId) {
-                    isProcessing = false;
-                  }
-                }
-                accumulatedContent += delta.content;
-                // Throttled update: buffer and flush on next animation frame
-                updateStreamingState(accumulatedContent, accumulatedThinking, assistantId);
-              }
-
-              if (delta.reasoning_content) {
-                if (!gotFirstToken) {
-                  gotFirstToken = true;
-                  if (streamingConversationId === activeConversationId) {
-                    isProcessing = false;
-                  }
-                }
-                accumulatedThinking += delta.reasoning_content;
-                // Only update global thinking display if viewing the stream's conversation
-                if (streamingConversationId === activeConversationId) {
-                  thinkingContent = accumulatedThinking;
-                }
-                // Throttled update for thinking content too
-                updateStreamingState(accumulatedContent, accumulatedThinking, assistantId);
-              }
-
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? toolCalls.length;
-                  if (!toolCalls[idx]) {
-                    toolCalls[idx] = { id: tc.id || `call_${idx}`, name: '', arguments: '' };
-                  }
-                  if (tc.id) toolCalls[idx].id = tc.id;
-                  if (tc.function?.name) toolCalls[idx].name = tc.function.name;
-                  if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
-                }
-              }
-
-              if (choice.finish_reason) {
-                finishReason = choice.finish_reason;
-              }
-
-              if (parsed.timings) {
-                const t = parsed.timings;
-                if (t.predicted_per_second) {
-                  if (streamingConversationId === activeConversationId) {
-                    tokensPerSecond = Math.round(t.predicted_per_second);
-                  }
-                  msgTimings.predictedPerSecond = t.predicted_per_second;
-                }
-                if (t.prompt_n) {
-                  if (streamingConversationId === activeConversationId) {
-                    promptTokens = t.prompt_n;
-                  }
-                  msgTimings.promptN = t.prompt_n;
-                }
-                if (t.prompt_ms) msgTimings.promptMs = t.prompt_ms;
-                if (t.predicted_n) msgTimings.predictedN = t.predicted_n;
-                if (t.predicted_ms) msgTimings.predictedMs = t.predicted_ms;
-                // Timings are infrequent — safe to update directly
-                updateStreamMessage(assistantId, (m) => ({ ...m, timings: { ...msgTimings } }));
-              }
-
-              if (parsed.prompt_progress && streamingConversationId === activeConversationId) {
-                processingLabel = `Processing prompt... ${Math.round(parsed.prompt_progress * 100)}%`;
-              }
-            } catch {
-              // skip unparseable lines
-            }
-          }
-        }
-
-        // Flush any remaining buffered content before finalizing
-        if (streamingRafId !== null) {
-          cancelAnimationFrame(streamingRafId);
-          streamingRafId = null;
-        }
-        streamingBuffer = null;
-
-        // Finalize this assistant message — keep isStreaming true if tool calls are
-        // pending so the progress bar / chip rendering stays visible during tool exec.
-        const pendingToolCalls = toolCalls.length > 0
-          ? toolCalls.map((tc) => ({
-              id: tc.id,
-              toolName: tc.name,
-              arguments: JSON.parse(tc.arguments || '{}'),
-              timestamp: Date.now(),
-            }))
-          : [];
-
-        updateStreamMessage(assistantId, (m) => ({
-          ...m,
-          content: cleanLoopedContent(accumulatedContent || ''),
-          isStreaming: finishReason === 'tool_calls' && toolCalls.length > 0,
-          thinkingContent: accumulatedThinking || undefined,
-          timings: msgTimings,
-          model: selectedModel || undefined,
-          mcpToolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : m.mcpToolCalls,
-        }));
-
-        // If no tool calls, we're done
-        if (finishReason !== 'tool_calls' || toolCalls.length === 0) {
-          break;
-        }
-
-        // Process tool calls via MCP
-        const openAIToolCalls = toolCalls.map((tc) => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: { name: tc.name, arguments: tc.arguments },
-        }));
-
-        apiMessages.push({
-          role: 'assistant',
-          content: accumulatedContent || null,
-          tool_calls: openAIToolCalls,
-        });
-
-        let collectedImageUrls: string[] = [];
-
-        for (const tc of toolCalls) {
-          const args = JSON.parse(tc.arguments || '{}');
-          let toolResult = '';
-          let isToolError = false;
-
-          const toolLabels: Record<string, string> = {
-            query_knowledge_graph: 'Looking through your memories...',
-            query_knowledge_graph_stream: 'Looking through your memories...',
-            save_to_knowledge_graph: 'Saving that for you...',
-            list_documents: 'Gathering your records...',
-          };
-          if (streamingConversationId === activeConversationId) {
-            processingLabel = toolLabels[tc.name] || `Working on it...`;
-            isProcessing = true;
-          }
-
-          try {
-            toolResult = await mcpClient.callTool(tc.name, args);
-          } catch (err) {
-            toolResult = err instanceof Error ? err.message : 'Tool call failed';
-            isToolError = true;
-          }
-
-          let displayResult = toolResult;
-          let parsedKG: MCPToolCall['parsedKG'] = undefined;
-          if (!isToolError && toolResult) {
-            const parsed = parseKGResult(toolResult);
-            parsedKG = parsed;
-            const markerIdx = toolResult.indexOf('---IMAGE_REFS---');
-            displayResult = markerIdx !== -1 ? toolResult.slice(0, markerIdx).trimEnd() : toolResult;
-            const MAX_TOOL_CHARS = 50000;
-            let toolContent = parsed.contextText;
-            if (toolContent.length > MAX_TOOL_CHARS) {
-              const relIdx = toolContent.indexOf('Knowledge Graph Data (Relationship)');
-              if (relIdx !== -1 && relIdx < MAX_TOOL_CHARS) {
-                const truncated = toolContent.slice(0, MAX_TOOL_CHARS);
-                const lastNl = truncated.lastIndexOf('\n');
-                toolContent = toolContent.slice(0, lastNl !== -1 ? lastNl : MAX_TOOL_CHARS) + '\n```';
-              } else {
-                const truncated = toolContent.slice(0, MAX_TOOL_CHARS);
-                const lastNl = truncated.lastIndexOf('\n');
-                toolContent = truncated.slice(0, lastNl !== -1 ? lastNl : MAX_TOOL_CHARS);
-              }
-            }
-            apiMessages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: toolContent,
-            });
-
-            if (parsed.imagePaths.length > 0) {
-              resolveImagePaths(parsed.imagePaths, assistantId, collectedImageUrls);
-            }
-          } else {
-            apiMessages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: toolResult,
-            });
-          }
-
-          // Update the message to show tool result
-          updateStreamMessage(assistantId, (m) => ({
-            ...m,
-            mcpToolCalls: m.mcpToolCalls?.map((mtc) =>
-              mtc.id === tc.id
-                ? { ...mtc, result: displayResult.slice(0, 2000), isError: isToolError, parsedKG }
-                : mtc
-            ),
-          }));
-        }
-
-        // Finalize this assistant message — the tool turn is done, the next
-        // loop iteration creates a fresh streaming assistant message.
-        updateStreamMessage(assistantId, (m) => ({ ...m, isStreaming: false }));
-
-        // Reset for next turn — the loop continues with tool results appended
-        isStreaming = false;
-        thinkingContent = '';
-        tokensPerSecond = null;
-        promptTokens = null;
-      }
-    } catch (err: unknown) {
-      // If the stream was aborted (e.g. user switched conversations), don't show an error
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        // Stream cancelled — the caller (cancelStreaming) already finalized state
-        return;
-      }
-      const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      // Look for the streaming message in the stream's conversation
-      const conv = streamingConversationId
-        ? conversations.find((c) => c.id === streamingConversationId)
-        : null;
-      const msgSource = (conv && streamingConversationId !== activeConversationId) ? conv.messages : messages;
-      const lastStreaming = msgSource.find((m) => m.isStreaming);
-      if (lastStreaming) {
-        const updater = (m: ChatMessage) =>
-          m.id === lastStreaming.id ? { ...m, content: `**Error:** ${errMsg}`, isStreaming: false } : m;
-        if (conv && streamingConversationId !== activeConversationId) {
-          conv.messages = conv.messages.map(updater);
-        } else {
-          messages = messages.map(updater);
-        }
-      }
-    } finally {
-      streamAbortController = null;
-      // Clean up any pending flush
-      if (streamingRafId !== null) {
-        cancelAnimationFrame(streamingRafId);
-        streamingRafId = null;
-      }
-      streamingBuffer = null;
-      isStreaming = false;
-      isProcessing = false;
-      processingLabel = '';
-      thinkingContent = '';
-      tokensPerSecond = null;
-      promptTokens = null;
-
-      // Save messages for the stream's conversation
-      if (streamingConversationId) {
-        const conv = conversations.find((c) => c.id === streamingConversationId);
-        if (conv) {
-          // If stream was in background, messages state points to a different conversation.
-          // Sync the background conversation's messages if needed.
-          if (streamingConversationId !== activeConversationId) {
-            conv.messages = conv.messages.map((m) =>
-              m.isStreaming ? { ...m, isStreaming: false } : m
-            );
-          } else {
-            conv.messages = [...messages];
-          }
-          conv.updatedAt = Date.now();
-          syncClient.saveConversation(conv);
-        }
-        // Mark as unread if stream completed in background
-        if (streamingConversationId !== activeConversationId) {
-          unreadConversations = new Set([...unreadConversations, streamingConversationId]);
-        }
-      }
-      streamingConversationId = null;
-      syncConversationIndicators();
-      requestAnimationFrame(scrollToBottom);
-
-      // Drain any AI responses queued while this stream was active.
-      // Each queued entry targets a specific conversation — switch to it
-      // and start the stream.
-      const queued = [...pendingStreams];
-      pendingStreams = [];
-      for (const entry of queued) {
-        // Switch to the conversation that queued this response
-        if (entry.conversationId !== activeConversationId) {
-          saveMessagesToConversation();
-          activeConversationId = entry.conversationId;
-          const conv = conversations.find((c) => c.id === entry.conversationId);
-          if (conv) {
-            messages = [...conv.messages];
-          }
-        }
-        await streamAssistantResponse(entry.attachments);
-      }
-    }
-  }
 
   async function handleSend(audioUrl?: string, audioData?: string, audioFormat?: 'wav' | 'mp3', startNew = false, transcript?: string, fromOrb = false) {
     const messageText = transcript ?? chatInput.trim();
@@ -1275,19 +994,34 @@
       scrollToBottom();
     });
 
-    // If a stream is already running, queue this AI response to start
-    // once the current one finishes. The user message has already been
-    // created and saved above, so it's visible in the conversation.
-    if (isStreamActive) {
-      pendingStreams = [...pendingStreams, {
-        conversationId: activeConversationId,
-        attachments: sentAttachments,
-      }];
-      syncConversationIndicators();
-      return;
+    // Submit the message to the server-side API. The server will enqueue the
+    // LLM job and stream the response back via SSE. We don't start any local
+    // streaming — the SSE event handlers will update the UI reactively.
+    const convId = activeConversationId;
+    try {
+      await fetch(API.chat.messages(convId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: trimmed,
+          attachments: sentAttachments.map((a) => ({
+            name: a.name,
+            mimeType: a.mimeType,
+            dataUrl: a.dataUrl,
+          })),
+          ...(audioUrl ? { audioUrl } : {}),
+          ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
+        }),
+      });
+      // Add this conversation to the streaming set immediately so the UI
+      // shows the thinking indicator before the first SSE event arrives.
+      streamingConvIds = new Set([...streamingConvIds, convId]);
+      graphStore.setStreamingConversations(streamingConvIds);
+    } catch (err) {
+      console.error('Failed to submit message to server:', err);
+      isProcessing = false;
+      processingLabel = '';
     }
-
-    await streamAssistantResponse(sentAttachments);
   }
 
   /** Process a single image through the KG pipeline with real-time SSE progress. */
@@ -1538,10 +1272,9 @@
 
   /**
    * Resend a user message: removes the assistant response (and any trailing
-   * messages) after the given user message, then re-triggers the LLM stream
-   * with the same conversation history up to that point.
+   * messages) after the given user message, then re-submits via the server API.
    */
-  function resendMessage(msgId: string) {
+  async function resendMessage(msgId: string) {
     if (isActiveConversationStreaming) return;
     const msgIdx = messages.findIndex((m) => m.id === msgId);
     if (msgIdx === -1) return;
@@ -1556,7 +1289,21 @@
     isProcessing = true;
     processingLabel = 'Regenerating...';
 
-    streamAssistantResponse();
+    // Re-submit the last user message to the server API
+    const convId = activeConversationId;
+    try {
+      await fetch(API.chat.messages(convId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: msg.content }),
+      });
+      streamingConvIds = new Set([...streamingConvIds, convId]);
+      graphStore.setStreamingConversations(streamingConvIds);
+    } catch (err) {
+      console.error('Failed to resend message:', err);
+      isProcessing = false;
+      processingLabel = '';
+    }
   }
 
   async function deleteConversation(id: string) {
@@ -2348,7 +2095,7 @@
             {@render messageRow(msg)}
           {/each}
 
-          {#if pendingStreams.some(p => p.conversationId === activeConversationId) && !isStreaming}
+          {#if isActiveConversationStreaming && !isStreaming}
             <div class="flex items-center gap-2 px-4 py-3" data-testid="pending-indicator">
               <div class="flex items-center gap-2">
                 <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>

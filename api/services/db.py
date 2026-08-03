@@ -118,6 +118,31 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(conv_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified);
 
+            CREATE TABLE IF NOT EXISTS llm_jobs (
+                id TEXT PRIMARY KEY,
+                conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                model TEXT,
+                system_prompt TEXT,
+                created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                updated_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now()),
+                error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS llm_job_events (
+                id BIGSERIAL PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES llm_jobs(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                event_data JSONB NOT NULL DEFAULT '{}',
+                created_at DOUBLE PRECISION NOT NULL DEFAULT extract(epoch from now())
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_llm_jobs_status ON llm_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_llm_jobs_conv_id ON llm_jobs(conv_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_job_events_job_id ON llm_job_events(job_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_job_events_created_at ON llm_job_events(job_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_llm_jobs_status_pending ON llm_jobs(status) WHERE status = 'pending';
+
             CREATE TABLE IF NOT EXISTS photo_metadata (
                 file_source TEXT PRIMARY KEY,
                 exif_data JSONB NOT NULL DEFAULT '{}',
