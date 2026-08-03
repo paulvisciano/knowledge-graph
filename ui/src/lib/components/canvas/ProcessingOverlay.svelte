@@ -35,10 +35,7 @@
   const ERROR_FLASH_MS = 5000;
   const TICK_MS = 100;
 
-  // nodeId -> timestamp (ms) when the flash should expire. Populated when a
-  // status transitions to complete/error so the badge lingers briefly.
   const flashUntil = new Map<string, number>();
-  // nodeId -> last stage seen, to detect the transition into complete/error.
   const lastStage = new Map<string, ImageStage>();
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -47,7 +44,6 @@
     const now = performance.now();
     const statuses = imageProcessingStore.statuses;
 
-    // Detect transitions into complete/error and seed the flash window.
     for (const [nodeId, status] of Object.entries(statuses)) {
       const prev = lastStage.get(nodeId);
       if (prev !== status.stage) {
@@ -60,7 +56,6 @@
       }
     }
 
-    // Expire flash entries.
     for (const [nodeId, until] of flashUntil) {
       if (now >= until) {
         flashUntil.delete(nodeId);
@@ -74,9 +69,7 @@
       const isFlashing = flashUntil.has(nodeId);
       const isComplete = status.stage === 'complete';
       const isError = status.stage === 'error';
-      // Skip completed/errored statuses that aren't in their flash window.
       if ((isComplete || isError) && !isFlashing) {
-        // Also clean lastStage if status entry was removed already.
         continue;
       }
 
