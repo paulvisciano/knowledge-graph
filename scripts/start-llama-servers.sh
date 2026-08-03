@@ -102,7 +102,7 @@ echo "Starting LLM on port ${LLM_PORT}..."
     --repeat-penalty "$LLM_REPEAT_PENALTY" --repeat-last-n "$LLM_REPEAT_LAST_N" \
     --dry-multiplier "$LLM_DRY_MULTIPLIER" --dry-base "$LLM_DRY_BASE" --dry-allowed-length "$LLM_DRY_ALLOWED_LENGTH" \
     --xtc-probability "$LLM_XTC_PROBABILITY" --xtc-threshold "$LLM_XTC_THRESHOLD" \
-    --reasoning on --reasoning-budget 1024 --ui-mcp-proxy \
+    --reasoning off --reasoning-budget 0 --ui-mcp-proxy \
     --host 0.0.0.0 --port "$LLM_PORT" \
     &>/tmp/llama-server-llm.log &
 PIDS+=($!)
