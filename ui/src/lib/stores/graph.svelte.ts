@@ -18,6 +18,10 @@ class GraphStore {
   /** Currently-active conversation id — conversation node with this id gets
    *  `properties.isActive = true` so the renderer can highlight it. */
   activeConversationId = $state('');
+  /** Set of conversation IDs currently streaming an AI response — conversation
+   *  nodes with these IDs get `properties.isStreaming = true` so the renderer
+   *  can show a thinking indicator. */
+  streamingConversationIds = $state<Set<string>>(new Set());
 
   filteredNodes = $derived.by(() => {
     if (!this.searchQuery.trim()) return this.nodes;
@@ -92,6 +96,7 @@ class GraphStore {
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
           isActive: c.id === this.activeConversationId,
+          isStreaming: this.streamingConversationIds.has(c.id),
           preview,
         },
       };
@@ -110,6 +115,13 @@ class GraphStore {
   setActiveConversation(id: string) {
     if (this.activeConversationId === id) return;
     this.activeConversationId = id;
+    this.loadConversations();
+  }
+
+  setStreamingConversations(ids: Set<string>) {
+    if (this.streamingConversationIds === ids) return;
+    if (this.streamingConversationIds.size === ids.size && [...this.streamingConversationIds].every((id) => ids.has(id))) return;
+    this.streamingConversationIds = ids;
     this.loadConversations();
   }
 

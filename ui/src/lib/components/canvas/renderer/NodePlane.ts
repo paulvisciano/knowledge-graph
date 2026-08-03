@@ -84,8 +84,9 @@ export class NodePlane {
     } else if (textureSource === 'text' && node.textContent) {
       const isConv = this._node.kind === 'conversation';
       const isActive = isConv && this._node.properties?.isActive === true;
+      const isStreaming = isConv && this._node.properties?.isStreaming === true;
       const tex = isConv
-        ? this._createConversationTexture(false, isActive)
+        ? this._createConversationTexture(false, isActive, isStreaming)
         : this._createTextTexture(node.textContent);
       this._noteTexture = tex;
       this._material.map = tex;
@@ -94,7 +95,7 @@ export class NodePlane {
       this._material.color.set(0xffffff);
       this._material.needsUpdate = true;
       if (isConv) {
-        this._hoverTexture = this._createConversationTexture(true, isActive);
+        this._hoverTexture = this._createConversationTexture(true, isActive, isStreaming);
       }
     }
   }
@@ -271,7 +272,7 @@ export class NodePlane {
     }
   }
 
-  private _createConversationTexture(hovered: boolean, isActive = false): THREE.CanvasTexture {
+  private _createConversationTexture(hovered: boolean, isActive = false, isStreaming = false): THREE.CanvasTexture {
     const aspect = this._node.width > 0 && this._node.height > 0
       ? this._node.width / this._node.height
       : 1 / 1.4;
@@ -338,6 +339,19 @@ export class NodePlane {
       this._roundRect(ctx, 1.5, 1.5, canvasW - 3, canvasH - 3, radius - 1);
       ctx.stroke();
       ctx.restore();
+    } else if (isStreaming) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(167,139,250,0.5)';
+      ctx.shadowBlur = Math.round(40 * scale);
+      ctx.strokeStyle = '#a78bfa';
+      ctx.lineWidth = 2;
+      this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
+      ctx.stroke();
+      ctx.shadowBlur = Math.round(80 * scale);
+      ctx.shadowColor = 'rgba(167,139,250,0.18)';
+      this._roundRect(ctx, 1, 1, canvasW - 2, canvasH - 2, radius - 1);
+      ctx.stroke();
+      ctx.restore();
     } else if (hovered) {
       ctx.save();
       ctx.shadowColor = 'rgba(19,220,246,0.32)';
@@ -354,9 +368,9 @@ export class NodePlane {
     }
 
     const topGrad = ctx.createLinearGradient(0, 0, canvasW, 0);
-    topGrad.addColorStop(0, 'rgba(19,220,246,0)');
-    topGrad.addColorStop(0.5, accent);
-    topGrad.addColorStop(1, 'rgba(19,220,246,0)');
+    topGrad.addColorStop(0, isStreaming ? 'rgba(167,139,250,0)' : 'rgba(19,220,246,0)');
+    topGrad.addColorStop(0.5, isStreaming ? '#a78bfa' : accent);
+    topGrad.addColorStop(1, isStreaming ? 'rgba(167,139,250,0)' : 'rgba(19,220,246,0)');
     ctx.fillStyle = topGrad;
     ctx.globalAlpha = isActive ? 1 : 0.7;
     ctx.fillRect(0, 0, canvasW, isActive ? 5 : 3);
@@ -403,10 +417,24 @@ export class NodePlane {
 
     const monoFamily = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace';
     const footTextY = footY + Math.round(8 * scale);
-    ctx.font = `700 ${footFont}px ${monoFamily}`;
-    ctx.fillStyle = accent;
-    this._setLetterSpacing(ctx, `${Math.round(0.16 * footFont)}px`);
-    ctx.fillText(isActive ? 'ACTIVE CHAT' : 'CHAT', padX, footTextY);
+    if (isStreaming) {
+      const streamColor = '#a78bfa';
+      const dotR = Math.round(footFont * 0.45);
+      const dotY = footTextY + footFont * 0.35;
+      ctx.fillStyle = streamColor;
+      ctx.beginPath();
+      ctx.arc(padX + dotR, dotY, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = `700 ${footFont}px ${monoFamily}`;
+      ctx.fillStyle = streamColor;
+      this._setLetterSpacing(ctx, `${Math.round(0.16 * footFont)}px`);
+      ctx.fillText('THINKING…', padX + dotR * 2 + Math.round(6 * scale), footTextY);
+    } else {
+      ctx.font = `700 ${footFont}px ${monoFamily}`;
+      ctx.fillStyle = accent;
+      this._setLetterSpacing(ctx, `${Math.round(0.16 * footFont)}px`);
+      ctx.fillText(isActive ? 'ACTIVE CHAT' : 'CHAT', padX, footTextY);
+    }
     // Date — right, faint, regular
     if (dateLabel) {
       ctx.font = `${footFont}px ${monoFamily}`;
