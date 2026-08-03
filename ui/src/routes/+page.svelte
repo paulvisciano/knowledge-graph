@@ -109,16 +109,16 @@
 
     // On new conversation created on the server (e.g. by another client)
     sseClient.on('new_conversation', (event: LlmEvent) => {
-      const data = event.data as { id: string; title?: string; created_at?: number };
-      if (!data?.id) return;
-      // Don't duplicate if we already have it locally
-      if (conversations.find((c) => c.id === data.id)) return;
+      const data = event.data as { conv_id?: string; id?: string; name?: string; title?: string; created_at?: number };
+      const convId = data?.conv_id ?? data?.id ?? event.convId;
+      if (!convId) return;
+      if (conversations.find((c) => c.id === convId)) return;
       const conv: Conversation = {
-        id: data.id,
-        title: data.title ?? '',
+        id: convId,
+        title: data?.name ?? data?.title ?? '',
         messages: [],
-        createdAt: data.created_at ?? Date.now(),
-        updatedAt: data.created_at ?? Date.now(),
+        createdAt: data?.created_at ?? Date.now(),
+        updatedAt: data?.created_at ?? Date.now(),
       };
       conversations = [conv, ...conversations];
       graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
@@ -126,30 +126,103 @@
 
     // On new message in a conversation (user or assistant)
     sseClient.on('new_message', (event: LlmEvent) => {
-      const data = event.data as { id: string; conv_id: string; role: string; content: string; timestamp?: number; is_streaming?: boolean };
-      if (!data?.conv_id) return;
-      const conv = conversations.find((c) => c.id === data.conv_id);
-      if (!conv) return;
-      // Don't duplicate if we already have this message
-      if (conv.messages.find((m) => m.id === data.id)) return;
-      // Also check the active messages array
-      if (data.conv_id === activeConversationId && messages.find((m) => m.id === data.id)) return;
+      const data = event.data as { id?: string; conv_id?: string; role?: string; content?: string; timestamp?: number; is_streaming?: boolean; message_id?: string };
+      const convId = data?.conv_id ?? event.convId;
+      if (!convId) return;
 
+      const msgId = data?.message_id ?? data?.id ?? '';
       const msg: ChatMessage = {
-        id: data.id,
-        role: data.role as 'user' | 'assistant' | 'system',
-        content: data.content ?? '',
-        timestamp: data.timestamp ?? Date.now(),
-        isStreaming: data.is_streaming ?? false,
+        id: msgId,
+        role: (data?.role ?? 'user') as 'user' | 'assistant' | 'system',
+        content: data?.content ?? '',
+        timestamp: data?.timestamp ?? Date.now(),
+        isStreaming: data?.is_streaming ?? false,
       };
 
-      if (data.conv_id === activeConversationId) {
+      // If we don't have this conversation locally, create it
+      let conv = conversations.find((c) => c.id === convId);
+      if (!conv) {
+        conv = {
+          id: convId,
+          title: data?.content ? data.content.slice(0, 50) + (data.content.length > 50 ? '…' : '') : '',
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        conversations = [conv, ...conversations];
+        graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
+      }
+
+      // Don't duplicate if we already have this message by ID
+      if (conv.messages.find((m) => m.id === msgId)) return;
+      if (convId === activeConversationId && messages.find((m) => m.id === msgId)) return;
+
+      // Content-based dedup: if the server echoes back a user message we already
+      // added optimistically (same role, content, and timestamp within 5 s), update
+      // the existing message's ID to the server-assigned one instead of adding a duplicate.
+      const existing = (convId === activeConversationId ? messages : conv.messages)
+        .find((m) =>
+          m.role === msg.role &&
+          m.content === msg.content &&
+          Math.abs(m.timestamp - msg.timestamp) < 5000
+        );
+      if (existing) {
+        existing.id = msgId;
+        if (convId === activeConversationId) {
+          messages = [...messages];
+        } else {
+          conv.messages = [...conv.messages];
+        }
+        return;
+      }
+
+      if (convId === activeConversationId) {
         messages = [...messages, msg];
       } else {
         conv.messages = [...conv.messages, msg];
-        unreadConversations = new Set([...unreadConversations, data.conv_id]);
+        unreadConversations = new Set([...unreadConversations, convId]);
       }
       conv.updatedAt = Date.now();
+      requestAnimationFrame(scrollToBottom);
+    });
+
+    // On stream start — create a placeholder assistant message for token appending
+    sseClient.on('start', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; model?: string; message_id?: string };
+      const convId = data?.conv_id ?? event.convId;
+      const msgId = data?.message_id;
+      if (!convId || !msgId) return;
+
+      sseStreamingConvId = convId;
+      sseStreamingMsgId = msgId;
+      streamingConvIds = new Set([...streamingConvIds, convId]);
+      graphStore.setStreamingConversations(streamingConvIds);
+      isStreaming = true;
+      isPending = false;
+      if (convId === activeConversationId) {
+        processingLabel = 'Thinking...';
+      }
+
+      // Create a placeholder assistant message for this conversation
+      const placeholder: ChatMessage = {
+        id: msgId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        isStreaming: true,
+      };
+
+      const conv = conversations.find((c) => c.id === convId);
+      if (convId === activeConversationId) {
+        if (!messages.find((m) => m.id === msgId)) {
+          messages = [...messages, placeholder];
+        }
+      } else if (conv) {
+        if (!conv.messages.find((m) => m.id === msgId)) {
+          conv.messages = [...conv.messages, placeholder];
+          unreadConversations = new Set([...unreadConversations, convId]);
+        }
+      }
       requestAnimationFrame(scrollToBottom);
     });
 
@@ -169,6 +242,7 @@
       }
 
       isStreaming = true;
+      isPending = false;
       if (convId === activeConversationId) {
         processingLabel = 'Streaming...';
       }
@@ -176,7 +250,25 @@
       const isActive = convId === activeConversationId;
       const targetMessages = isActive ? messages : conversations.find((c) => c.id === convId)?.messages;
 
-      if (!targetMessages) return;
+      // If we don't have the streaming message yet (e.g. reconnect mid-stream),
+      // create a placeholder so we can append tokens
+      if (targetMessages && !targetMessages.find((m) => m.id === msgId)) {
+        const placeholder: ChatMessage = {
+          id: msgId,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          isStreaming: true,
+        };
+        if (isActive) {
+          messages = [...messages, placeholder];
+        } else {
+          const conv = conversations.find((c) => c.id === convId);
+          if (conv) {
+            conv.messages = [...conv.messages, placeholder];
+          }
+        }
+      }
 
       const tokenText = data.token ?? '';
       if (data.thinking) {
@@ -217,6 +309,7 @@
       const msgId = data.message_id ?? sseStreamingMsgId;
 
       isStreaming = false;
+      isPending = false;
       isProcessing = false;
       processingLabel = '';
       thinkingContent = '';
@@ -278,10 +371,105 @@
       }
       graphStore.setStreamingConversations(streamingConvIds);
 
-      // If a conversation we're viewing just started streaming, show the indicator
-      if (convId === activeConversationId && (data?.status === 'streaming' || data?.status === 'pending')) {
-        isProcessing = true;
-        processingLabel = 'Thinking...';
+      if (convId === activeConversationId) {
+        if (data?.status === 'pending') {
+          isPending = true;
+          isProcessing = true;
+          processingLabel = 'Queued…';
+        } else if (data?.status === 'streaming') {
+          isPending = false;
+          isProcessing = true;
+          processingLabel = 'Thinking…';
+        } else {
+          isPending = false;
+        }
+      }
+    });
+
+    // On tool_calls event — initial list of tool calls the model wants to make
+    sseClient.on('tool_calls', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; job_id?: string; message_id?: string; tool_calls?: { id: string; name: string; arguments: string }[] };
+      const convId = data?.conv_id ?? event.convId;
+      const msgId = data?.message_id ?? sseStreamingMsgId;
+      if (!convId || !msgId || !data?.tool_calls) return;
+
+      const toolCalls: MCPToolCall[] = data.tool_calls.map((tc) => ({
+        id: tc.id,
+        toolName: tc.name,
+        arguments: JSON.parse(tc.arguments || '{}'),
+        timestamp: Date.now(),
+      }));
+
+      const updateMsg = (m: ChatMessage): ChatMessage => {
+        const existing = m.mcpToolCalls ?? [];
+        return { ...m, mcpToolCalls: [...existing, ...toolCalls] };
+      };
+
+      if (convId === activeConversationId) {
+        const idx = messages.findIndex((m) => m.id === msgId);
+        if (idx !== -1) messages = messages.map((m) => m.id === msgId ? updateMsg(m) : m);
+      } else {
+        const conv = conversations.find((c) => c.id === convId);
+        if (conv) {
+          const idx = conv.messages.findIndex((m) => m.id === msgId);
+          if (idx !== -1) conv.messages = conv.messages.map((m) => m.id === msgId ? updateMsg(m) : m);
+        }
+      }
+      requestAnimationFrame(scrollToBottom);
+    });
+
+    // On tool_call_start — tool execution has begun
+    sseClient.on('tool_call_start', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; job_id?: string; message_id?: string; tool_name?: string; tool_call_id?: string };
+      const convId = data?.conv_id ?? event.convId;
+      const msgId = data?.message_id ?? sseStreamingMsgId;
+      if (!convId || !msgId) return;
+
+      processingLabel = data?.tool_name === 'save_to_knowledge_graph' ? 'Saving to knowledge graph...' : 'Searching knowledge graph...';
+
+      const updateMsg = (m: ChatMessage): ChatMessage => {
+        const existing = m.mcpToolCalls ?? [];
+        const alreadyHas = existing.find((tc) => tc.id === data?.tool_call_id);
+        if (alreadyHas) return m;
+        return {
+          ...m,
+          mcpToolCalls: [...existing, { id: data?.tool_call_id, toolName: data?.tool_name ?? '', arguments: {}, timestamp: Date.now() }],
+        };
+      };
+
+      if (convId === activeConversationId) {
+        const idx = messages.findIndex((m) => m.id === msgId);
+        if (idx !== -1) messages = messages.map((m) => m.id === msgId ? updateMsg(m) : m);
+      } else {
+        const conv = conversations.find((c) => c.id === convId);
+        if (conv) {
+          const idx = conv.messages.findIndex((m) => m.id === msgId);
+          if (idx !== -1) conv.messages = conv.messages.map((m) => m.id === msgId ? updateMsg(m) : m);
+        }
+      }
+    });
+
+    // On tool_call_result — tool execution finished
+    sseClient.on('tool_call_result', (event: LlmEvent) => {
+      const data = event.data as { conv_id?: string; job_id?: string; message_id?: string; tool_name?: string; tool_call_id?: string; result?: string; is_error?: boolean };
+      const convId = data?.conv_id ?? event.convId;
+      const msgId = data?.message_id ?? sseStreamingMsgId;
+      if (!convId || !msgId) return;
+
+      const updateMsg = (m: ChatMessage): ChatMessage => {
+        const existing = m.mcpToolCalls ?? [];
+        const tcIdx = existing.findIndex((tc) => tc.id === data?.tool_call_id);
+        if (tcIdx === -1) return m;
+        const updated = [...existing];
+        updated[tcIdx] = { ...updated[tcIdx], result: data?.result, isError: data?.is_error };
+        return { ...m, mcpToolCalls: updated };
+      };
+
+      if (convId === activeConversationId) {
+        messages = messages.map((m) => m.id === msgId ? updateMsg(m) : m);
+      } else {
+        const conv = conversations.find((c) => c.id === convId);
+        if (conv) conv.messages = conv.messages.map((m) => m.id === msgId ? updateMsg(m) : m);
       }
     });
 
@@ -295,6 +483,7 @@
         graphStore.setStreamingConversations(streamingConvIds);
       }
       isStreaming = false;
+      isPending = false;
       isProcessing = false;
       processingLabel = '';
 
@@ -329,21 +518,6 @@
         for (const s of statuses) {
           if (s.status === 'streaming' || s.status === 'pending') {
             streamingIds.add(s.conv_id);
-            // Create a placeholder streaming assistant message if needed
-            const conv = conversations.find((c) => c.id === s.conv_id);
-            if (conv && !conv.messages.find((m) => m.isStreaming)) {
-              const placeholderMsg: ChatMessage = {
-                id: generateId(),
-                role: 'assistant',
-                content: '',
-                timestamp: Date.now(),
-                isStreaming: true,
-              };
-              conv.messages = [...conv.messages, placeholderMsg];
-              if (s.conv_id === activeConversationId) {
-                messages = [...messages, placeholderMsg];
-              }
-            }
           }
         }
         streamingConvIds = streamingIds;
@@ -360,6 +534,7 @@
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
   let isStreaming = $state(false);
+  let isPending = $state(false);
   let chatInput = $state('');
   let panelChatInput = $state('');
   let chatExpanded = $state(false);
@@ -957,6 +1132,7 @@
     // The user can click the conversation node to view it.
     if (!fromOrb) chatExpanded = true;
     isProcessing = true;
+    isPending = true;
     processingLabel = 'Sending...';
 
     if (startNew || !wasChatExpanded || !activeConversationId) {
@@ -1287,6 +1463,7 @@
     chatExpanded = true;
 
     isProcessing = true;
+    isPending = true;
     processingLabel = 'Regenerating...';
 
     // Re-submit the last user message to the server API
@@ -1589,6 +1766,9 @@
       }
       syncClient.startPeriodicSync(30_000, (updated) => {
         conversations = [...updated];
+        for (const conv of updated) {
+          graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
+        }
       });
     });
   });
@@ -2095,7 +2275,7 @@
             {@render messageRow(msg)}
           {/each}
 
-          {#if isActiveConversationStreaming && !isStreaming}
+          {#if isPending}
             <div class="flex items-center gap-2 px-4 py-3" data-testid="pending-indicator">
               <div class="flex items-center gap-2">
                 <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>

@@ -170,6 +170,20 @@ class SyncClient {
       });
 
       if (res.status === 409) {
+        // Server has a newer version — reload it so local state stays in sync
+        try {
+          const fresh = await this.loadConversation(conv.id);
+          if (fresh.length > 0) {
+            const localConv = this.conversations.find((c) => c.id === conv.id);
+            if (localConv) {
+              localConv.messages = fresh;
+              localConv.updatedAt = Date.now();
+              this.loadedConversations.set(conv.id, fresh);
+            }
+          }
+        } catch {
+          // Silently ignore — local state will be reconciled on next periodic sync
+        }
         return;
       }
 
@@ -202,7 +216,7 @@ class SyncClient {
 
   private onSync: ((conv: Conversation[]) => void) | null = null;
 
-  startPeriodicSync(intervalMs: number = 30_000, onSync?: (conv: Conversation[]) => void): void {
+  startPeriodicSync(intervalMs: number = 10_000, onSync?: (conv: Conversation[]) => void): void {
     this.onSync = onSync ?? null;
     this.stopPeriodicSync();
     this.periodicTimer = setInterval(() => this.pullRemoteChanges(), intervalMs);

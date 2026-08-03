@@ -9,8 +9,9 @@ export type SseEventType =
   | 'new_conversation'
   | 'new_message'
   | 'token'
-  | 'tool_call'
-  | 'tool_result'
+  | 'tool_calls'
+  | 'tool_call_start'
+  | 'tool_call_result'
   | 'status_change'
   | 'complete'
   | 'error'
@@ -223,18 +224,6 @@ class SseClient {
       this.#reconnectTimer = null;
     }
   }
-
-  // -----------------------------------------------------------------------
-  // Lifecycle — $effect auto-connects on mount and disconnects on destroy
-  // -----------------------------------------------------------------------
-
-  readonly #lifecycleEffect = $effect(() => {
-    this.connect();
-    return () => {
-      this.#disposed = true;
-      this.disconnect();
-    };
-  });
 }
 
 // ---------------------------------------------------------------------------
