@@ -239,6 +239,14 @@
     conversationId: string;
     attachments: Attachment[];
   }>>([]);
+  /** Sync the union of streaming + pending conversation IDs to the graph store
+   *  so that ALL conversations awaiting an AI response show the thinking indicator. */
+  function syncConversationIndicators() {
+    const ids = new Set<string>();
+    if (streamingConversationId) ids.add(streamingConversationId);
+    for (const entry of pendingStreams) ids.add(entry.conversationId);
+    graphStore.setStreamingConversations(ids);
+  }
   const HOLD_TO_RECORD_MS = 3000;
   const HOLD_TICK_MS = 50;
   const HOLD_START_DELAY_MS = 300;
@@ -653,7 +661,8 @@
       promptTokens = null;
     }
     streamingConversationId = null;
-    graphStore.setStreamingConversations(new Set());
+    pendingStreams = [];
+    syncConversationIndicators();
     saveMessagesToConversation();
   }
 
@@ -809,7 +818,7 @@
         pushStreamMessage(assistantMsg);
         isStreaming = true;
         thinkingContent = '';
-        graphStore.setStreamingConversations(new Set([streamingConversationId!]));
+        syncConversationIndicators();
 
         const requestBody: Record<string, unknown> = {
           model: selectedModel || undefined,
@@ -1195,7 +1204,7 @@
         }
       }
       streamingConversationId = null;
-      graphStore.setStreamingConversations(new Set());
+      syncConversationIndicators();
       requestAnimationFrame(scrollToBottom);
 
       // Drain any AI responses queued while this stream was active.
@@ -1274,6 +1283,7 @@
         conversationId: activeConversationId,
         attachments: sentAttachments,
       }];
+      syncConversationIndicators();
       return;
     }
 
@@ -2337,6 +2347,15 @@
           {#each messages as msg (msg.id)}
             {@render messageRow(msg)}
           {/each}
+
+          {#if pendingStreams.some(p => p.conversationId === activeConversationId) && !isStreaming}
+            <div class="flex items-center gap-2 px-4 py-3" data-testid="pending-indicator">
+              <div class="flex items-center gap-2">
+                <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>
+                <span class="text-xs text-cyber-purple">Queued — waiting for response…</span>
+              </div>
+            </div>
+          {/if}
         </div>
       {/if}
 
