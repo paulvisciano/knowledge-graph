@@ -58,9 +58,10 @@
 
   let timelineEntries = $derived.by(() => {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return [];
-    // timeIndex is oldest→newest; reverse so newest appears first in the dropdown.
+    // timeIndex is oldest→newest; keep natural order so scrolling down
+    // (positive deltaY) moves forward in time, scrolling up goes back.
     const labels = timeIndex.indexToLabel;
-    return labels.map((label, idx) => ({ idx, label })).reverse();
+    return labels.map((label, idx) => ({ idx, label }));
   });
 
   function clearSelection(): void {
@@ -205,7 +206,8 @@
     const visualIdx = Math.round(wheelOffset / ITEM_HEIGHT);
     const n = timeIndex.indexToLabel.length;
     const clampedVisual = Math.max(0, Math.min(n - 1, visualIdx));
-    const bucketIdx = n - 1 - clampedVisual;
+    // Entries are oldest→newest, so visual index = bucket index
+    const bucketIdx = clampedVisual;
     if (bucketIdx !== currentBucketIdx) {
       currentBucketIdx = bucketIdx;
       dateLabel = timeIndex.indexToLabel[bucketIdx];
@@ -217,6 +219,13 @@
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
     timelineOpen = true;
     timelineScrubbing = true;
+
+    // Initialize wheel to current position on first open
+    if (wheelOffset === 0) {
+      const n = timeIndex.indexToLabel.length;
+      const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
+      wheelOffset = visualIdx * ITEM_HEIGHT;
+    }
 
     // Move the wheel by the dampened delta — continuous, no inertia
     wheelOffset = clampWheelOffset(wheelOffset + delta * SCROLL_SENSITIVITY);
@@ -426,13 +435,11 @@
     activeFlyTimer = setTimeout(tryFly, 220);
   });
 
-  // When timeline opens, initialize wheel offset to current bucket
+  // Reset wheel offset when timeline closes
   let prevTimelineOpen = false;
   $effect(() => {
-    if (timelineOpen && !prevTimelineOpen && timeIndex && timeIndex.indexToLabel.length > 0) {
-      const n = timeIndex.indexToLabel.length;
-      const visualIdx = currentBucketIdx < 0 ? 0 : n - 1 - currentBucketIdx;
-      wheelOffset = visualIdx * ITEM_HEIGHT;
+    if (!timelineOpen) {
+      wheelOffset = 0;
     }
     prevTimelineOpen = timelineOpen;
   });
