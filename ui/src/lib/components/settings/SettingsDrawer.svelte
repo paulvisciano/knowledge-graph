@@ -5,12 +5,15 @@
   import FaceDetectionToggle from '$lib/components/settings/FaceDetectionToggle.svelte';
   import TimeTravelSensitivity from '$lib/components/settings/TimeTravelSensitivity.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
-  import { createSwipeHandler } from '$lib/composables/use-swipe';
-
-  let panelEl: HTMLDivElement | undefined = $state();
+  import { useSwipe } from 'svelte-gestures';
+  import type { SwipeCustomEvent } from 'svelte-gestures';
 
   function close() {
     settingsDrawerOpen.set(false);
+  }
+
+  function handleSwipe(e: SwipeCustomEvent) {
+    if (e.detail.direction === 'bottom') close();
   }
 
   function handleBackdropClick(e: MouseEvent) {
@@ -24,16 +27,6 @@
       close();
     }
   }
-
-  $effect(() => {
-    if (!$isMobile || !$settingsDrawerOpen || !panelEl) return;
-    const handler = createSwipeHandler({
-      element: panelEl,
-      onSwipeDown: () => close(),
-      threshold: 60,
-    });
-    return () => handler.destroy();
-  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -43,7 +36,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="mobile-sheet-backdrop" onclick={handleBackdropClick} role="presentation">
-      <div bind:this={panelEl} class="mobile-sheet mobile-sheet-bottom">
+      <div class="mobile-sheet mobile-sheet-bottom" {...useSwipe(handleSwipe, () => ({ minSwipeDistance: 60, touchAction: 'pan-y' }))}>
         <div class="mobile-sheet-handle"><div class="mobile-sheet-handle-bar"></div></div>
         <div class="flex items-center justify-between border-b border-cyber-border/50 px-4 py-3">
           <div class="flex items-center gap-2">

@@ -3,12 +3,15 @@
   import Icon from '$lib/components/ui/Icon.svelte';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
-  import { createSwipeHandler } from '$lib/composables/use-swipe';
-
-  let panelEl: HTMLElement | undefined = $state();
+  import { useSwipe } from 'svelte-gestures';
+  import type { SwipeCustomEvent } from 'svelte-gestures';
 
   function close() {
     navDrawerOpen.set(false);
+  }
+
+  function handleSwipe(e: SwipeCustomEvent) {
+    if (e.detail.direction === 'bottom') close();
   }
 
   function handleBackdropClick(e: MouseEvent) {
@@ -33,16 +36,6 @@
     close();
   }
 
-  $effect(() => {
-    if (!$isMobile || !$navDrawerOpen || !panelEl) return;
-    const handler = createSwipeHandler({
-      element: panelEl,
-      onSwipeDown: () => close(),
-      threshold: 60,
-    });
-    return () => handler.destroy();
-  });
-
   const tabs: { id: TabId; icon: string; label: string }[] = [
     { id: 'graph', icon: 'graph', label: 'Graph' },
     { id: 'ingestion', icon: 'upload', label: 'Ingest' },
@@ -59,7 +52,7 @@
     onclick={handleBackdropClick}
     role="presentation"
   >
-    <aside bind:this={panelEl} class="nav-drawer-panel {$isMobile ? 'nav-drawer-bottom' : ''}">
+    <aside class="nav-drawer-panel {$isMobile ? 'nav-drawer-bottom' : ''}" {...($isMobile ? useSwipe(handleSwipe, () => ({ minSwipeDistance: 60, touchAction: 'pan-y' })) : {})}>
       <div class="nav-drawer-header">
         <div class="flex items-center gap-2.5">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg border border-cyber-cyan/20 bg-cyber-cyan/10">
