@@ -889,8 +889,14 @@
 
   @media (max-width: 768px) {
     .timeline-pill {
-      right: 15px;
-      bottom: 15px;
+      right: 20px;
+      bottom: 20px;
+    }
+    .timeline-header {
+      padding: 8px 16px;
+    }
+    .timeline-header-label {
+      font-size: 13px;
     }
   }
 
