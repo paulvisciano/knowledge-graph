@@ -421,6 +421,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
   const yesterdayKey = 'yesterday';
   const todayMonthKey = monthKey(today);
   const yesterdayMonthKey = monthKey(yesterday);
+  const prevMonthKey = monthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 
   const granularity: 'month' | 'day' | 'photo' = 'month';
 
@@ -457,7 +458,7 @@ function buildTimePlan(nodes: KGNode[], edges: KGEdge[]): TimePlan {
       bucketLabel.set(sortedBuckets[i], 'Yesterday');
     } else if (sortedBuckets[i] === todayMonthKey) {
       bucketLabel.set(sortedBuckets[i], 'This Month');
-    } else if (sortedBuckets[i] === yesterdayMonthKey) {
+    } else if (sortedBuckets[i] === prevMonthKey) {
       bucketLabel.set(sortedBuckets[i], 'Last Month');
     } else {
       bucketLabel.set(sortedBuckets[i], sortedBuckets[i]);

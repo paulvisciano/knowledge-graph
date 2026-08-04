@@ -13,6 +13,7 @@
   import type { TimeIndex } from './Layout';
   import { configStore } from '$lib/stores/config.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
+  import { usePan, type PanCustomEvent, useComposedGesture, pinchComposition, type PinchCustomEvent, type GestureCallback, useSwipe, type SwipeCustomEvent, usePress, type PressCustomEvent } from 'svelte-gestures';
   import NodeOverlay from './NodeOverlay.svelte';
   import ProcessingOverlay from './ProcessingOverlay.svelte';
   import type { CanvasNode } from './renderer/types';
@@ -109,6 +110,87 @@
     };
   }
 
+  let lastPinchScale = $state(1);
+  let lastPinchCenterY = $state(0);
+  let twoFingerGesture: 'undecided' | 'pinch' | 'swipe' = $state('undecided');
+  let lastPanX = $state(0);
+  let lastPanY = $state(0);
+
+  // Composed gesture: pinch (fingers converge/diverge) → zoom,
+  // two-finger swipe (fingers move in parallel) → timeline scroll.
+  // Single-finger pan is handled by SceneManager's pointer events.
+  const canvasGesture: GestureCallback = (register) => {
+    const pinchFns = register(pinchComposition, { touchAction: 'none' });
+    let prevCenterY: number | null = null;
+
+    return (activeEvents, event) => {
+      if (activeEvents.length < 2) {
+        if (twoFingerGesture === 'pinch') {
+          sceneManager?.handlePinchEnd();
+        }
+        prevCenterY = null;
+        twoFingerGesture = 'undecided';
+        lastPinchScale = 1;
+        return;
+      }
+
+      pinchFns.onMove?.(activeEvents, event);
+
+      const p0 = activeEvents[0];
+      const p1 = activeEvents[1];
+      const centerY = (p0.clientY + p1.clientY) / 2;
+
+      if (prevCenterY === null) {
+        prevCenterY = centerY;
+        return;
+      }
+
+      const dy = centerY - prevCenterY;
+      prevCenterY = centerY;
+
+      if (twoFingerGesture === 'swipe' && sceneManager) {
+        sceneManager.onTimelineScroll?.(dy);
+      }
+    };
+  };
+
+  function handlePinch(event: PinchCustomEvent): void {
+    if (!sceneManager) return;
+    if (twoFingerGesture === 'swipe') return;
+    twoFingerGesture = 'pinch';
+    const scale = event.detail.scale;
+    if (lastPinchScale === 1) {
+      sceneManager.handlePinchStart();
+    }
+    const delta = -(scale - lastPinchScale) * 200;
+    lastPinchScale = scale;
+    sceneManager.handlePinchMove(delta);
+  }
+
+  const SWIPE_TIMELINE_DELTA = 40;
+
+  function handleSwipe(event: SwipeCustomEvent): void {
+    if (event.detail.pointerType !== 'touch') return;
+    const dir = event.detail.direction;
+    if (dir === 'top') {
+      handleTimelineScroll(-SWIPE_TIMELINE_DELTA);
+    } else if (dir === 'bottom') {
+      handleTimelineScroll(SWIPE_TIMELINE_DELTA);
+    }
+  }
+
+  function handlePress(_event: PressCustomEvent): void {
+    timelineOpen = true;
+    timelineScrubbing = true;
+    if (wheelOffset === 0) {
+      if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+      const n = timeIndex.indexToLabel.length;
+      const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
+      wheelOffset = visualIdx * ITEM_HEIGHT;
+      updateBucketFromWheel();
+    }
+  }
+
   function handleDoubleTap(x: number, y: number): void {
     if (!sceneManager || !timeIndex || currentBucketIdx < 0) return;
     const sm = sceneManager;
@@ -187,13 +269,16 @@
 
   function closeTimeline(): void {
     timelineOpen = false;
+    pendingScrollDelta = 0;
   }
 
   // ── Continuous picker-wheel scroll state ──
   const ITEM_HEIGHT = 44;
-  const SCROLL_SENSITIVITY = 0.6;
+  const SCROLL_SENSITIVITY = 0.15;
+  const SCROLL_DEAD_ZONE = 80;          // min cumulative delta before timeline opens
 
   let wheelOffset = $state(0);         // continuous pixel offset of the drum
+  let pendingScrollDelta = 0;           // accumulates small deltas until dead zone is crossed
 
   function clampWheelOffset(offset: number): number {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return 0;
@@ -217,6 +302,20 @@
 
   function handleTimelineScroll(delta: number): void {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+
+    // Dead zone: accumulate small deltas until the user has scrolled enough
+    // to clearly intend a timeline navigation. This prevents accidental
+    // date switches from minor trackpad brushes.
+    if (!timelineOpen) {
+      pendingScrollDelta += delta;
+      if (Math.abs(pendingScrollDelta) < SCROLL_DEAD_ZONE) return;
+      // Exceeded dead zone — consume the accumulated delta
+      delta = pendingScrollDelta;
+      pendingScrollDelta = 0;
+    } else {
+      pendingScrollDelta = 0;
+    }
+
     timelineOpen = true;
     timelineScrubbing = true;
 
@@ -244,6 +343,41 @@
       updateBucketFromWheel();
       flyToBucket(currentBucketIdx);
     }, 1200);
+  }
+
+  function handleTimelinePan(event: PanCustomEvent): void {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+    if (event.detail.pointerType !== 'touch') return;
+    const dy = event.detail.y - lastPanY;
+    lastPanY = event.detail.y;
+    handleTimelineScroll(-dy * 1.2);
+  }
+
+  function handleTimelinePanStart(): void {
+    timelineOpen = true;
+    timelineScrubbing = true;
+    lastPanX = 0;
+    lastPanY = 0;
+    if (wheelOffset === 0) {
+      if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+      const n = timeIndex.indexToLabel.length;
+      const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
+      wheelOffset = visualIdx * ITEM_HEIGHT;
+    }
+  }
+
+  function handleTimelinePanEnd(): void {
+    lastPanX = 0;
+    lastPanY = 0;
+    if (timelineCloseTimer) clearTimeout(timelineCloseTimer);
+    timelineCloseTimer = setTimeout(() => {
+      timelineScrubbing = false;
+      timelineCloseTimer = null;
+      const snapTarget = Math.round(wheelOffset / ITEM_HEIGHT) * ITEM_HEIGHT;
+      wheelOffset = snapTarget;
+      updateBucketFromWheel();
+      flyToBucket(currentBucketIdx);
+    }, 800);
   }
 
   function rebuildLayout(): void {
@@ -440,6 +574,7 @@
   $effect(() => {
     if (!timelineOpen) {
       wheelOffset = 0;
+      pendingScrollDelta = 0;
     }
     prevTimelineOpen = timelineOpen;
   });
@@ -447,7 +582,11 @@
   let isEmpty = $derived(graphStore.nodes.length === 0);
  </script>
  
- <div bind:this={containerEl} class="canvas-container" data-testid="graph-canvas"></div>
+  <div bind:this={containerEl} class="canvas-container" data-testid="graph-canvas"
+    {...useComposedGesture(canvasGesture, { onpinch: handlePinch })}
+    {...useSwipe(handleSwipe, () => ({ timeframe: 400, minSwipeDistance: 40, touchAction: 'none' }))}
+    {...usePress(handlePress, () => ({ timeframe: 400, spread: 10, touchAction: 'none' }))}
+  ></div>
  
 {#if isEmpty}
   <div class="empty-state">
@@ -481,6 +620,7 @@
       onwheel={(e) => { e.preventDefault(); handleTimelineScroll(e.deltaY); }}
       onclick={(e) => { if (e.target === e.currentTarget) closeTimeline(); }}
       onkeydown={(e) => (e.key === 'Escape' ? closeTimeline() : null)}
+      {...usePan(handleTimelinePan, () => ({ touchAction: 'none' }), { onpandown: handleTimelinePanStart, onpanup: handleTimelinePanEnd })}
       data-od-id="navigate-overlay"
     >
       <div class="navigate-overlay-label">Navigate to</div>
@@ -686,6 +826,7 @@
     backdrop-filter: blur(16px) saturate(0.8);
     -webkit-backdrop-filter: blur(16px) saturate(0.8);
     cursor: default;
+    touch-action: none;
     animation: overlay-fade-in 0.2s ease-out;
   }
 
