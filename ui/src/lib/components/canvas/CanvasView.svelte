@@ -890,7 +890,7 @@
   @media (max-width: 768px) {
     .timeline-pill {
       right: 12px;
-      top: 12px;
+      bottom: 12px;
     }
   }
 
