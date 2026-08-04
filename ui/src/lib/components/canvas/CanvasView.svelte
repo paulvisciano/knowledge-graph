@@ -291,6 +291,37 @@
     updatePinchBounds(clampedVisual);
   }
 
+  function moveTimelineWheel(pixelDelta: number): void {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+    timelineOpen = true;
+    timelineScrubbing = true;
+
+    if (!wheelInitialized) {
+      const n = timeIndex.indexToLabel.length;
+      const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
+      wheelOffset = visualIdx * ITEM_HEIGHT;
+      wheelInitialized = true;
+    }
+
+    // Apply pixel delta 1:1 — no sensitivity dampening (touch deltas are already small)
+    wheelOffset = clampWheelOffset(wheelOffset + pixelDelta);
+    updateBucketFromWheel();
+
+    // Reset close timer — when it fires, we snap and navigate
+    if (timelineCloseTimer) clearTimeout(timelineCloseTimer);
+    timelineCloseTimer = setTimeout(() => {
+      timelineScrubbing = false;
+      timelineCloseTimer = null;
+      const snapTarget = Math.round(wheelOffset / ITEM_HEIGHT) * ITEM_HEIGHT;
+      wheelOffset = snapTarget;
+      const n = timeIndex.indexToLabel.length;
+      const bucketIdx = Math.max(0, Math.min(n - 1, Math.round(wheelOffset / ITEM_HEIGHT)));
+      currentBucketIdx = bucketIdx;
+      dateLabel = timeIndex.indexToLabel[bucketIdx];
+      flyToBucket(bucketIdx);
+    }, 1200);
+  }
+
   function handleTimelineScroll(delta: number): void {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
 
@@ -352,7 +383,9 @@
     }
     const dy = event.detail.y - lastPanY;
     lastPanY = event.detail.y;
-    handleTimelineScroll(-dy * 1.2);
+    // Touch pan deltas are in screen pixels — apply directly without
+    // the dampening factor used for scroll-wheel (which has much larger deltas).
+    moveTimelineWheel(-dy);
   }
 
   function handleTimelinePanStart(): void {
