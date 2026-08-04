@@ -75,8 +75,6 @@ export class SceneManager {
   private readonly _raycaster = new THREE.Raycaster();
   private readonly _pointerNdc = new THREE.Vector2();
 
-  /** Active touch pointers keyed by pointerId, used for pinch + pan. */
-  private readonly _touchPointers = new Map<number, { x: number; y: number }>();
   /** Last single-pointer drag state (mouse or first touch). */
   private readonly _pointer = {
     down: false,
@@ -87,11 +85,8 @@ export class SceneManager {
     dragged: false,
     isTouch: false,
   };
-  /** Snapshot of pinch distance/midpoint at the start of the current pinch gesture. */
+  /** True while a pinch-to-zoom gesture is active (fed from svelte-gestures). */
   private _pinchActive = false;
-  private _pinchStartDist = 0;
-  private _pinchStartZ = 0;
-  private _pinchDirty = false;
 
   private static readonly IS_TOUCH_DEVICE =
     ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) ||
@@ -483,10 +478,6 @@ export class SceneManager {
       this._drift.set(0, 0);
     } else {
       this.applyKeyboard();
-      if (this._pinchDirty) {
-        this.applyPinch();
-        this._pinchDirty = false;
-      }
       this.applyVelocity();
       this.applyDrift();
     }
@@ -597,18 +588,13 @@ export class SceneManager {
   private onPointerDown = (e: PointerEvent): void => {
     this.cancelFly();
     if (e.pointerType === 'touch') {
-      this._touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this._touchPointers.size === 2) {
-        this.beginPinch();
-      } else if (this._touchPointers.size === 1) {
-        this._pointer.down = true;
-        this._pointer.isTouch = true;
-        this._pointer.lastX = e.clientX;
-        this._pointer.lastY = e.clientY;
-        this._pointer.downStartX = e.clientX;
-        this._pointer.downStartY = e.clientY;
-        this._pointer.dragged = false;
-      }
+      this._pointer.down = true;
+      this._pointer.isTouch = true;
+      this._pointer.lastX = e.clientX;
+      this._pointer.lastY = e.clientY;
+      this._pointer.downStartX = e.clientX;
+      this._pointer.downStartY = e.clientY;
+      this._pointer.dragged = false;
     } else {
       this._pointer.down = true;
       this._pointer.isTouch = false;
@@ -627,14 +613,19 @@ export class SceneManager {
     this._mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this._mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    if (e.pointerType === 'touch' && this._touchPointers.has(e.pointerId)) {
-      this._touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this._pinchActive && this._touchPointers.size >= 2) {
-        this._pinchDirty = true;
-        return;
-      }
-      if (this._touchPointers.size === 1 && this._pointer.down) {
-        this.applyTouchPan(e);
+    if (e.pointerType === 'touch') {
+      if (this._pointer.down && !this._pinchActive) {
+        const dx = e.clientX - this._pointer.lastX;
+        const dy = e.clientY - this._pointer.lastY;
+        this._pointer.lastX = e.clientX;
+        this._pointer.lastY = e.clientY;
+        if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
+          this._pointer.dragged = true;
+        }
+        const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+        this._targetVel.x -= dx * TOUCH_PAN_FACTOR * zScale;
+        this._targetVel.y += dy * TOUCH_PAN_FACTOR * zScale;
+        this._userMoved = true;
       }
       return;
     }
@@ -659,25 +650,10 @@ export class SceneManager {
 
   private onPointerUp = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') {
-      this._touchPointers.delete(e.pointerId);
-      if (this._touchPointers.size < 2) this._pinchActive = false;
-      if (this._touchPointers.size === 0) {
-        if (this._pointer.down && !this._pointer.dragged) {
-          this.detectDoubleTap(e.clientX, e.clientY);
-        }
-        this._pointer.down = false;
-      } else if (this._touchPointers.size === 1) {
-        // one finger lifted mid-pinch — resume single-finger pan from remaining pointer
-        const remaining = this._touchPointers.values().next().value;
-        if (remaining) {
-          this._pointer.down = true;
-          this._pointer.lastX = remaining.x;
-          this._pointer.lastY = remaining.y;
-          this._pointer.downStartX = remaining.x;
-          this._pointer.downStartY = remaining.y;
-          this._pointer.dragged = true;
-        }
+      if (this._pointer.down && !this._pointer.dragged) {
+        this.detectDoubleTap(e.clientX, e.clientY);
       }
+      this._pointer.down = false;
       this.updateCursor();
       return;
     }
@@ -718,34 +694,29 @@ export class SceneManager {
     this.onDoubleTap?.(x, y);
   }
 
-  /** Initializes pinch snapshot from the two current touch pointers. */
-  private beginPinch(): void {
-    const pts = [...this._touchPointers.values()];
-    if (pts.length < 2) return;
+  /** Called by svelte-gestures when a pinch-to-zoom gesture starts. */
+  handlePinchStart(): void {
     this._pinchActive = true;
     this._pointer.dragged = true;
-    this._pinchStartDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
-    this._pinchStartZ = this._basePos.z;
+    this._userMoved = true;
+    this.cancelFly();
   }
 
-  private applyPinch(): void {
-    const pts = [...this._touchPointers.values()];
-    if (pts.length < 2) return;
-    const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) || 1;
+  /** Called by svelte-gestures on each pinch scale change. */
+  handlePinchMove(scaleDelta: number): void {
+    if (!this._pinchActive) return;
     const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
-    this._scrollAccum += (this._pinchStartDist - dist) * ZOOM_FACTOR * zScale * this._pinchSensitivity;
-    this._pinchStartDist = dist;
+    this._scrollAccum += scaleDelta * ZOOM_FACTOR * zScale * this._pinchSensitivity;
     this._userMoved = true;
   }
 
-  private applyTouchPan(e: PointerEvent): void {
-    const dx = e.clientX - this._pointer.lastX;
-    const dy = e.clientY - this._pointer.lastY;
-    this._pointer.lastX = e.clientX;
-    this._pointer.lastY = e.clientY;
-    if (Math.hypot(e.clientX - this._pointer.downStartX, e.clientY - this._pointer.downStartY) > 5) {
-      this._pointer.dragged = true;
-    }
+  /** Called by svelte-gestures when the pinch gesture ends. */
+  handlePinchEnd(): void {
+    this._pinchActive = false;
+  }
+
+  /** Called by svelte-gestures on single-finger touch pan. */
+  handleTouchPan(dx: number, dy: number): void {
     const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
     this._targetVel.x -= dx * TOUCH_PAN_FACTOR * zScale;
     this._targetVel.y += dy * TOUCH_PAN_FACTOR * zScale;

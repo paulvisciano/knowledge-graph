@@ -61,14 +61,14 @@ export const INVIS_THRESHOLD = 0.01;
  * panning stays proportional on-screen regardless of zoom level.
  * Ported from the reference's `0.025` multiplier.
  */
-export const MOUSE_PAN_FACTOR = 0.025;
+export const MOUSE_PAN_FACTOR = 0.05;
 
 /**
  * Single-touch pan factor: each pixel of touch delta adds this much to
  * `targetVel.x/y`, then z-scaled like MOUSE_PAN_FACTOR.
- * Ported from the reference's `0.02` multiplier.
+ * Matched to MOUSE_PAN_FACTOR so touch and mouse panning feel equally responsive.
  */
-export const TOUCH_PAN_FACTOR = 0.02;
+export const TOUCH_PAN_FACTOR = 0.20;
 
 /**
  * Wheel / pinch-zoom factor: each pixel of `deltaY` (or pinch distance
