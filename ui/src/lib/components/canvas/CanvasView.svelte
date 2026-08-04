@@ -13,7 +13,7 @@
   import type { TimeIndex } from './Layout';
   import { configStore } from '$lib/stores/config.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
-  import { usePan, type PanCustomEvent, useComposedGesture, pinchComposition, type PinchCustomEvent, type GestureCallback, useSwipe, type SwipeCustomEvent, usePress, type PressCustomEvent } from 'svelte-gestures';
+  import { usePan, type PanCustomEvent, useComposedGesture, pinchComposition, type PinchCustomEvent, type GestureCallback, useSwipe, type SwipeCustomEvent } from 'svelte-gestures';
   import NodeOverlay from './NodeOverlay.svelte';
   import ProcessingOverlay from './ProcessingOverlay.svelte';
   import type { CanvasNode } from './renderer/types';
@@ -179,18 +179,6 @@
     }
   }
 
-  function handlePress(_event: PressCustomEvent): void {
-    timelineOpen = true;
-    timelineScrubbing = true;
-    if (wheelOffset === 0) {
-      if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
-      const n = timeIndex.indexToLabel.length;
-      const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
-      wheelOffset = visualIdx * ITEM_HEIGHT;
-      updateBucketFromWheel();
-    }
-  }
-
   function handleDoubleTap(x: number, y: number): void {
     if (!sceneManager || !timeIndex || currentBucketIdx < 0) return;
     const sm = sceneManager;
@@ -216,6 +204,9 @@
   }
 
   function updateDateLabel(camChunkZ: number): void {
+    // Don't overwrite the bucket/date while the user is scrubbing the timeline
+    // or while we're restoring from a dismiss.
+    if (timelineScrubbing) return;
     if (!timeIndex || timeIndex.indexToLabel.length === 0) {
       currentBucketIdx = -1;
       dateLabel = null;
@@ -270,6 +261,9 @@
   function closeTimeline(): void {
     timelineOpen = false;
     pendingScrollDelta = 0;
+    timelineScrubbing = false;
+    // Cancel any pending navigation — dismiss means cancel, not navigate
+    if (timelineCloseTimer) { clearTimeout(timelineCloseTimer); timelineCloseTimer = null; }
   }
 
   // ── Continuous picker-wheel scroll state ──
@@ -291,13 +285,9 @@
     const visualIdx = Math.round(wheelOffset / ITEM_HEIGHT);
     const n = timeIndex.indexToLabel.length;
     const clampedVisual = Math.max(0, Math.min(n - 1, visualIdx));
-    // Entries are oldest→newest, so visual index = bucket index
-    const bucketIdx = clampedVisual;
-    if (bucketIdx !== currentBucketIdx) {
-      currentBucketIdx = bucketIdx;
-      dateLabel = timeIndex.indexToLabel[bucketIdx];
-      updatePinchBounds(bucketIdx);
-    }
+    // Don't commit the bucket/date while scrubbing — only update pinch bounds.
+    // The confirmed values are set when the settle timer fires or on dismiss.
+    updatePinchBounds(clampedVisual);
   }
 
   function handleTimelineScroll(delta: number): void {
@@ -340,8 +330,12 @@
       // Snap to nearest item, then navigate
       const snapTarget = Math.round(wheelOffset / ITEM_HEIGHT) * ITEM_HEIGHT;
       wheelOffset = snapTarget;
-      updateBucketFromWheel();
-      flyToBucket(currentBucketIdx);
+      // Commit the selection
+      const n = timeIndex.indexToLabel.length;
+      const bucketIdx = Math.max(0, Math.min(n - 1, Math.round(wheelOffset / ITEM_HEIGHT)));
+      currentBucketIdx = bucketIdx;
+      dateLabel = timeIndex.indexToLabel[bucketIdx];
+      flyToBucket(bucketIdx);
     }, 1200);
   }
 
@@ -375,8 +369,12 @@
       timelineCloseTimer = null;
       const snapTarget = Math.round(wheelOffset / ITEM_HEIGHT) * ITEM_HEIGHT;
       wheelOffset = snapTarget;
-      updateBucketFromWheel();
-      flyToBucket(currentBucketIdx);
+      if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+      const n = timeIndex.indexToLabel.length;
+      const bucketIdx = Math.max(0, Math.min(n - 1, Math.round(wheelOffset / ITEM_HEIGHT)));
+      currentBucketIdx = bucketIdx;
+      dateLabel = timeIndex.indexToLabel[bucketIdx];
+      flyToBucket(bucketIdx);
     }, 800);
   }
 
@@ -585,7 +583,6 @@
   <div bind:this={containerEl} class="canvas-container" data-testid="graph-canvas"
     {...useComposedGesture(canvasGesture, { onpinch: handlePinch })}
     {...useSwipe(handleSwipe, () => ({ timeframe: 400, minSwipeDistance: 40, touchAction: 'none' }))}
-    {...usePress(handlePress, () => ({ timeframe: 400, spread: 10, touchAction: 'none' }))}
   ></div>
  
 {#if isEmpty}
