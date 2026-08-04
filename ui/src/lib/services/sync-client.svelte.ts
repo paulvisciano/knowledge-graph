@@ -117,7 +117,7 @@ class SyncClient {
     }
   }
 
-  async saveConversation(conv: Conversation): Promise<void> {
+  async saveConversation(conv: Conversation, { optimisticOnly = false }: { optimisticOnly?: boolean } = {}): Promise<void> {
     this.error = null;
     try {
       // Defensive: never persist an empty title when the conversation has
@@ -155,6 +155,8 @@ class SyncClient {
         conv.id,
         conv.messages.filter((m) => !m.isStreaming),
       );
+
+      if (optimisticOnly) return;
 
       const dbConv = this.toSyncConv(conv);
       const dbMessages = conv.messages
@@ -320,7 +322,23 @@ class SyncClient {
     let mcpToolCalls: MCPToolCall[] | undefined;
     if (data.toolCalls) {
       try {
-        mcpToolCalls = JSON.parse(data.toolCalls) as MCPToolCall[];
+        const raw = JSON.parse(data.toolCalls);
+        const arr = Array.isArray(raw) ? raw : [raw];
+        mcpToolCalls = arr.map((tc: any) => {
+          if (tc.function && typeof tc.function === 'object') {
+            return {
+              id: tc.id,
+              toolName: tc.function.name,
+              arguments: typeof tc.function.arguments === 'string'
+                ? JSON.parse(tc.function.arguments)
+                : tc.function.arguments,
+              timestamp: tc.timestamp ?? Date.now(),
+              result: tc.result,
+              isError: tc.isError,
+            } as MCPToolCall;
+          }
+          return tc as MCPToolCall;
+        });
       } catch {
         mcpToolCalls = undefined;
       }

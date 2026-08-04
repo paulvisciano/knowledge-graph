@@ -429,6 +429,36 @@ async def _update_assistant_message(
 # SSE parsing
 # ---------------------------------------------------------------------------
 
+def _normalize_tool_calls(raw: list[dict[str, Any]] | dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert tool_calls from MCP format to OpenAI format.
+
+    The DB may store tool_calls in either format:
+    - MCP:    {"id", "toolName", "arguments": {obj}, "timestamp", "result", ...}
+    - OpenAI: {"id", "type": "function", "function": {"name", "arguments": str}}
+    llama-server requires OpenAI format.
+    """
+    if isinstance(raw, dict):
+        raw = [raw]
+    result: list[dict[str, Any]] = []
+    for tc in raw:
+        if "function" in tc and isinstance(tc["function"], dict):
+            # Already OpenAI format
+            result.append(tc)
+            continue
+        # MCP format → OpenAI format
+        tc_id = tc.get("id", "")
+        tc_name = tc.get("toolName") or tc.get("name") or tc.get("function", {}).get("name", "")
+        tc_args = tc.get("arguments") or tc.get("function", {}).get("arguments", {})
+        if isinstance(tc_args, dict):
+            tc_args = json.dumps(tc_args)
+        result.append({
+            "id": tc_id,
+            "type": "function",
+            "function": {"name": tc_name, "arguments": tc_args},
+        })
+    return result
+
+
 def _parse_sse_lines(buffer: str) -> tuple[list[dict[str, Any]], str]:
     """Parse SSE data from a buffer. Returns (parsed_events, remaining_buffer).
 
@@ -516,10 +546,11 @@ async def process_llm_job(job: dict[str, Any]) -> None:
             api_messages.append({"role": "user", "content": msg.get("content", "")})
         elif msg.get("role") == "assistant":
             entry: dict[str, Any] = {"role": "assistant", "content": msg.get("content", "") or None}
-            # Include tool_calls if present
+            # Include tool_calls if present — convert MCP format to OpenAI format
             if msg.get("tool_calls"):
                 try:
-                    entry["tool_calls"] = json.loads(msg["tool_calls"]) if isinstance(msg["tool_calls"], str) else msg["tool_calls"]
+                    raw = json.loads(msg["tool_calls"]) if isinstance(msg["tool_calls"], str) else msg["tool_calls"]
+                    entry["tool_calls"] = _normalize_tool_calls(raw)
                 except (json.JSONDecodeError, TypeError):
                     pass
             api_messages.append(entry)
@@ -749,6 +780,23 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                     conv_id=conv_id,
                 )
                 return
+            except RuntimeError as exc:
+                # Catches "llama-server HTTP {status}: {body}" from non-200 responses
+                # (e.g. context window exceeded, model overload, etc.)
+                err_msg = str(exc)
+                logger.error("Job %s: %s", job_id, err_msg)
+                await update_llm_job_status(job_id, "error", err_msg)
+                await append_llm_job_event(
+                    job_id, "status_change",
+                    {"conv_id": conv_id, "status": "error"},
+                    conv_id=conv_id,
+                )
+                await append_llm_job_event(
+                    job_id, "error",
+                    {"error": err_msg},
+                    conv_id=conv_id,
+                )
+                return
 
             # Publish timing info if we got any
             if timings:
@@ -917,10 +965,11 @@ async def poll_and_process() -> None:
 
     try:
         await process_llm_job(job)
-    except Exception:
+    except Exception as exc:
         logger.exception("Job %s failed with unhandled exception", job_id)
+        err_msg = f"Unhandled exception: {exc}"
         try:
-            await update_llm_job_status(job_id, "error", "Unhandled exception during processing")
+            await update_llm_job_status(job_id, "error", err_msg)
             await append_llm_job_event(
                 job_id, "status_change",
                 {"conv_id": conv_id, "status": "error"},
@@ -928,7 +977,7 @@ async def poll_and_process() -> None:
             )
             await append_llm_job_event(
                 job_id, "error",
-                {"error": "Unhandled exception during processing"},
+                {"error": err_msg},
                 conv_id=conv_id,
             )
         except Exception:

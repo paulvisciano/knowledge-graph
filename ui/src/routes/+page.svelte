@@ -338,6 +338,15 @@
         if (conv) {
           if (convId === activeConversationId) {
             conv.messages = [...messages];
+          } else {
+            // Periodic sync may have replaced conv.messages with an empty
+            // summary (fromSyncConv returns messages: []). Restore the
+            // actual messages from the syncClient cache before saving,
+            // otherwise saveConversation would wipe all messages from the DB.
+            const cached = syncClient.getCachedMessages(convId);
+            if (cached && cached.length > 0) {
+              conv.messages = cached;
+            }
           }
           conv.updatedAt = Date.now();
           syncClient.saveConversation(conv);
@@ -476,7 +485,8 @@
     // On error from the server
     sseClient.on('error', (event: LlmEvent) => {
       const data = event.data as { message?: string; conv_id?: string };
-      console.error('SSE error:', data?.message ?? 'Unknown error');
+      const errorMessage = data?.message ?? (data as any)?.error ?? 'Unknown error';
+      console.error('SSE error:', errorMessage);
       const convId = data?.conv_id ?? event.convId;
       if (convId) {
         streamingConvIds = new Set([...streamingConvIds].filter((id) => id !== convId));
@@ -492,7 +502,7 @@
         if (convId === activeConversationId) {
           messages = messages.map((m) =>
             m.id === sseStreamingMsgId
-              ? { ...m, content: `**Error:** ${data?.message ?? 'Unknown error'}`, isStreaming: false }
+              ? { ...m, content: `**Error:** ${errorMessage}`, isStreaming: false }
               : m
           );
         } else {
@@ -500,7 +510,7 @@
           if (conv) {
             conv.messages = conv.messages.map((m) =>
               m.id === sseStreamingMsgId
-                ? { ...m, content: `**Error:** ${data?.message ?? 'Unknown error'}`, isStreaming: false }
+                ? { ...m, content: `**Error:** ${errorMessage}`, isStreaming: false }
                 : m
             );
           }
@@ -1110,12 +1120,12 @@
     switchConversation(id);
   }
 
-  function saveMessagesToConversation() {
+  function saveMessagesToConversation({ optimisticOnly = false }: { optimisticOnly?: boolean } = {}) {
     const conv = conversations.find((c) => c.id === activeConversationId);
     if (conv) {
       conv.messages = [...messages];
       conv.updatedAt = Date.now();
-      syncClient.saveConversation(conv);
+      syncClient.saveConversation(conv, { optimisticOnly });
     }
   }
 
@@ -1158,7 +1168,9 @@
     }
     conv?.updatedAt && (conv.updatedAt = Date.now());
 
-    saveMessagesToConversation();
+    // Optimistic-only: skip the PUT since the POST to /chat/conversations/{id}/messages
+    // will persist the conversation server-side, avoiding a 409 race.
+    saveMessagesToConversation({ optimisticOnly: true });
 
     const sentAttachments = [...attachments];
     chatInput = '';
@@ -1483,6 +1495,11 @@
     }
   }
 
+  function deleteMessage(msgId: string) {
+    messages = messages.filter((m) => m.id !== msgId);
+    saveMessagesToConversation();
+  }
+
   async function deleteConversation(id: string) {
     conversations = conversations.filter((c) => c.id !== id);
     syncClient.deleteConversation(id);
@@ -1765,6 +1782,23 @@
         }
       }
       syncClient.startPeriodicSync(30_000, (updated) => {
+        // Merge: preserve in-memory messages from the current conversations
+        // array. syncClient.conversations (which `updated` references) has
+        // messages: [] because fromSyncConv() only returns metadata — the
+        // actual messages live in loadedConversations (the cache). Blinding
+        // replacing conversations[] would wipe any messages that SSE events
+        // or local edits added since the last sync.
+        for (const synced of updated) {
+          const existing = conversations.find((c) => c.id === synced.id);
+          if (existing && existing.messages.length > 0) {
+            synced.messages = existing.messages;
+          } else {
+            const cached = syncClient.getCachedMessages(synced.id);
+            if (cached && cached.length > 0) {
+              synced.messages = cached;
+            }
+          }
+        }
         conversations = [...updated];
         for (const conv of updated) {
           graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
@@ -1930,12 +1964,21 @@
                   <span class="text-[10px] text-cyber-text-dim/50">{formatTime(msg.timestamp)}</span>
                   {#if !isActiveConversationStreaming}
                     <button
+                      onclick={() => { if (confirm('Delete this message?')) deleteMessage(msg.id); }}
+                      class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red"
+                      title="Delete message"
+                      data-testid="delete-message-button"
+                    >
+                      <Icon name="trash-2" size={12} />
+                      Delete
+                    </button>
+                    <button
                       onclick={() => resendMessage(msg.id)}
-                      class="flex items-center gap-1 rounded-md border border-cyber-border/50 bg-cyber-surface-2/60 px-2 py-1 text-[11px] font-medium text-cyber-text-dim transition-all duration-200 hover:border-cyber-cyan/50 hover:bg-cyber-cyan/10 hover:text-cyber-cyan hover:glow-cyan focus:outline-none focus:ring-1 focus:ring-cyber-cyan/40 active:scale-95"
+                      class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan"
                       title="Regenerate response"
                       data-testid="regenerate-button"
                     >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                       Regenerate
                     </button>
                   {/if}
@@ -2008,6 +2051,15 @@
 
                     {#if !msg.isStreaming && msg.content}
                       <div class="flex items-center gap-2">
+                        <button
+                          onclick={() => { if (confirm('Delete this message?')) deleteMessage(msg.id); }}
+                          class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red"
+                          title="Delete message"
+                          data-testid="delete-message-button"
+                        >
+                          <Icon name="trash-2" size={12} />
+                          Delete
+                        </button>
                         {#if msg.role === 'assistant'}
                           <button
                             onclick={() => {
