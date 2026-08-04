@@ -669,7 +669,7 @@
       onwheel={(e) => { e.preventDefault(); handleTimelineScroll(e.deltaY); }}
       onclick={(e) => { if (e.target === e.currentTarget) closeTimeline(); }}
       onkeydown={(e) => (e.key === 'Escape' ? closeTimeline() : null)}
-      {...usePan(handleTimelinePan, () => ({ touchAction: 'none' }), { onpandown: handleTimelinePanStart, onpanup: handleTimelinePanEnd })}
+      {...usePan(handleTimelinePan, () => ({ touchAction: 'none', delay: 0 }), { onpandown: handleTimelinePanStart, onpanup: handleTimelinePanEnd })}
       data-od-id="navigate-overlay"
     >
       <div class="navigate-overlay-label">Navigate to</div>
