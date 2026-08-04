@@ -272,6 +272,7 @@
   const SCROLL_DEAD_ZONE = 80;          // min cumulative delta before timeline opens
 
   let wheelOffset = $state(0);         // continuous pixel offset of the drum
+  let wheelInitialized = false;        // true once the wheel position has been set
   let pendingScrollDelta = 0;           // accumulates small deltas until dead zone is crossed
 
   function clampWheelOffset(offset: number): number {
@@ -310,10 +311,11 @@
     timelineScrubbing = true;
 
     // Initialize wheel to current position on first open
-    if (wheelOffset === 0) {
+    if (!wheelInitialized) {
       const n = timeIndex.indexToLabel.length;
       const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
       wheelOffset = visualIdx * ITEM_HEIGHT;
+      wheelInitialized = true;
     }
 
     // Move the wheel by the dampened delta — continuous, no inertia
@@ -352,11 +354,12 @@
     timelineScrubbing = true;
     lastPanX = 0;
     lastPanY = 0;
-    if (wheelOffset === 0) {
+    if (!wheelInitialized) {
       if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
       const n = timeIndex.indexToLabel.length;
       const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
       wheelOffset = visualIdx * ITEM_HEIGHT;
+      wheelInitialized = true;
     }
   }
 
@@ -572,6 +575,7 @@
   $effect(() => {
     if (!timelineOpen) {
       wheelOffset = 0;
+      wheelInitialized = false;
       pendingScrollDelta = 0;
     }
     prevTimelineOpen = timelineOpen;
