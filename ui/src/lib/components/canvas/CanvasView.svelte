@@ -609,10 +609,19 @@
     activeFlyTimer = setTimeout(tryFly, 220);
   });
 
-  // Reset wheel offset when timeline closes
+  // Reset wheel offset when timeline closes; initialize when it opens
   let prevTimelineOpen = false;
   $effect(() => {
-    if (!timelineOpen) {
+    if (timelineOpen) {
+      // Immediately position the wheel at the current bucket so it shows
+      // the correct date on open, not the oldest entry.
+      if (timeIndex && timeIndex.indexToLabel.length > 0 && !wheelInitialized) {
+        const n = timeIndex.indexToLabel.length;
+        const visualIdx = currentBucketIdx < 0 ? n - 1 : currentBucketIdx;
+        wheelOffset = visualIdx * ITEM_HEIGHT;
+        wheelInitialized = true;
+      }
+    } else {
       wheelOffset = 0;
       wheelInitialized = false;
       pendingScrollDelta = 0;
