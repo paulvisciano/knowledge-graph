@@ -53,6 +53,8 @@
   let doubleTapPhase = $state(0);
   let doubleTapReturnZ = $state(0);
   let doubleTapOriginIdx = -1;
+  let timelineCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let timelineScrubbing = $state(false);
 
   let timelineEntries = $derived.by(() => {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return [];
@@ -100,6 +102,9 @@
     };
     sm.onDoubleTap = (x, y) => {
       handleDoubleTap(x, y);
+    };
+    sm.onTimelineScroll = (direction) => {
+      handleTimelineScroll(direction);
     };
   }
 
@@ -165,13 +170,13 @@
     );
   }
 
-  function flyToBucket(bucketIdx: number): void {
+  function flyToBucket(bucketIdx: number, closeOnFly = true): void {
     if (!sceneManager || !timeIndex) return;
     const n = timeIndex.indexToLabel.length;
     if (bucketIdx < 0 || bucketIdx >= n) return;
     const targetZ = bucketIdx * TIME_BUCKET_SPACING * CHUNK_SIZE + INITIAL_CAMERA_Z;
     sceneManager.flyTo(targetZ);
-    timelineOpen = false;
+    if (closeOnFly) timelineOpen = false;
     doubleTapPhase = 0;
   }
 
@@ -181,6 +186,55 @@
 
   function closeTimeline(): void {
     timelineOpen = false;
+  }
+
+  // ── Continuous picker-wheel scroll state ──
+  const ITEM_HEIGHT = 44;
+  const SCROLL_SENSITIVITY = 0.6;
+
+  let wheelOffset = $state(0);         // continuous pixel offset of the drum
+
+  function clampWheelOffset(offset: number): number {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return 0;
+    const maxOffset = (timeIndex.indexToLabel.length - 1) * ITEM_HEIGHT;
+    return Math.max(0, Math.min(maxOffset, offset));
+  }
+
+  function updateBucketFromWheel(): void {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+    const visualIdx = Math.round(wheelOffset / ITEM_HEIGHT);
+    const n = timeIndex.indexToLabel.length;
+    const clampedVisual = Math.max(0, Math.min(n - 1, visualIdx));
+    const bucketIdx = n - 1 - clampedVisual;
+    if (bucketIdx !== currentBucketIdx) {
+      currentBucketIdx = bucketIdx;
+      dateLabel = timeIndex.indexToLabel[bucketIdx];
+      updatePinchBounds(bucketIdx);
+    }
+  }
+
+  function handleTimelineScroll(delta: number): void {
+    if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
+    timelineOpen = true;
+    timelineScrubbing = true;
+
+    // Move the wheel by the dampened delta — continuous, no inertia
+    wheelOffset = clampWheelOffset(wheelOffset + delta * SCROLL_SENSITIVITY);
+
+    // Update bucket index in real time (visual only, rounds to nearest)
+    updateBucketFromWheel();
+
+    // Reset close timer — when it fires, we snap and navigate
+    if (timelineCloseTimer) clearTimeout(timelineCloseTimer);
+    timelineCloseTimer = setTimeout(() => {
+      timelineScrubbing = false;
+      timelineCloseTimer = null;
+      // Snap to nearest item, then navigate
+      const snapTarget = Math.round(wheelOffset / ITEM_HEIGHT) * ITEM_HEIGHT;
+      wheelOffset = snapTarget;
+      updateBucketFromWheel();
+      flyToBucket(currentBucketIdx);
+    }, 1200);
   }
 
   function rebuildLayout(): void {
@@ -281,6 +335,10 @@
       clearTimeout(activeFlyTimer);
       activeFlyTimer = null;
     }
+    if (timelineCloseTimer) {
+      clearTimeout(timelineCloseTimer);
+      timelineCloseTimer = null;
+    }
     containerEl?.removeEventListener('pointermove', onContainerPointerMove);
     sceneManager?.stop();
     sceneManager?.dispose();
@@ -368,6 +426,17 @@
     activeFlyTimer = setTimeout(tryFly, 220);
   });
 
+  // When timeline opens, initialize wheel offset to current bucket
+  let prevTimelineOpen = false;
+  $effect(() => {
+    if (timelineOpen && !prevTimelineOpen && timeIndex && timeIndex.indexToLabel.length > 0) {
+      const n = timeIndex.indexToLabel.length;
+      const visualIdx = currentBucketIdx < 0 ? 0 : n - 1 - currentBucketIdx;
+      wheelOffset = visualIdx * ITEM_HEIGHT;
+    }
+    prevTimelineOpen = timelineOpen;
+  });
+
   let isEmpty = $derived(graphStore.nodes.length === 0);
  </script>
  
@@ -398,30 +467,56 @@
   </div>
 {/if}
 
-{#if dateLabel}
+  {#if dateLabel}
   {#if timelineOpen}
     <div
-      class="timeline-backdrop"
-      role="button"
-      tabindex="-1"
-      aria-label="Close timeline"
-      onclick={closeTimeline}
+      class="navigate-overlay"
+      onwheel={(e) => { e.preventDefault(); handleTimelineScroll(e.deltaY); }}
+      onclick={(e) => { if (e.target === e.currentTarget) closeTimeline(); }}
       onkeydown={(e) => (e.key === 'Escape' ? closeTimeline() : null)}
-    ></div>
+      data-od-id="navigate-overlay"
+    >
+      <div class="navigate-overlay-label">Navigate to</div>
+      <div class="timeline-wheel" data-od-id="timeline-wheel">
+        <div class="timeline-wheel-highlight" class:scrubbing={timelineScrubbing}></div>
+        <div
+          class="timeline-wheel-drum"
+          class:scrubbing={timelineScrubbing}
+          style="transform: translateY({-wheelOffset}px)"
+        >
+          {#each timelineEntries as entry, i (entry.idx)}
+            {@const itemTop = i * ITEM_HEIGHT - wheelOffset}
+            {@const distFromCenter = itemTop / ITEM_HEIGHT}
+            {@const absDist = Math.abs(distFromCenter)}
+            {@const rotateX = distFromCenter > 0 ? -10 * Math.min(absDist, 3) : distFromCenter < 0 ? 10 * Math.min(absDist, 3) : 0}
+            {@const scale = absDist === 0 ? 1 : absDist <= 1 ? 0.88 + 0.12 * (1 - absDist) : absDist <= 2 ? 0.76 + 0.12 * (2 - absDist) : 0.65}
+            {@const opacity = absDist === 0 ? 1 : absDist <= 1 ? 0.65 + 0.35 * (1 - absDist) : absDist <= 2 ? 0.35 + 0.30 * (2 - absDist) : 0.15}
+            {@const isNearest = absDist < 0.5}
+            <div
+              class="timeline-wheel-item"
+              class:active={isNearest}
+              style="opacity: {opacity}; transform: perspective(400px) rotateX({rotateX}deg) scale({scale})"
+              onclick={() => flyToBucket(entry.idx)}
+              role="option"
+              aria-selected={isNearest ? 'true' : undefined}
+              data-od-id="timeline-tick"
+            >
+              {entry.label}
+            </div>
+          {/each}
+        </div>
+      </div>
+    </div>
   {/if}
 
   <div
-    class="timeline-bar"
-    class:collapsed={!timelineOpen}
+    class="timeline-pill"
     data-od-id="timeline-bar"
     data-testid="timeline-bar"
   >
-    <div
+    <button
+      type="button"
       class="timeline-header"
-      role="button"
-      tabindex="0"
-      aria-label="Toggle timeline"
-      aria-expanded={timelineOpen}
       onclick={toggleTimeline}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ' ? toggleTimeline() : null)}
       data-od-id="timeline-header"
@@ -431,33 +526,14 @@
           <span in:fade={{ duration: 220 }}>{dateLabel}</span>
         {/key}
       </span>
-      <span class="timeline-header-chevron" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      </span>
-    </div>
-
-    <div class="timeline-track" role="listbox" aria-label="Photo timeline" data-od-id="timeline-track" data-testid="timeline-dropdown">
-      {#each timelineEntries as entry, i (entry.idx)}
-        <button
-          type="button"
-          class="timeline-tick has-content"
-          class:active={entry.idx === currentBucketIdx}
-          onclick={() => flyToBucket(entry.idx)}
-          aria-current={entry.idx === currentBucketIdx ? 'true' : undefined}
-          data-od-id="timeline-tick"
-        >
-          <span class="timeline-tick-dot" aria-hidden="true"></span>
-          <span class="timeline-tick-label">{entry.label}</span>
-        </button>
-      {/each}
-    </div>
+    </button>
   </div>
 {/if}
 
 {#if loaded && !isEmpty && !loadError && !$isMobile}
   <div class="zoom-hint" data-od-id="zoom-hint">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-    <span>Scroll to zoom through time · Drag to pan</span>
+    <span>Scroll to time travel · Pinch to zoom · Drag to pan</span>
   </div>
 {/if}
 
@@ -590,170 +666,163 @@
   }
   .hover-tooltip.show { opacity: 1; }
 
-  /* ── Timeline backdrop (click-outside / escape) ── */
-  .timeline-backdrop {
+  /* ── Navigate overlay with picker wheel ── */
+  .navigate-overlay {
     position: fixed;
     inset: 0;
     z-index: 19;
-    cursor: default;
-  }
-
-  /* ── Timeline bar — right-side vertical collapsible glass panel ── */
-  .timeline-bar {
-    position: absolute;
-    right: 24px;
-    top: 24px;
-    z-index: 20;
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    padding: 0;
-    width: 180px;
-    background: oklch(12% 0.015 255 / 75%);
-    backdrop-filter: blur(24px) saturate(1.5);
-    -webkit-backdrop-filter: blur(24px) saturate(1.5);
-    border-radius: 16px;
-    border: 1px solid oklch(65% 0.04 250 / 35%);
-    box-shadow:
-      0 0 0 1px oklch(50% 0.06 250 / 20%),
-      0 8px 32px oklch(0% 0 0 / 50%);
+    align-items: center;
+    justify-content: center;
+    background: oklch(6% 0.02 260 / 70%);
+    backdrop-filter: blur(16px) saturate(0.8);
+    -webkit-backdrop-filter: blur(16px) saturate(0.8);
+    cursor: default;
+    animation: overlay-fade-in 0.2s ease-out;
+  }
+
+  .navigate-overlay-label {
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 16px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: oklch(82% 0.14 210 / 60%);
+    pointer-events: none;
+    margin-bottom: 8px;
+  }
+
+  @keyframes overlay-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* ── Timeline pill (collapsed date label, always visible) ── */
+  .timeline-pill {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    z-index: 20;
     pointer-events: auto;
-    transition: opacity 0.3s, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    overflow: hidden;
   }
 
   .timeline-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px;
+    padding: 6px 12px;
+    background: oklch(12% 0.015 255 / 40%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 8px;
+    border: 1px solid oklch(65% 0.04 250 / 15%);
     cursor: pointer;
-    border-bottom: 1px solid var(--canvas-hairline);
-    flex-shrink: 0;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .timeline-header:hover {
+    background: oklch(16% 0.02 255 / 50%);
+    border-color: oklch(65% 0.06 250 / 25%);
   }
   .timeline-header:focus-visible {
     outline: 2px solid var(--canvas-accent);
-    outline-offset: -2px;
+    outline-offset: 2px;
     border-radius: inherit;
   }
 
   .timeline-header-label {
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 14px;
-    letter-spacing: 0.12em;
+    font-size: 11px;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--canvas-accent);
-    font-weight: 600;
+    color: var(--canvas-muted);
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
   }
 
-  .timeline-header-chevron {
-    display: flex;
-    align-items: center;
-    color: var(--canvas-muted);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .timeline-header-chevron svg { width: 16px; height: 16px; }
-  .timeline-bar:not(.collapsed) .timeline-header-chevron { transform: rotate(180deg); }
-
-  .timeline-track {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 1px;
-    position: relative;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--canvas-accent-dim) transparent;
-    max-height: 0;
-    transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .timeline-track::-webkit-scrollbar { width: 3px; }
-  .timeline-track::-webkit-scrollbar-thumb {
-    background: var(--canvas-accent-dim);
-    border-radius: 2px;
-  }
-  .timeline-bar:not(.collapsed) .timeline-track { max-height: 520px; }
-
-  /* On mobile, line up with the fixed menu trigger (top: 12px) on the right edge */
   @media (max-width: 768px) {
-    .timeline-bar {
+    .timeline-pill {
       right: 12px;
       top: 12px;
     }
   }
 
-  .timeline-tick {
+  /* ── iOS-style carousel wheel ── */
+  .timeline-wheel {
+    position: relative;
+    width: 240px;
+    height: 220px;
+    overflow: hidden;
+    perspective: 400px;
+  }
+
+  .timeline-wheel-highlight {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+    background: transparent;
+    border-top: 1px solid oklch(82% 0.14 210 / 30%);
+    border-bottom: 1px solid oklch(82% 0.14 210 / 30%);
+    pointer-events: none;
+    z-index: 2;
+    transition: border-color 0.3s;
+  }
+  .timeline-wheel-highlight.scrubbing {
+    border-color: oklch(82% 0.14 210 / 40%);
+  }
+
+  .timeline-wheel-drum {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 88px;
+    transform-origin: center center;
+    transition: transform 0.08s ease-out;
+    will-change: transform;
+  }
+  .timeline-wheel-drum.scrubbing {
+    transition: none;
+  }
+
+  .timeline-wheel-item {
     display: flex;
-    flex-direction: row;
     align-items: center;
-    gap: 12px;
-    padding: 11px 16px;
+    justify-content: center;
+    width: 100%;
+    height: 44px;
     border: none;
     background: transparent;
-    border-radius: 0;
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    position: relative;
-    flex-shrink: 0;
-    text-align: left;
-    min-height: 44px;
-  }
-  .timeline-tick:focus-visible {
-    outline: 2px solid var(--canvas-accent);
-    outline-offset: -2px;
-    border-radius: inherit;
-  }
-
-  .timeline-tick-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: oklch(50% 0.03 255 / 30%);
-    transition: all 0.25s;
-    flex-shrink: 0;
-  }
-
-  .timeline-tick-label {
+    user-select: none;
+    -webkit-user-select: none;
     font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 13px;
-    letter-spacing: 0.06em;
+    font-size: 18px;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--canvas-faint);
     white-space: nowrap;
-    transition: color 0.25s;
     font-variant-numeric: tabular-nums;
+    transition: color 0.25s, font-weight 0.25s, opacity 0.25s, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    flex-shrink: 0;
+    transform-origin: center center;
+    position: relative;
+    z-index: 1;
   }
-
-  .timeline-tick:hover .timeline-tick-dot {
-    background: var(--canvas-accent);
-    box-shadow: 0 0 6px oklch(82% 0.14 210 / 40%);
+  .timeline-wheel-drum.scrubbing .timeline-wheel-item {
+    transition: color 0.06s, font-weight 0.06s, opacity 0.06s, transform 0.06s linear;
   }
-  .timeline-tick:hover .timeline-tick-label { color: var(--canvas-fg); }
-
-  .timeline-tick.active { background: oklch(82% 0.14 210 / 10%); }
-  .timeline-tick.active .timeline-tick-dot {
-    background: var(--canvas-accent);
-    box-shadow: 0 0 8px oklch(82% 0.14 210 / 50%);
-    width: 8px;
-    height: 8px;
+  .timeline-wheel-item:hover {
+    color: var(--canvas-fg);
   }
-  .timeline-tick.active .timeline-tick-label {
+  .timeline-wheel-item.active {
     color: var(--canvas-accent);
     font-weight: 600;
+    font-size: 22px;
   }
 
-  .timeline-tick.has-content .timeline-tick-dot {
-    background: oklch(50% 0.03 255 / 50%);
-  }
-
-  .timeline-divider {
-    width: 100%;
-    height: 1px;
-    background: oklch(50% 0.03 255 / 12%);
-    flex-shrink: 0;
-    margin: 2px 0;
+  .timeline-wheel-mask {
+    display: none;
   }
 
   /* ── Zoom hint — glass pill (bottom-left) ── */

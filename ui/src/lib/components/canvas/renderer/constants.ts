@@ -84,6 +84,31 @@ export const ZOOM_FACTOR = 0.006;
  */
 export const SCROLL_DECAY = 0.8;
 
+/**
+ * How much the scroll-momentum multiplier grows per rapid wheel event.
+ * Each wheel event within the momentum window multiplies the current
+ * momentum by (1 + SCROLL_MOMENTUM_RAMP). 0.55 means the 2nd rapid
+ * scroll tick is 1.55×, the 3rd is ~2.4×, etc.
+ */
+export const SCROLL_MOMENTUM_RAMP = 2.5;
+
+/** Maximum scroll-momentum multiplier (prevents runaway acceleration). */
+export const SCROLL_MOMENTUM_MAX = 50.0;
+
+/**
+ * Per-frame decay of the scroll-momentum multiplier toward 1.0 when not
+ * scrolling. 0.65 means ~35 % decay per frame — momentum snaps back
+ * hard after scrolling stops.
+ */
+export const SCROLL_MOMENTUM_DECAY = 0.65;
+
+/**
+ * Time window (ms) for detecting rapid successive wheel events. If two
+ * wheel events arrive within this interval, the momentum multiplier ramps
+ * up instead of resetting.
+ */
+export const SCROLL_MOMENTUM_WINDOW_MS = 200;
+
 /** Per-frame camera translation when a movement key is held. */
 export const KEYBOARD_SPEED = 0.18;
 

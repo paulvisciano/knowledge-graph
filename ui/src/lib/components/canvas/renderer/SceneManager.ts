@@ -24,6 +24,10 @@ import {
   MOUSE_PAN_FACTOR,
   RENDER_DISTANCE,
   SCROLL_DECAY,
+  SCROLL_MOMENTUM_DECAY,
+  SCROLL_MOMENTUM_MAX,
+  SCROLL_MOMENTUM_RAMP,
+  SCROLL_MOMENTUM_WINDOW_MS,
   TOUCH_PAN_FACTOR,
   VELOCITY_DECAY,
   VELOCITY_LERP,
@@ -62,6 +66,8 @@ export class SceneManager {
   private readonly _velocity = new THREE.Vector3();
   private readonly _targetVel = new THREE.Vector3();
   private _scrollAccum = 0;
+  private _scrollMomentum = 1;
+  private _lastScrollTime = 0;
   private readonly _basePos = new THREE.Vector3();
   private readonly _drift = new THREE.Vector2();
   private readonly _mouse = new THREE.Vector2();
@@ -153,6 +159,9 @@ export class SceneManager {
 
   /** Fired on a confirmed double-tap (touch) with the tap screen coordinates. */
   onDoubleTap?: (clientX: number, clientY: number) => void;
+
+  /** Fired when a trackpad (two-finger) scroll is detected; carries accumulated pixel delta. */
+  onTimelineScroll?: (delta: number) => void;
 
   /**
    * Creates the renderer, camera, scene, shared geometry, and chunk manager,
@@ -356,6 +365,7 @@ export class SceneManager {
     this._velocity.set(0, 0, 0);
     this._targetVel.set(0, 0, 0);
     this._scrollAccum = 0;
+    this._scrollMomentum = 1;
   }
 
   flyToXYZ(x: number, y: number, z: number, durationMs = 700): void {
@@ -368,6 +378,7 @@ export class SceneManager {
     this._velocity.set(0, 0, 0);
     this._targetVel.set(0, 0, 0);
     this._scrollAccum = 0;
+    this._scrollMomentum = 1;
   }
 
   /**
@@ -392,6 +403,7 @@ export class SceneManager {
     this._velocity.set(0, 0, 0);
     this._targetVel.set(0, 0, 0);
     this._scrollAccum = 0;
+    this._scrollMomentum = 1;
   }
 
   /** Cancels any active fly-to, leaving the camera wherever it currently sits. */
@@ -527,6 +539,8 @@ export class SceneManager {
   private applyVelocity(): void {
     this._targetVel.z += this._scrollAccum;
     this._scrollAccum *= SCROLL_DECAY;
+    this._scrollMomentum = 1 + (this._scrollMomentum - 1) * SCROLL_MOMENTUM_DECAY;
+    if (this._scrollMomentum < 1.01) this._scrollMomentum = 1;
 
     this._targetVel.clampLength(0, MAX_VELOCITY);
 
@@ -740,11 +754,17 @@ export class SceneManager {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    this.cancelFly();
-    const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
-    this._scrollAccum += e.deltaY * ZOOM_FACTOR * zScale;
-    this._pointer.dragged = true;
-    this._userMoved = true;
+    // Pinch-to-zoom sends ctrlKey=true on macOS. Everything else
+    // (trackpad scroll, mouse wheel) navigates the timeline.
+    if (e.ctrlKey) {
+      this.cancelFly();
+      const zScale = this._basePos.z / ZOOM_FACTOR_DIVISOR;
+      this._scrollAccum += e.deltaY * ZOOM_FACTOR * zScale;
+      this._pointer.dragged = true;
+      this._userMoved = true;
+      return;
+    }
+    this.onTimelineScroll?.(e.deltaY);
   };
 
   /**
