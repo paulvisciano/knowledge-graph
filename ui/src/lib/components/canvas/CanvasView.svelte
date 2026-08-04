@@ -889,8 +889,8 @@
 
   @media (max-width: 768px) {
     .timeline-pill {
-      right: 12px;
-      bottom: 12px;
+      right: 72px;
+      bottom: 24px;
     }
   }
 
