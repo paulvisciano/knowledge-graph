@@ -125,6 +125,10 @@
   let deleting = $state(false);
   let personPhotoErrors = $state(new Set<string>());
   let activeTab = $state<'details' | 'insights' | 'connections'>('details');
+  let imageLoaded = $state(false);
+  let touchStartX = $state(0);
+  let touchStartY = $state(0);
+  let filmstripTrackEl: HTMLDivElement | undefined = $state();
 
   let convMessages = $state<ChatMessage[]>([]);
   let convLoading = $state(false);
@@ -696,6 +700,52 @@
     personPhotoErrors = new Set([...personPhotoErrors, n.id]);
   }
 
+  /** Reset imageLoaded when navigating to a different photo. */
+  $effect(() => {
+    void node?.id;
+    imageLoaded = false;
+  });
+
+  function onImageLoad() {
+    imageLoaded = true;
+  }
+
+  // ── Swipe gesture handlers ──────────────────────────────────────
+  function onTouchStart(e: TouchEvent) {
+    if (e.touches.length !== 1) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    if (e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    // Only trigger if the swipe is predominantly horizontal
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) {
+        navigateByOffset(1);  // swipe left → next
+      } else {
+        navigateByOffset(-1); // swipe right → prev
+      }
+    }
+  }
+
+  // ── Filmstrip auto-scroll ────────────────────────────────────────
+  $effect(() => {
+    // Depend on node?.id so this runs when the active photo changes
+    void node?.id;
+    // Defer to next microtask so the DOM has updated with the new is-active class
+    const id = setTimeout(() => {
+      if (!filmstripTrackEl) return;
+      const active = filmstripTrackEl.querySelector('.filmstrip-thumb.is-active');
+      if (active) {
+        active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }, 60);
+    return () => clearTimeout(id);
+  });
+
   $effect(() => {
     if (!node) return;
     function onKeydown(e: KeyboardEvent) {
@@ -856,11 +906,19 @@
             {/if}
           </div>
         {:else}
-          <div class="image-frame" data-od-id="image-viewer">
+          <div class="image-frame" data-od-id="image-viewer"
+            ontouchstart={onTouchStart}
+            ontouchend={onTouchEnd}>
             {#if fullUrl ?? imageUrl}
-              <img class="photo" data-od-id="main-photo"
+              {#if !imageLoaded}
+                <div class="photo-skeleton" data-od-id="photo-skeleton">
+                  <div class="skeleton-shimmer"></div>
+                </div>
+              {/if}
+              <img class="photo {imageLoaded ? '' : 'photo-hidden'}" data-od-id="main-photo"
                    src={fullUrl ?? imageUrl!}
                    alt={fileName}
+                   onload={onImageLoad}
                    onclick={() => openFullscreen(fullUrl ?? imageUrl!)}>
             {:else}
               <div class="photo-placeholder" data-od-id="photo-placeholder">
@@ -896,7 +954,7 @@
                 onclick={() => navigateByOffset(-1)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
-              <div class="filmstrip-track" data-od-id="filmstrip-track">
+              <div class="filmstrip-track" data-od-id="filmstrip-track" bind:this={filmstripTrackEl}>
                 {#each monthPhotosByDay as group (group.dayKey)}
                   <div class="filmstrip-day-group" data-od-id="filmstrip-day-{group.dayKey}">
                     <div class="filmstrip-day-label">{group.label}</div>
@@ -1342,6 +1400,10 @@
     margin: 0 auto;
     border-radius: 16px;
     overflow: hidden;
+    /* Fixed height prevents layout shift when switching between
+       photos with different aspect ratios. */
+    height: 65vh;
+    background: var(--glass);
     box-shadow:
       0 40px 100px oklch(0% 0 0 / 60%),
       0 0 60px oklch(82% 0.14 210 / 8%),
@@ -1357,12 +1419,44 @@
       0 0 0 1px oklch(82% 0.14 210 / 20%);
   }
   .image-frame .photo {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
-    height: auto;
-    max-height: 65vh;
+    height: 100%;
     object-fit: cover;
     cursor: zoom-in;
+    transition: opacity 0.3s ease;
+  }
+  .image-frame .photo.photo-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .photo-skeleton {
+    width: 100%;
+    height: 100%;
+    background: var(--glass);
+    border-radius: inherit;
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(50% 0.03 255 / 8%) 40%,
+      oklch(50% 0.03 255 / 15%) 50%,
+      oklch(50% 0.03 255 / 8%) 60%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   .photo-placeholder {
@@ -2119,8 +2213,8 @@
   @media (max-width: 768px) {
     .spatial-scene { padding: 2vh 4vw; perspective: none; }
     .scene-inner { transform: none !important; }
-    .image-frame { border-radius: 12px; }
-    .image-frame .photo { min-height: 45vh; max-height: 45vh; }
+    .image-frame { border-radius: 12px; height: 45vh; }
+    .photo-skeleton { height: 45vh; }
     .description-panel { padding: 14px 18px; border-radius: 12px; }
     .description-text { font-size: 13px; line-height: 1.65; }
     .data-row { flex-direction: column; gap: 8px; }
