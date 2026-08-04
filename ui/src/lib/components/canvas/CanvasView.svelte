@@ -344,6 +344,12 @@
   function handleTimelinePan(event: PanCustomEvent): void {
     if (!timeIndex || timeIndex.indexToLabel.length === 0) return;
     if (event.detail.pointerType !== 'touch') return;
+    // Skip the first pan event after reset — lastPanY=0 would produce a
+    // huge absolute delta that causes a jarring jump.
+    if (lastPanY === 0) {
+      lastPanY = event.detail.y;
+      return;
+    }
     const dy = event.detail.y - lastPanY;
     lastPanY = event.detail.y;
     handleTimelineScroll(-dy * 1.2);
@@ -378,7 +384,7 @@
       currentBucketIdx = bucketIdx;
       dateLabel = timeIndex.indexToLabel[bucketIdx];
       flyToBucket(bucketIdx);
-    }, 800);
+    }, 500);
   }
 
   function rebuildLayout(): void {
