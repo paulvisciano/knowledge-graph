@@ -1,0 +1,1209 @@
+<!-- Synced from: ui/src/lib/components/ingestion/IngestionPanel.svelte -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0a0e17',
+              surface: '#111827',
+              'surface-2': '#1a2235',
+              border: '#1e2d45',
+              text: '#c8d6e5',
+              'text-dim': '#5a6b80',
+              cyan: '#00d4ff',
+              'cyan-dim': '#007a99',
+              purple: '#a855f7',
+              'purple-dim': '#6b21a8',
+              green: '#00ff88',
+              'green-dim': '#00804a',
+              orange: '#ff8c00',
+              red: '#ff3366',
+              yellow: '#ffd600',
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace],
+            sans: ['Inter', 'SF Pro Display', system-ui, sans-serif],
+          }
+        }
+      }
+    }
+  </script>
+  <title>Ingestion Panel Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ===== Design Tokens (from app.css @theme) ===== */
+    :root {
+      --color-cyber-bg: #0a0e17;
+      --color-cyber-surface: #111827;
+      --color-cyber-surface-2: #1a2235;
+      --color-cyber-border: #1e2d45;
+      --color-cyber-text: #c8d6e5;
+      --color-cyber-text-dim: #5a6b80;
+      --color-cyber-cyan: #00d4ff;
+      --color-cyber-cyan-dim: #007a99;
+      --color-cyber-purple: #a855f7;
+      --color-cyber-purple-dim: #6b21a8;
+      --color-cyber-green: #00ff88;
+      --color-cyber-green-dim: #00804a;
+      --color-cyber-orange: #ff8c00;
+      --color-cyber-red: #ff3366;
+      --color-cyber-yellow: #ffd600;
+      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
+      color-scheme: dark;
+    }
+
+    /* ===== Keyframes (from app.css) ===== */
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    @keyframes scan-line {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    @keyframes data-flow {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+    @keyframes fade-in-up {
+      0% { opacity: 0; transform: translateY(10px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slide-in-right {
+      0% { opacity: 0; transform: translateX(20px); }
+      100% { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes ping {
+      75%, 100% { transform: scale(2); opacity: 0; }
+    }
+
+    /* ===== Base Styles (from app.css @layer base) ===== */
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      margin: 0;
+    }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--color-cyber-bg);
+      color: var(--color-cyber-text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    /* Scrollbar (from app.css) */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--color-cyber-surface); }
+    ::-webkit-scrollbar-thumb { background: var(--color-cyber-border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--color-cyber-cyan-dim); }
+
+    /* ===== Glow Utilities (from app.css @utility) ===== */
+    .glow-cyan { box-shadow: 0 0 15px rgba(0, 212, 255, 0.3), 0 0 30px rgba(0, 212, 255, 0.1); }
+    .glow-purple { box-shadow: 0 0 15px rgba(168, 85, 247, 0.3), 0 0 30px rgba(168, 85, 247, 0.1); }
+    .glow-green { box-shadow: 0 0 15px rgba(0, 255, 136, 0.3), 0 0 30px rgba(0, 255, 136, 0.1); }
+    .text-glow-cyan { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5), 0 0 20px rgba(0, 212, 255, 0.2); }
+    .text-glow-purple { text-shadow: 0 0 10px rgba(168, 85, 247, 0.5), 0 0 20px rgba(168, 85, 247, 0.2); }
+
+    /* ===== Animation Utilities (from app.css @utility) ===== */
+    .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+    .animate-scan { animation: scan-line 4s linear infinite; }
+    .animate-data-flow { animation: data-flow 3s linear infinite; }
+    .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
+    .animate-slide-in-right { animation: slide-in-right 0.3s ease-out forwards; }
+    .animate-spin { animation: spin 1s linear infinite; }
+    .animate-ping { animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+    /* ===== Prose Cyber (from app.css @layer base) ===== */
+    .prose-cyber { line-height: 1.6; }
+    .prose-cyber p { margin: 0.5em 0; }
+    .prose-cyber h1 { font-size: 1.25em; font-weight: 600; margin: 0.75em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber h2 { font-size: 1.1em; font-weight: 600; margin: 0.75em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber h3 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber ul, .prose-cyber ol { padding-left: 1.5em; margin: 0.25em 0; }
+    .prose-cyber li { margin: 0.15em 0; }
+    .prose-cyber code {
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      background: var(--color-cyber-surface-2);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 4px;
+      padding: 0.15em 0.35em;
+      color: var(--color-cyber-cyan);
+    }
+    .prose-cyber pre {
+      background: var(--color-cyber-bg);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 8px;
+      padding: 0.75em 1em;
+      margin: 0.5em 0;
+      overflow-x: auto;
+      font-size: 0.8em;
+      line-height: 1.5;
+    }
+    .prose-cyber pre code { background: none; border: none; padding: 0; color: var(--color-cyber-text); }
+    .prose-cyber blockquote {
+      border-left: 3px solid var(--color-cyber-purple);
+      padding-left: 1em;
+      margin: 0.5em 0;
+      color: var(--color-cyber-text-dim);
+      font-style: italic;
+    }
+    .prose-cyber a { color: var(--color-cyber-cyan); text-decoration: underline; text-underline-offset: 2px; }
+    .prose-cyber a:hover { color: var(--color-cyber-cyan); opacity: 0.8; }
+    .prose-cyber strong { color: var(--color-cyber-text); font-weight: 600; }
+    .prose-cyber em { color: var(--color-cyber-text-dim); }
+    .prose-cyber hr { border-color: var(--color-cyber-border); margin: 1em 0; }
+    .prose-cyber table { border-collapse: collapse; margin: 0.5em 0; }
+    .prose-cyber th, .prose-cyber td { border: 1px solid var(--color-cyber-border); padding: 0.35em 0.75em; text-align: left; }
+    .prose-cyber th { background: var(--color-cyber-surface-2); font-weight: 600; }
+
+    /* ===== Mobile Utilities (from app.css) ===== */
+    @media (max-width: 768px) {
+      .hide-mobile { display: none !important; }
+      .show-mobile { display: flex !important; }
+    }
+    @media (min-width: 769px) {
+      .hide-mobile { display: flex !important; }
+      .show-mobile { display: none !important; }
+    }
+
+    /* ===== Layout Utilities (matching Tailwind) ===== */
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .flex-1 { flex: 1 1 0%; }
+    .flex-wrap { flex-wrap: wrap; }
+    .shrink-0 { flex-shrink: 0; }
+    .min-w-0 { min-width: 0; }
+    .items-center { align-items: center; }
+    .items-start { align-items: flex-start; }
+    .items-baseline { align-items: baseline; }
+    .justify-center { justify-content: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.25rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-3 { gap: 0.75rem; }
+    .gap-4 { gap: 1rem; }
+    .ml-auto { margin-left: auto; }
+    .ml-2 { margin-left: 0.5rem; }
+    .mt-0\.5 { margin-top: 0.125rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .p-1 { padding: 0.25rem; }
+    .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+    .px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
+    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .py-px { padding-top: 1px; padding-bottom: 1px; }
+    .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .h-2 { height: 0.5rem; }
+    .h-3\.5 { height: 0.875rem; }
+    .h-4 { height: 1rem; }
+    .h-5 { height: 1.25rem; }
+    .h-10 { height: 2.5rem; }
+    .h-full { height: 100%; }
+    .w-2 { width: 0.5rem; }
+    .w-px { width: 1px; }
+    .w-3\.5 { width: 0.875rem; }
+    .w-4 { width: 1rem; }
+    .w-10 { width: 2.5rem; }
+    .w-36 { width: 9rem; }
+    .w-full { width: 100%; }
+    .max-w-3xl { max-width: 48rem; }
+    .max-h-56 { max-height: 14rem; }
+    .max-h-\[85vh\] { max-height: 85vh; }
+    .max-w-\[200px\] { max-width: 200px; }
+    .max-w-\[320px\] { max-width: 320px; }
+    .overflow-hidden { overflow: hidden; }
+    .overflow-y-auto { overflow-y: auto; }
+    .overflow-x-auto { overflow-x: auto; }
+    .rounded { border-radius: 0.25rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-md { border-radius: 0.375rem; }
+    .rounded-full { border-radius: 9999px; }
+    .border { border-width: 1px; border-style: solid; }
+    .border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+    .border-t { border-top-width: 1px; border-top-style: solid; }
+    .divide-y > :not(:last-child) { border-bottom: 1px solid; }
+    .text-left { text-align: left; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-\[10px\] { font-size: 10px; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    .whitespace-nowrap { white-space: nowrap; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .break-words { overflow-wrap: break-word; }
+    .leading-relaxed { line-height: 1.625; }
+    .object-cover { object-fit: cover; }
+    .cursor-pointer { cursor: pointer; }
+    .cursor-not-allowed { cursor: not-allowed; }
+    .fixed { position: fixed; }
+    .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+    .z-\[9999\] { z-index: 9999; }
+    .relative { position: relative; }
+    .absolute { position: absolute; }
+    .inline-flex { display: inline-flex; }
+    .inline-block { display: inline-block; }
+    .sticky { position: sticky; }
+    .top-0 { top: 0; }
+    .opacity-60 { opacity: 0.6; }
+    .opacity-50 { opacity: 0.5; }
+    .opacity-40 { opacity: 0.4; }
+    .opacity-30 { opacity: 0.3; }
+    .p-4 { padding: 1rem; }
+    .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+    .backdrop-blur-md { backdrop-filter: blur(12px); }
+    .min-h-0 { min-height: 0; }
+    .font-mono { font-family: var(--font-mono); }
+    .whitespace-pre-wrap { white-space: pre-wrap; }
+    .transition-colors { transition-property: color, background-color, border-color; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+    .transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+    .duration-200 { transition-duration: 200ms; }
+    .duration-300 { transition-duration: 300ms; }
+    .hidden { display: none !important; }
+
+    /* ===== Color + Border Utilities (cyber theme) ===== */
+    .bg-cyber-bg { background-color: var(--color-cyber-bg); }
+    .bg-cyber-surface { background-color: var(--color-cyber-surface); }
+    .bg-cyber-surface-2 { background-color: var(--color-cyber-surface-2); }
+    .bg-cyber-border { background-color: var(--color-cyber-border); }
+    .bg-cyber-cyan { background-color: var(--color-cyber-cyan); }
+    .bg-cyber-orange { background-color: var(--color-cyber-orange); }
+    .bg-cyber-red { background-color: var(--color-cyber-red); }
+    .bg-cyber-green { background-color: var(--color-cyber-green); }
+    .bg-cyber-purple { background-color: var(--color-cyber-purple); }
+    .bg-cyber-cyan\/5 { background-color: rgba(0, 212, 255, 0.05); }
+    .bg-cyber-cyan\/10 { background-color: rgba(0, 212, 255, 0.1); }
+    .bg-cyber-cyan\/70 { background-color: rgba(0, 212, 255, 0.7); }
+    .bg-cyber-red\/10 { background-color: rgba(255, 51, 102, 0.1); }
+    .bg-cyber-bg\/60 { background-color: rgba(10, 14, 23, 0.6); }
+    .bg-black\/80 { background-color: rgba(0, 0, 0, 0.8); }
+    .bg-fuchsia-400\/5 { background-color: rgba(232, 121, 249, 0.05); }
+    .bg-fuchsia-400\/10 { background-color: rgba(232, 121, 249, 0.1); }
+    .bg-amber-400\/10 { background-color: rgba(251, 191, 36, 0.1); }
+    .bg-emerald-400\/10 { background-color: rgba(52, 211, 153, 0.1); }
+    .bg-cyber-surface-2\/30 { background-color: rgba(26, 34, 53, 0.3); }
+    .bg-cyber-surface-2\/40 { background-color: rgba(26, 34, 53, 0.4); }
+    .bg-cyber-border\/60 { background-color: rgba(30, 45, 69, 0.6); }
+
+    .text-cyber-bg { color: var(--color-cyber-bg); }
+    .text-cyber-surface { color: var(--color-cyber-surface); }
+    .text-cyber-text { color: var(--color-cyber-text); }
+    .text-cyber-text-dim { color: var(--color-cyber-text-dim); }
+    .text-cyber-cyan { color: var(--color-cyber-cyan); }
+    .text-cyber-cyan-dim { color: var(--color-cyber-cyan-dim); }
+    .text-cyber-purple { color: var(--color-cyber-purple); }
+    .text-cyber-purple-dim { color: var(--color-cyber-purple-dim); }
+    .text-cyber-green { color: var(--color-cyber-green); }
+    .text-cyber-green-dim { color: var(--color-cyber-green-dim); }
+    .text-cyber-orange { color: var(--color-cyber-orange); }
+    .text-cyber-red { color: var(--color-cyber-red); }
+    .text-cyber-yellow { color: var(--color-cyber-yellow); }
+    .text-emerald-400 { color: #34d399; }
+    .text-amber-400 { color: #fbbf24; }
+    .text-fuchsia-400 { color: #e879f9; }
+
+    /* Opacity text variants */
+    .text-cyber-text\/90 { color: rgba(200, 214, 229, 0.9); }
+    .text-cyber-text-dim\/50 { color: rgba(90, 107, 128, 0.5); }
+    .text-cyber-text-dim\/70 { color: rgba(90, 107, 128, 0.7); }
+
+    .border-cyber-border { border-color: var(--color-cyber-border); }
+    .border-cyber-cyan { border-color: var(--color-cyber-cyan); }
+    .border-cyber-cyan\/40 { border-color: rgba(0, 212, 255, 0.4); }
+    .border-cyber-cyan\/60 { border-color: rgba(0, 212, 255, 0.6); }
+    .border-cyber-red\/40 { border-color: rgba(255, 51, 102, 0.4); }
+    .border-cyber-green\/40 { border-color: rgba(0, 255, 136, 0.4); }
+    .border-cyber-purple\/40 { border-color: rgba(168, 85, 247, 0.4); }
+    .border-cyber-orange\/40 { border-color: rgba(255, 140, 0, 0.4); }
+    .border-fuchsia-400\/40 { border-color: rgba(232, 121, 249, 0.4); }
+    .border-amber-400\/40 { border-color: rgba(251, 191, 36, 0.4); }
+    .border-emerald-400\/40 { border-color: rgba(52, 211, 153, 0.4); }
+    .border-cyber-border\/50 { border-color: rgba(30, 45, 69, 0.5); }
+
+    .divide-cyber-border\/40 > :not(:last-child) { border-bottom-color: rgba(30, 45, 69, 0.4); }
+
+    /* ===== StatusBadge Color Variants ===== */
+    .bg-cyber-text-dim\/20 { background-color: rgba(90, 107, 128, 0.2); }
+    .bg-cyber-orange\/20 { background-color: rgba(255, 140, 0, 0.2); }
+    .bg-cyber-cyan\/20 { background-color: rgba(0, 212, 255, 0.2); }
+    .bg-cyber-purple\/20 { background-color: rgba(168, 85, 247, 0.2); }
+    .bg-cyber-green\/20 { background-color: rgba(0, 255, 136, 0.2); }
+    .bg-cyber-red\/20 { background-color: rgba(255, 51, 102, 0.2); }
+
+    /* ===== Image Processing Tone Classes (from TONE_CLASSES/TONE_DOT) ===== */
+    .tone-progress { color: var(--color-cyber-cyan); border-color: rgba(0, 212, 255, 0.4); background-color: rgba(0, 212, 255, 0.1); }
+    .tone-waiting { color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background-color: rgba(251, 191, 36, 0.1); }
+    .tone-ai { color: #e879f9; border-color: rgba(232, 121, 249, 0.4); background-color: rgba(232, 121, 249, 0.1); }
+    .tone-complete { color: #34d399; border-color: rgba(52, 211, 153, 0.4); background-color: rgba(52, 211, 153, 0.1); }
+    .tone-error { color: var(--color-cyber-red); border-color: rgba(255, 51, 102, 0.4); background-color: rgba(255, 51, 102, 0.1); }
+
+    .dot-progress { background-color: var(--color-cyber-cyan); }
+    .dot-waiting { background-color: #fbbf24; }
+    .dot-ai { background-color: #e879f9; }
+    .dot-complete { background-color: #34d399; }
+    .dot-error { background-color: var(--color-cyber-red); }
+
+    /* ===== Hover States ===== */
+    .hover\:bg-cyber-cyan\/10:hover { background-color: rgba(0, 212, 255, 0.1); }
+    .hover\:bg-cyber-surface-2:hover { background-color: var(--color-cyber-surface-2); }
+    .hover\:bg-cyber-red\/10:hover { background-color: rgba(255, 51, 102, 0.1); }
+    .hover\:bg-cyber-surface-2\/30:hover { background-color: rgba(26, 34, 53, 0.3); }
+    .hover\:bg-cyber-surface-2\/40:hover { background-color: rgba(26, 34, 53, 0.4); }
+    .hover\:text-cyber-cyan:hover { color: var(--color-cyber-cyan); }
+    .hover\:text-cyber-text:hover { color: var(--color-cyber-text); }
+    .hover\:text-cyber-red:hover { color: var(--color-cyber-red); }
+    .hover\:border-cyber-cyan\/40:hover { border-color: rgba(0, 212, 255, 0.4); }
+    .hover\:border-fuchsia-400:hover { border-color: #e879f9; }
+    .hover\:border-cyber-cyan:hover { border-color: var(--color-cyber-cyan); }
+    .hover\:opacity-100:hover { opacity: 1; }
+    .hover\:bg-fuchsia-400\/10:hover { background-color: rgba(232, 121, 249, 0.1); }
+
+    /* ===== Focus States ===== */
+    .focus\:border-cyber-cyan\/60:focus { border-color: rgba(0, 212, 255, 0.6); }
+    .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+    .focus\:ring-1:focus { box-shadow: 0 0 0 1px var(--tw-ring-shadow-color, rgba(0,212,255,0.3)); }
+    .focus\:ring-cyber-cyan\/30:focus { --tw-ring-shadow-color: rgba(0, 212, 255, 0.3); }
+
+    /* ===== Placeholder ===== */
+    .placeholder\:text-cyber-text-dim\/50::placeholder { color: rgba(90, 107, 128, 0.5); }
+
+    /* ===== Disabled States ===== */
+    button:disabled { cursor: not-allowed; }
+    button:disabled.opacity-50 { opacity: 0.5; }
+    button:disabled.opacity-40 { opacity: 0.4; }
+    button:disabled.opacity-30 { opacity: 0.3; }
+
+    /* Pagination disabled hover override */
+    button:disabled:hover.border-override { border-color: var(--color-cyber-border) !important; }
+
+    /* ScanButton disabled hover overrides */
+    .scan-btn:disabled:hover { border-color: rgba(0, 212, 255, 0.4); background-color: rgba(0, 212, 255, 0.05); color: var(--color-cyber-cyan); box-shadow: none; }
+    .scan-btn:hover:not(:disabled) { border-color: var(--color-cyber-cyan); background-color: rgba(0, 212, 255, 0.1); }
+    .scan-btn:hover:not(:disabled) .scan-btn-icon { transform: rotate(45deg); }
+    .scan-btn:hover:not(:disabled).text-glow-cyan-trigger { text-shadow: 0 0 10px rgba(0, 212, 255, 0.5), 0 0 20px rgba(0, 212, 255, 0.2); }
+
+    /* AI Queue button disabled */
+    .ai-queue-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+    /* ===== App Container ===== */
+    .app-container {
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      gap: 0.75rem;
+    }
+
+    /* ===== Prototype Controls ===== */
+    .prototype-controls {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      z-index: 10000;
+      background: var(--color-cyber-surface-2);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--color-cyber-text-dim);
+      max-width: 280px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    }
+    .prototype-controls h4 {
+      color: var(--color-cyber-cyan);
+      font-weight: 600;
+      margin: 0 0 0.5rem 0;
+      font-size: 0.8rem;
+    }
+    .prototype-controls label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0.25rem 0;
+      cursor: pointer;
+      color: var(--color-cyber-text);
+    }
+    .prototype-controls input[type="checkbox"] {
+      accent-color: var(--color-cyber-cyan);
+    }
+    .prototype-controls button.ctrl-btn {
+      background: rgba(0, 212, 255, 0.1);
+      border: 1px solid rgba(0, 212, 255, 0.4);
+      color: var(--color-cyber-cyan);
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin: 0.25rem 0.125rem;
+    }
+    .prototype-controls button.ctrl-btn:hover {
+      background: rgba(0, 212, 255, 0.2);
+      border-color: var(--color-cyber-cyan);
+    }
+
+    /* ===== Mobile Responsive ===== */
+    @media (max-width: 768px) {
+      .app-container {
+        padding: 0.5rem;
+        gap: 0.5rem;
+      }
+      .stats-bar {
+        flex-wrap: wrap;
+        gap: 0.5rem !important;
+      }
+      .stats-bar > .ml-auto {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+      }
+      table { font-size: 0.7rem; }
+      .max-w-\[200px\] { max-width: 120px; }
+      .max-w-\[320px\] { max-width: 160px; }
+      .prototype-controls {
+        bottom: 0.5rem;
+        right: 0.5rem;
+        max-width: 220px;
+        font-size: 0.65rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Error Banner (conditionally visible) -->
+    <div id="error-banner" class="animate-fade-in-up rounded-lg border border-cyber-red/40 bg-cyber-red/10 px-3 py-2 text-sm text-cyber-red hidden">
+      <span id="error-text">Something went wrong.</span>
+      <button onclick="hideError()" class="ml-2 opacity-60 hover:opacity-100" style="background:none;border:none;color:inherit;cursor:pointer;">✕</button>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="flex shrink-0 items-center gap-4 rounded-lg border border-cyber-border bg-cyber-surface px-4 py-2.5 stats-bar">
+      <div class="flex items-baseline gap-1.5">
+        <span class="text-lg font-semibold tabular-nums text-cyber-cyan" id="total-docs">42</span>
+        <span class="text-xs text-cyber-text-dim">Documents</span>
+      </div>
+      <div class="h-5 w-px bg-cyber-border"></div>
+      <div class="flex items-baseline gap-1.5">
+        <span class="text-lg font-semibold tabular-nums text-cyber-cyan" id="total-nodes">1,287</span>
+        <span class="text-xs text-cyber-text-dim">Nodes</span>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <span class="text-xs text-emerald-400 hidden" id="ai-queue-result">Processed 3 image(s)</span>
+        <button
+          id="ai-queue-btn"
+          class="group relative inline-flex items-center gap-2 rounded-lg border border-fuchsia-400/40 bg-fuchsia-400/5 px-3 py-1.5 text-xs font-medium text-fuchsia-400 transition-all duration-300 hover:border-fuchsia-400 hover:bg-fuchsia-400/10 ai-queue-btn"
+          onclick="simulateAIQueue()"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v8" /><path d="m4.93 10.93 1.41 1.41" /><path d="M2 18h2" /><path d="M20 18h2" /><path d="m17.66 12.34 1.41-1.41" /><path d="m22 22-2-2" /><path d="m2 22 2-2" /><path d="M16 18a4 4 0 0 0-8 0" /><circle cx="12" cy="6" r="4" />
+          </svg>
+          <span id="ai-queue-text">Process AI Queue</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Image Processing Section (conditionally visible) -->
+    <section id="image-processing-section" class="animate-fade-in-up flex shrink-0 flex-col rounded-lg border border-cyber-border bg-cyber-surface">
+      <div class="flex shrink-0 items-center gap-2 border-b border-cyber-border px-3 py-2">
+        <span class="relative flex h-2 w-2">
+          <span id="img-ping-dot" class="absolute inline-flex h-full w-full animate-ping opacity-60 dot-progress"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full dot-progress"></span>
+        </span>
+        <h3 class="text-sm font-semibold text-cyber-text">Image Processing</h3>
+        <span class="text-xs text-cyber-text-dim" id="img-processing-count">2 processing</span>
+        <span class="text-xs text-cyber-red hidden" id="img-error-count">· 1 error</span>
+      </div>
+
+      <div class="max-h-56 overflow-y-auto">
+        <ul class="divide-y divide-cyber-border/40">
+          <!-- Processing item (progress tone) -->
+          <li class="animate-fade-in-up flex items-start gap-3 px-3 py-2 transition-colors hover:bg-cyber-surface-2/30">
+            <div class="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded border border-cyber-border bg-cyber-bg">
+              <div class="h-full w-full flex items-center justify-center text-cyber-text-dim text-lg">🏞️</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-xs font-medium text-cyber-text" title="landscape_sunset.jpg">landscape_sunset.jpg</span>
+                <span class="inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-medium tone-progress">
+                  detecting_faces
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1">
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="exif done"></span>
+                <span class="h-1 flex-1 rounded-full dot-progress animate-pulse" title="detecting_faces current"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="captions pending"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="entities pending"></span>
+              </div>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <span class="rounded bg-cyber-bg/60 px-1.5 py-px text-[10px] text-cyber-text-dim">
+                  <span class="text-cyber-text-dim/70">ISO:</span> 400
+                </span>
+                <span class="rounded bg-cyber-bg/60 px-1.5 py-px text-[10px] text-cyber-text-dim">
+                  <span class="text-cyber-text-dim/70">ƒ:</span> 2.8
+                </span>
+              </div>
+            </div>
+          </li>
+
+          <!-- Processing item (AI tone) -->
+          <li class="animate-fade-in-up flex items-start gap-3 px-3 py-2 transition-colors hover:bg-cyber-surface-2/30">
+            <div class="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded border border-cyber-border bg-cyber-bg">
+              <div class="h-full w-full flex items-center justify-center text-cyber-text-dim text-lg">👤</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-xs font-medium text-cyber-text" title="portrait_photo.png">portrait_photo.png</span>
+                <span class="inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-medium tone-ai">
+                  describing_image
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1">
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="exif done"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="faces done"></span>
+                <span class="h-1 flex-1 rounded-full dot-ai animate-pulse" title="describing current"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="uploading pending"></span>
+              </div>
+            </div>
+          </li>
+
+          <!-- Completed item (complete tone) -->
+          <li class="animate-fade-in-up flex items-start gap-3 px-3 py-2 transition-colors hover:bg-cyber-surface-2/30">
+            <div class="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded border border-cyber-border bg-cyber-bg">
+              <div class="h-full w-full flex items-center justify-center text-cyber-text-dim text-lg">📸</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-xs font-medium text-cyber-text" title="city_night.jpg">city_night.jpg</span>
+                <span class="inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-medium tone-complete">
+                  complete
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1">
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="exif done"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="faces done"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="captions done"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-cyan/70 transition-colors" title="entities done"></span>
+              </div>
+            </div>
+          </li>
+
+          <!-- Error item -->
+          <li class="animate-fade-in-up flex items-start gap-3 px-3 py-2 transition-colors hover:bg-cyber-surface-2/30">
+            <div class="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded border border-cyber-border bg-cyber-bg">
+              <div class="h-full w-full flex items-center justify-center text-cyber-text-dim text-lg">🖼️</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-xs font-medium text-cyber-text" title="corrupted_file.jpg">corrupted_file.jpg</span>
+                <span class="inline-flex shrink-0 items-center rounded border px-1.5 py-px text-[10px] font-medium tone-error">
+                  error
+                </span>
+              </div>
+              <div class="mt-1 flex items-center gap-1">
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="failed"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="failed"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="failed"></span>
+                <span class="h-1 flex-1 rounded-full bg-cyber-border/60 transition-colors" title="failed"></span>
+              </div>
+              <p class="mt-1 truncate text-[10px] text-cyber-red" title="Failed to extract EXIF data">Failed to extract EXIF data</p>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Documents Panel -->
+    <div class="flex min-h-0 flex-1 flex-col rounded-lg border border-cyber-border bg-cyber-surface">
+      <div class="flex shrink-0 items-center gap-2 border-b border-cyber-border px-3 py-2">
+        <h3 class="text-sm font-semibold text-cyber-text">Documents</h3>
+        <span class="text-xs text-cyber-text-dim" id="doc-count">42</span>
+        <div class="ml-auto">
+          <input
+            id="filter-input"
+            type="text"
+            placeholder="Filter…"
+            class="w-36 rounded border border-cyber-border bg-cyber-bg px-2 py-1 text-xs text-cyber-text placeholder:text-cyber-text-dim/50 focus:border-cyber-cyan/60 focus:outline-none focus:ring-1 focus:ring-cyber-cyan/30"
+          />
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="sticky top-0 bg-cyber-surface text-cyber-text-dim">
+            <tr class="border-b border-cyber-border">
+              <th class="px-3 py-1.5 font-medium">File</th>
+              <th class="px-3 py-1.5 font-medium">Summary</th>
+              <th class="px-3 py-1.5 font-medium whitespace-nowrap">Status</th>
+              <th class="px-3 py-1.5 font-medium text-right whitespace-nowrap">Length</th>
+              <th class="px-3 py-1.5 font-medium">Date</th>
+              <th class="px-3 py-1.5 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="doc-tbody">
+            <!-- Row: processed -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="research_notes.md">
+                research_notes.md
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Analysis of neural network architectures">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('research_notes.md', 'processed', 'Analysis of neural network architectures')">
+                  Analysis of neural network architectures
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-green/20 text-cyber-green">
+                  <span class="text-[10px]">✓</span>
+                  processed
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                12,847
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                2h ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: processing -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="project_report.pdf">
+                project_report.pdf
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Quarterly project status report">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('project_report.pdf', 'processing', 'Quarterly project status report')">
+                  Quarterly project status report
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-cyan/20 text-cyber-cyan animate-pulse-glow">
+                  <span class="text-[10px]">◉</span>
+                  processing
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                8,234
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                5m ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: failed -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="corrupted_data.txt">
+                corrupted_data.txt
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Unreadable content with encoding issues">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('corrupted_data.txt', 'failed', 'Unreadable content with encoding issues')">
+                  Unreadable content with encoding issues
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-red/20 text-cyber-red">
+                  <span class="text-[10px]">✕</span>
+                  failed
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                156
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                1d ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: pending -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="new_document.md">
+                new_document.md
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Pending processing in queue">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('new_document.md', 'pending', 'Pending processing in queue')">
+                  Pending processing in queue
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-text-dim/20 text-cyber-text-dim">
+                  <span class="text-[10px]">○</span>
+                  pending
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                4,521
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                just now
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: parsing -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="meeting_notes.txt">
+                meeting_notes.txt
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Team meeting notes from last week">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('meeting_notes.txt', 'parsing', 'Team meeting notes from last week')">
+                  Team meeting notes from last week
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-orange/20 text-cyber-orange animate-pulse-glow">
+                  <span class="text-[10px]">◐</span>
+                  parsing
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                6,789
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                30m ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: analyzing -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="api_docs.md">
+                api_docs.md
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="REST API documentation and endpoints">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('api_docs.md', 'analyzing', 'REST API documentation and endpoints')">
+                  REST API documentation and endpoints
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-orange/20 text-cyber-orange animate-pulse-glow">
+                  <span class="text-[10px]">◑</span>
+                  analyzing
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                15,432
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                15m ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <!-- Row: preprocessed -->
+            <tr class="border-b border-cyber-border/50 transition-colors hover:bg-cyber-surface-2/40 animate-fade-in-up">
+              <td class="max-w-[200px] truncate px-3 py-1.5 text-cyber-text" title="database_schema.sql">
+                database_schema.sql
+              </td>
+              <td class="max-w-[320px] truncate px-3 py-1.5 text-cyber-text-dim" title="Database schema definitions and constraints">
+                <button type="button" class="cursor-pointer text-left transition-colors hover:text-cyber-cyan" style="background:none;border:none;color:inherit;padding:0;" onclick="openSummary('database_schema.sql', 'preprocessed', 'Database schema definitions and constraints')">
+                  Database schema definitions and constraints
+                </button>
+              </td>
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-purple/20 text-cyber-purple">
+                  <span class="text-[10px]">◆</span>
+                  preprocessed
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right text-cyber-text-dim whitespace-nowrap tabular-nums">
+                3,201
+              </td>
+              <td class="px-3 py-1.5 text-cyber-text-dim whitespace-nowrap">
+                3h ago
+              </td>
+              <td class="px-3 py-1.5 text-right">
+                <div class="inline-flex gap-1">
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Reprocess" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                  </button>
+                  <button class="rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-red/10 hover:text-cyber-red" title="Delete" style="background:none;border:none;cursor:pointer;">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="flex shrink-0 items-center justify-between border-t border-cyber-border px-3 py-1.5">
+        <span class="text-[10px] text-cyber-text-dim">
+          Page 1 of 3 · 42 docs
+        </span>
+        <div class="flex gap-1">
+          <button class="rounded border border-cyber-border px-2 py-0.5 text-xs text-cyber-text-dim transition-colors hover:border-cyber-cyan/40 hover:text-cyber-text opacity-30 border-override" disabled style="cursor:not-allowed;">
+            ←
+          </button>
+          <button class="rounded border border-cyber-border px-2 py-0.5 text-xs text-cyber-text-dim transition-colors hover:border-cyber-cyan/40 hover:text-cyber-text">
+            →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Modal -->
+  <div id="summary-modal" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md hidden" onclick="closeSummary()">
+    <div class="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-cyber-border bg-cyber-surface shadow-2xl" onclick="event.stopPropagation()">
+      <div class="flex shrink-0 items-center gap-2 border-b border-cyber-border px-4 py-3">
+        <h3 class="truncate text-sm font-semibold text-cyber-text" id="summary-title" title="research_notes.md">
+          research_notes.md
+        </h3>
+        <span class="shrink-0" id="summary-badge">
+          <!-- StatusBadge: processed -->
+          <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyber-green/20 text-cyber-green">
+            <span class="text-[10px]">✓</span>
+            processed
+          </span>
+        </span>
+        <button
+          type="button"
+          onclick="closeSummary()"
+          class="ml-auto rounded p-1 text-cyber-text-dim transition-colors hover:bg-cyber-surface-2 hover:text-cyber-text"
+          title="Close (Esc)"
+          aria-label="Close"
+          style="background:none;border:none;cursor:pointer;"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div class="prose-cyber text-xs leading-relaxed text-cyber-text/90">
+          <h2>Research Notes: Neural Network Architectures</h2>
+          <p>This document provides a comprehensive analysis of modern neural network architectures, focusing on transformer models and their applications in natural language processing.</p>
+          <h3>Key Findings</h3>
+          <ul>
+            <li>Transformer architectures have consistently outperformed RNN-based models</li>
+            <li>Attention mechanisms enable better long-range dependency capture</li>
+            <li>Pre-training on large corpora provides significant downstream task improvements</li>
+          </ul>
+          <h3>Methodology</h3>
+          <p>We evaluated multiple architectures across standard benchmarks including GLUE, SQuAD, and custom domain-specific tasks.</p>
+          <blockquote>The quality of pre-training data often matters more than the model size alone.</blockquote>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scan Button (standalone, as used in parent layout) -->
+  <div style="position:fixed;bottom:1rem;left:1rem;z-index:9998;">
+    <button
+      id="scan-button"
+      class="scan-btn group relative inline-flex items-center gap-2 rounded-lg border border-cyber-cyan/40 bg-cyber-cyan/5 px-4 py-2 text-sm font-medium text-cyber-cyan transition-all duration-300 hover:border-cyber-cyan hover:bg-cyber-cyan/10"
+      onclick="toggleScanButton()"
+    >
+      <svg class="h-4 w-4 transition-transform duration-200 group-hover:rotate-45 scan-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+      </svg>
+      <span id="scan-button-text">Scan Input Directory</span>
+    </button>
+  </div>
+
+  <!-- Prototype Controls Panel -->
+  <div class="prototype-controls">
+    <h4>⚙ Prototype Controls</h4>
+    <label>
+      <input type="checkbox" id="toggle-error" onchange="toggleError()" />
+      Show Error Banner
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-img-processing" checked onchange="toggleImageProcessing()" />
+      Image Processing Section
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-summary" onchange="toggleSummary()" />
+      Show Summary Modal
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-ai-result" onchange="toggleAIResult()" />
+      AI Queue Result
+    </label>
+    <label>
+      <input type="checkbox" id="toggle-img-error" onchange="toggleImgError()" />
+      Image Error Count
+    </label>
+    <div style="margin-top:0.5rem;">
+      <button class="ctrl-btn" onclick="cycleStatusBadges()">Cycle Status</button>
+      <button class="ctrl-btn" onclick="toggleScanButton()">Toggle Scan Busy</button>
+      <button class="ctrl-btn" onclick="toggleAIQueueLoading()">Toggle AI Queue Busy</button>
+    </div>
+  </div>
+
+  <script>
+    // Error banner
+    function toggleError() {
+      const el = document.getElementById('error-banner');
+      const visible = document.getElementById('toggle-error').checked;
+      el.classList.toggle('hidden', !visible);
+      if (visible) {
+        const errors = [
+          'Something went wrong.',
+          'Failed to load documents.',
+          'Connection timeout — retrying in 5s.',
+          'No images waiting for AI processing.'
+        ];
+        document.getElementById('error-text').textContent = errors[Math.floor(Math.random() * errors.length)];
+      }
+    }
+    function hideError() {
+      document.getElementById('error-banner').classList.add('hidden');
+      document.getElementById('toggle-error').checked = false;
+    }
+
+    // Image processing section
+    function toggleImageProcessing() {
+      const el = document.getElementById('image-processing-section');
+      const visible = document.getElementById('toggle-img-processing').checked;
+      el.classList.toggle('hidden', !visible);
+    }
+
+    // Image error count
+    function toggleImgError() {
+      const el = document.getElementById('img-error-count');
+      const visible = document.getElementById('toggle-img-error').checked;
+      el.classList.toggle('hidden', !visible);
+    }
+
+    // Summary modal
+    function openSummary(fileName, status, summary) {
+      const el = document.getElementById('summary-modal');
+      document.getElementById('summary-title').textContent = fileName;
+      document.getElementById('summary-title').title = fileName;
+      // Update badge based on status
+      updateSummaryBadge(status);
+      el.classList.remove('hidden');
+      document.getElementById('toggle-summary').checked = true;
+    }
+    function toggleSummary() {
+      const el = document.getElementById('summary-modal');
+      const visible = document.getElementById('toggle-summary').checked;
+      el.classList.toggle('hidden', !visible);
+    }
+    function closeSummary() {
+      document.getElementById('summary-modal').classList.add('hidden');
+      document.getElementById('toggle-summary').checked = false;
+    }
+    // Close on Escape
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeSummary();
+    });
+
+    function updateSummaryBadge(status) {
+      const badgeEl = document.getElementById('summary-badge');
+      const configs = {
+        pending:     { bg: 'bg-cyber-text-dim/20', text: 'text-cyber-text-dim', pulse: false, icon: '○' },
+        parsing:     { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◐' },
+        analyzing:   { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◑' },
+        handling:    { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◔' },
+        processing:  { bg: 'bg-cyber-cyan/20', text: 'text-cyber-cyan', pulse: true, icon: '◉' },
+        preprocessed:{ bg: 'bg-cyber-purple/20', text: 'text-cyber-purple', pulse: false, icon: '◆' },
+        processed:   { bg: 'bg-cyber-green/20', text: 'text-cyber-green', pulse: false, icon: '✓' },
+        failed:      { bg: 'bg-cyber-red/20', text: 'text-cyber-red', pulse: false, icon: '✕' },
+      };
+      const cfg = configs[status] || configs.pending;
+      badgeEl.innerHTML = '<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ' + cfg.bg + ' ' + cfg.text + (cfg.pulse ? ' animate-pulse-glow' : '') + '"><span class="text-[10px]">' + cfg.icon + '</span>' + status + '</span>';
+    }
+
+    // AI queue result
+    function toggleAIResult() {
+      const el = document.getElementById('ai-queue-result');
+      const visible = document.getElementById('toggle-ai-result').checked;
+      el.classList.toggle('hidden', !visible);
+    }
+
+    // Simulate AI queue processing
+    function simulateAIQueue() {
+      const el = document.getElementById('ai-queue-result');
+      el.textContent = 'Processed ' + (Math.floor(Math.random() * 5) + 1) + ' image(s)';
+      el.classList.remove('hidden');
+      document.getElementById('toggle-ai-result').checked = true;
+    }
+
+    // AI queue loading toggle
+    let aiQueueLoading = false;
+    function toggleAIQueueLoading() {
+      aiQueueLoading = !aiQueueLoading;
+      const btn = document.getElementById('ai-queue-btn');
+      const text = document.getElementById('ai-queue-text');
+      if (aiQueueLoading) {
+        btn.disabled = true;
+        btn.classList.add('ai-queue-btn');
+        btn.innerHTML = '<span class="animate-pulse-glow inline-block h-2 w-2 rounded-full" style="background-color:#e879f9;"></span><span>Processing AI Queue\u2026</span>';
+      } else {
+        btn.disabled = false;
+        btn.classList.remove('ai-queue-btn');
+        btn.innerHTML = '<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8" /><path d="m4.93 10.93 1.41 1.41" /><path d="M2 18h2" /><path d="M20 18h2" /><path d="m17.66 12.34 1.41-1.41" /><path d="m22 22-2-2" /><path d="m2 22 2-2" /><path d="M16 18a4 4 0 0 0-8 0" /><circle cx="12" cy="6" r="4" /></svg><span id="ai-queue-text">Process AI Queue</span>';
+      }
+    }
+
+    // Scan button busy toggle
+    let scanBusy = false;
+    function toggleScanButton() {
+      scanBusy = !scanBusy;
+      const btn = document.getElementById('scan-button');
+      if (scanBusy) {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = '<span class="animate-pulse-glow inline-block h-2 w-2 rounded-full bg-cyber-orange"></span><span>Scanning\u2026</span>';
+      } else {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        btn.innerHTML = '<svg class="h-4 w-4 transition-transform duration-200 group-hover:rotate-45 scan-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg><span>Scan Input Directory</span>';
+      }
+    }
+
+    // Cycle through status badge variants on all table rows
+    const statuses = ['pending', 'parsing', 'analyzing', 'handling', 'processing', 'preprocessed', 'processed', 'failed'];
+    const statusConfig = {
+      pending:     { bg: 'bg-cyber-text-dim/20', text: 'text-cyber-text-dim', pulse: false, icon: '○' },
+      parsing:     { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◐' },
+      analyzing:   { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◑' },
+      handling:    { bg: 'bg-cyber-orange/20', text: 'text-cyber-orange', pulse: true, icon: '◔' },
+      processing:  { bg: 'bg-cyber-cyan/20', text: 'text-cyber-cyan', pulse: true, icon: '◉' },
+      preprocessed:{ bg: 'bg-cyber-purple/20', text: 'text-cyber-purple', pulse: false, icon: '◆' },
+      processed:   { bg: 'bg-cyber-green/20', text: 'text-cyber-green', pulse: false, icon: '✓' },
+      failed:      { bg: 'bg-cyber-red/20', text: 'text-cyber-red', pulse: false, icon: '✕' },
+    };
+    let statusIndex = 0;
+    function cycleStatusBadges() {
+      statusIndex = (statusIndex + 1) % statuses.length;
+      const s = statuses[statusIndex];
+      const cfg = statusConfig[s];
+      const badges = document.querySelectorAll('tbody .inline-flex.items-center.gap-1');
+      badges.forEach(badge => {
+        badge.className = 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ' + cfg.bg + ' ' + cfg.text + (cfg.pulse ? ' animate-pulse-glow' : '');
+        badge.querySelector('.text-\\[10px\\]').textContent = cfg.icon;
+        badge.lastChild.textContent = s;
+      });
+    }
+
+    // Initialize: show image processing section by default
+    document.getElementById('image-processing-section').classList.remove('hidden');
+  </script>
+</body>
+</html>

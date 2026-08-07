@@ -1,0 +1,1614 @@
+<!-- Synced from: ui/src/routes/+page.svelte -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0a0e17',
+              surface: '#111827',
+              'surface-2': '#1a2235',
+              border: '#1e2d45',
+              text: '#c8d6e5',
+              'text-dim': '#5a6b80',
+              cyan: '#00d4ff',
+              'cyan-dim': '#007a99',
+              purple: '#a855f7',
+              'purple-dim': '#6b21a8',
+              green: '#00ff88',
+              'green-dim': '#00804a',
+              orange: '#ff8c00',
+              red: '#ff3366',
+              yellow: '#ffd600',
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace],
+            sans: ['Inter', 'SF Pro Display', system-ui, sans-serif],
+          }
+        }
+      }
+    }
+  </script>
+  <title>ChatPanel Prototype</title>
+  <style>
+    /* ── Design tokens (from app.css) ── */
+    :root {
+      --color-cyber-bg: #0a0e17;
+      --color-cyber-surface: #111827;
+      --color-cyber-surface-2: #1a2235;
+      --color-cyber-border: #1e2d45;
+      --color-cyber-text: #c8d6e5;
+      --color-cyber-text-dim: #5a6b80;
+      --color-cyber-cyan: #00d4ff;
+      --color-cyber-cyan-dim: #007a99;
+      --color-cyber-purple: #a855f7;
+      --color-cyber-purple-dim: #6b21a8;
+      --color-cyber-green: #00ff88;
+      --color-cyber-green-dim: #00804a;
+      --color-cyber-orange: #ff8c00;
+      --color-cyber-red: #ff3366;
+      --color-cyber-yellow: #ffd600;
+      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
+      color-scheme: dark;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--color-cyber-bg);
+      color: var(--color-cyber-text);
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--color-cyber-surface); }
+    ::-webkit-scrollbar-thumb { background: var(--color-cyber-border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--color-cyber-cyan-dim); }
+
+    /* ── Utility classes used inline in the Svelte template ── */
+    .hidden { display: none; }
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .flex-1 { flex: 1; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .justify-end { justify-content: flex-end; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.25rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-6 { gap: 1.5rem; }
+    .mb-1 { margin-bottom: 0.25rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mt-0\.5 { margin-top: 0.125rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .mt-1\.5 { margin-top: 0.375rem; }
+    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    .px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .py-0 { padding-top: 0; padding-bottom: 0; }
+    .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+    .py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .p-2\.5 { padding: 0.625rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-base { font-size: 1rem; line-height: 1.5rem; }
+    .text-\[10px\] { font-size: 10px; }
+    .text-\[11px\] { font-size: 11px; }
+    .text-\[12px\] { font-size: 12px; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .uppercase { text-transform: uppercase; }
+    .tracking-wider { letter-spacing: 0.05em; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    .leading-relaxed { line-height: 1.625; }
+    .whitespace-pre-wrap { white-space: pre-wrap; }
+    .font-mono { font-family: var(--font-mono); }
+    .max-w-\[95\%\] { max-width: 95%; }
+    .w-full { width: 100%; }
+    .h-full { height: 100%; }
+    .h-4 { height: 1rem; }
+    .w-1 { width: 0.25rem; }
+    .h-1\.5 { height: 0.375rem; }
+    .h-2 { height: 0.5rem; }
+    .w-2 { height: 0.5rem; }
+    .min-h-12 { min-height: 3rem; }
+    .max-h-\[140px\] { max-height: 140px; }
+    .resize-none { resize: none; }
+    .bg-transparent { background: transparent; }
+    .outline-none { outline: none; }
+    .border-0 { border-width: 0; }
+    .shrink-0 { flex-shrink: 0; }
+    .space-y-1 > * + * { margin-top: 0.25rem; }
+    .space-y-1\.5 > * + * { margin-top: 0.375rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-md { border-radius: 0.375rem; }
+    .rounded-full { border-radius: 9999px; }
+    .rounded-br-sm { border-bottom-right-radius: 0.125rem; }
+    .rounded-bl-sm { border-bottom-left-radius: 0.125rem; }
+    .transition-colors { transition-property: color, background-color, border-color; transition-duration: 150ms; }
+    .transition-opacity { transition-property: opacity; transition-duration: 150ms; }
+    .transition-all { transition-property: all; transition-duration: 200ms; }
+    .duration-200 { transition-duration: 200ms; }
+    .cursor-pointer { cursor: pointer; }
+    .overflow-y-auto { overflow-y: auto; }
+    .overflow-hidden { overflow: hidden; }
+    .max-h-96 { max-height: 24rem; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .opacity-0 { opacity: 0; }
+    .group:hover .group-hover\:opacity-100 { opacity: 1; }
+    .group { position: relative; }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .animate-spin { animation: spin 1s linear infinite; }
+    .inline-flex { display: inline-flex; }
+    .inline-block { display: inline-block; }
+    .align-text-bottom { vertical-align: text-bottom; }
+    .aspect-square { aspect-ratio: 1; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Color utilities from Tailwind (cyber theme) ── */
+    .bg-cyber-cyan\/10 { background: rgba(0, 212, 255, 0.1); }
+    .bg-cyber-cyan\/15 { background: rgba(0, 212, 255, 0.15); }
+    .bg-cyber-cyan\/25 { background: rgba(0, 212, 255, 0.25); }
+    .bg-cyber-surface-2\/80 { background: rgba(26, 34, 53, 0.8); }
+    .bg-cyber-surface-2\/50 { background: rgba(26, 34, 53, 0.5); }
+    .bg-cyber-surface-2\/40 { background: rgba(26, 34, 53, 0.4); }
+    .bg-cyber-purple\/5 { background: rgba(168, 85, 247, 0.05); }
+    .bg-cyber-purple\/10 { background: rgba(168, 85, 247, 0.1); }
+    .bg-cyber-green\/5 { background: rgba(0, 255, 136, 0.05); }
+    .bg-cyber-green\/10 { background: rgba(0, 255, 136, 0.1); }
+    .bg-cyber-orange\/5 { background: rgba(255, 140, 0, 0.05); }
+    .bg-cyber-orange { background: var(--color-cyber-orange); }
+    .bg-cyber-red\/5 { background: rgba(255, 51, 102, 0.05); }
+    .bg-cyber-red\/10 { background: rgba(255, 51, 102, 0.1); }
+    .bg-cyber-red\/20 { background: rgba(255, 51, 102, 0.2); }
+    .bg-red-500\/20 { background: rgba(239, 68, 68, 0.2); }
+    .bg-cyber-border\/40 { background: rgba(30, 45, 69, 0.4); }
+    .border-cyber-cyan\/20 { border-color: rgba(0, 212, 255, 0.2); }
+    .border-cyber-border\/30 { border-color: rgba(30, 45, 69, 0.3); }
+    .border-cyber-border\/40 { border-color: rgba(30, 45, 69, 0.4); }
+    .border-cyber-purple\/10 { border-color: rgba(168, 85, 247, 0.1); }
+    .border-cyber-purple\/25 { border-color: rgba(168, 85, 247, 0.25); }
+    .border-cyber-red\/30 { border-color: rgba(255, 51, 102, 0.3); }
+    .border-cyber-red\/50 { border-color: rgba(255, 51, 102, 0.5); }
+    .border-cyber-green\/30 { border-color: rgba(0, 255, 136, 0.3); }
+    .border-cyber-orange\/30 { border-color: rgba(255, 140, 0, 0.3); }
+    .text-cyber-cyan { color: var(--color-cyber-cyan); }
+    .text-cyber-text { color: var(--color-cyber-text); }
+    .text-cyber-text-dim { color: var(--color-cyber-text-dim); }
+    .text-cyber-text-dim\/45 { color: rgba(90, 107, 128, 0.45); }
+    .text-cyber-text-dim\/50 { color: rgba(90, 107, 128, 0.5); }
+    .text-cyber-text-dim\/70 { color: rgba(90, 107, 128, 0.7); }
+    .text-cyber-text-dim\/80 { color: rgba(90, 107, 128, 0.8); }
+    .text-cyber-purple { color: var(--color-cyber-purple); }
+    .text-cyber-orange { color: var(--color-cyber-orange); }
+    .text-cyber-red { color: var(--color-cyber-red); }
+    .text-cyber-green { color: var(--color-cyber-green); }
+    .text-red-400 { color: #f87171; }
+    .ring-1 { box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.4); }
+    .ring-2 { box-shadow: 0 0 0 2px currentColor; }
+    .ring-cyber-cyan\/40 { box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.4); }
+    .ring-cyber-cyan\/60 { box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.6); }
+    .ring-cyber-red\/40 { box-shadow: 0 0 0 2px rgba(255, 51, 102, 0.4); }
+    .ring-red-500\/40 { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
+    .ring-cyber-cyan\/30 { box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.3); }
+    .hover\:bg-cyber-cyan\/10:hover { background: rgba(0, 212, 255, 0.1); }
+    .hover\:bg-cyber-cyan\/25:hover { background: rgba(0, 212, 255, 0.25); }
+    .hover\:bg-cyber-purple\/10:hover { background: rgba(168, 85, 247, 0.1); }
+    .hover\:bg-cyber-red\/30:hover { background: rgba(255, 51, 102, 0.3); }
+    .hover\:bg-red-500\/30:hover { background: rgba(239, 68, 68, 0.3); }
+    .hover\:text-cyber-cyan:hover { color: var(--color-cyber-cyan); }
+    .hover\:text-cyber-red:hover { color: var(--color-cyber-red); }
+    .hover\:text-cyber-text-dim\/80:hover { color: rgba(90, 107, 128, 0.8); }
+    .hover\:border-cyber-red\/50:hover { border-color: rgba(255, 51, 102, 0.5); }
+    .hover\:bg-cyber-red\/10:hover { background: rgba(255, 51, 102, 0.1); }
+    .hover\:bg-cyber-green\/10:hover { background: rgba(0, 255, 136, 0.1); }
+    .focus-within\:ring-1:focus-within { box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.4); }
+    .focus-within\:ring-cyber-cyan\/40:focus-within { box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.4); }
+    .placeholder\:text-cyber-text-dim\/70::placeholder { color: rgba(90, 107, 128, 0.7); }
+
+    /* ── prose-cyber (markdown rendering, from app.css) ── */
+    .prose-cyber { line-height: 1.6; }
+    .prose-cyber p { margin: 0.5em 0; }
+    .prose-cyber h1 { font-size: 1.25em; font-weight: 600; margin: 0.75em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber h2 { font-size: 1.1em; font-weight: 600; margin: 0.75em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber h3 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.25em; color: var(--color-cyber-text); }
+    .prose-cyber ul, .prose-cyber ol { padding-left: 1.5em; margin: 0.25em 0; }
+    .prose-cyber li { margin: 0.15em 0; }
+    .prose-cyber code {
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      background: var(--color-cyber-surface-2);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 4px;
+      padding: 0.15em 0.35em;
+      color: var(--color-cyber-cyan);
+    }
+    .prose-cyber pre {
+      background: var(--color-cyber-bg);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 8px;
+      padding: 0.75em 1em;
+      margin: 0.5em 0;
+      overflow-x: auto;
+      font-size: 0.8em;
+      line-height: 1.5;
+    }
+    .prose-cyber pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--color-cyber-text);
+    }
+    .prose-cyber blockquote {
+      border-left: 3px solid var(--color-cyber-purple);
+      padding-left: 1em;
+      margin: 0.5em 0;
+      color: var(--color-cyber-text-dim);
+      font-style: italic;
+    }
+    .prose-cyber a {
+      color: var(--color-cyber-cyan);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .prose-cyber a:hover {
+      color: var(--color-cyber-cyan);
+      opacity: 0.8;
+    }
+    .prose-cyber strong { color: var(--color-cyber-text); font-weight: 600; }
+    .prose-cyber em { color: var(--color-cyber-text-dim); }
+    .prose-cyber hr { border-color: var(--color-cyber-border); margin: 1em 0; }
+    .prose-cyber table { border-collapse: collapse; margin: 0.5em 0; }
+    .prose-cyber th, .prose-cyber td { border: 1px solid var(--color-cyber-border); padding: 0.35em 0.75em; text-align: left; }
+    .prose-cyber th { background: var(--color-cyber-surface-2); font-weight: 600; }
+
+    /* ── Global utility animations (from app.css) ── */
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    @keyframes scan-line {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    @keyframes data-flow {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+    @keyframes fade-in-up {
+      0% { opacity: 0; transform: translateY(10px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slide-in-right {
+      0% { opacity: 0; transform: translateX(20px); }
+      100% { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       CHAT INLINE OVERLAY — all CSS verbatim from +page.svelte <style>
+       ══════════════════════════════════════════════════════════════════ */
+
+    .chat-inline-overlay {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      z-index: 30;
+      display: flex;
+      width: 24rem;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 1rem;
+      padding-bottom: 1rem;
+      pointer-events: none;
+    }
+
+    .chat-inline-overlay > * {
+      pointer-events: auto;
+    }
+
+    .orb-options-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 29;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      animation: orb-backdrop-in 200ms ease-out;
+    }
+
+    @keyframes orb-backdrop-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* ── Collapsed chat orb ── */
+    .chat-collapsed-orb-host {
+      position: absolute;
+      left: 50%;
+      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      z-index: 30;
+      pointer-events: auto;
+    }
+
+    .chat-collapsed-orb {
+      display: flex;
+      flex-direction: column-reverse;
+      align-items: center;
+      gap: 0;
+      pointer-events: auto;
+    }
+
+    .chat-orb {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: oklch(18% 0.02 255 / 85%);
+      backdrop-filter: blur(24px) saturate(1.5);
+      -webkit-backdrop-filter: blur(24px) saturate(1.5);
+      border: 1px solid oklch(82% 0.14 210 / 25%);
+      box-shadow:
+        0 0 0 1px oklch(82% 0.14 210 / 12%),
+        0 0 32px oklch(82% 0.14 210 / 20%),
+        0 0 64px oklch(82% 0.14 210 / 8%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--color-cyber-cyan);
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      flex-shrink: 0;
+    }
+    .chat-orb svg {
+      width: 26px;
+      height: 26px;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .chat-orb::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 1px solid oklch(82% 0.14 210 / 0%);
+      transition: border-color 0.4s, inset 0.4s;
+      pointer-events: none;
+    }
+    .chat-collapsed-orb:hover .chat-orb,
+    .chat-orb:hover {
+      color: var(--color-cyber-cyan);
+      border-color: oklch(82% 0.14 210 / 40%);
+      box-shadow:
+        0 0 0 1px oklch(82% 0.14 210 / 20%),
+        0 0 48px oklch(82% 0.14 210 / 30%),
+        0 0 96px oklch(82% 0.14 210 / 12%),
+        0 16px 48px oklch(0% 0 0 / 60%);
+      transform: scale(1.08);
+    }
+    .chat-orb::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid oklch(82% 0.14 210 / 0%);
+      animation: orbPulse 3s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes orbPulse {
+      0%, 100% { border-color: oklch(82% 0.14 210 / 0%); inset: 0; }
+      50% { border-color: oklch(82% 0.14 210 / 15%); inset: -6px; }
+    }
+    .chat-orb.recording {
+      color: oklch(62% 0.20 18);
+      border-color: oklch(62% 0.20 18 / 40%);
+      background: oklch(20% 0.02 18 / 80%);
+      box-shadow:
+        0 0 0 1px oklch(62% 0.20 18 / 15%),
+        0 0 32px oklch(62% 0.20 18 / 24%),
+        0 0 64px oklch(62% 0.20 18 / 10%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+    }
+    .chat-orb.recording::before {
+      border-color: oklch(62% 0.20 18 / 30%);
+      animation: orbRecording 1s ease-in-out infinite;
+    }
+    @keyframes orbRecording {
+      0%, 100% { border-color: oklch(62% 0.20 18 / 20%); inset: 0; }
+      50% { border-color: oklch(62% 0.20 18 / 8%); inset: -12px; }
+    }
+
+    /* Loading indicator: a conversation is streaming in the background. */
+    .chat-orb.streaming {
+      color: var(--color-cyber-purple);
+      border-color: oklch(60% 0.18 300 / 35%);
+      background: oklch(20% 0.04 300 / 80%);
+      box-shadow:
+        0 0 0 1px oklch(60% 0.18 300 / 15%),
+        0 0 32px oklch(60% 0.18 300 / 22%),
+        0 0 64px oklch(60% 0.18 300 / 10%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+    }
+    .chat-orb.streaming::before {
+      border-color: oklch(60% 0.18 300 / 30%);
+      animation: orbStreaming 1.4s ease-in-out infinite;
+    }
+    @keyframes orbStreaming {
+      0%, 100% { border-color: oklch(60% 0.18 300 / 25%); inset: 0; }
+      50% { border-color: oklch(60% 0.18 300 / 10%); inset: -10px; }
+    }
+
+    .chat-orb-expand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px 8px 8px;
+      border-radius: 100px;
+      background: oklch(16% 0.015 255 / 80%);
+      backdrop-filter: blur(24px) saturate(1.5);
+      -webkit-backdrop-filter: blur(24px) saturate(1.5);
+      border: 1px solid oklch(50% 0.03 255 / 12%);
+      box-shadow:
+        0 0 0 1px oklch(50% 0.03 255 / 6%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+      cursor: pointer;
+      color: var(--color-cyber-text);
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(20px) scale(0.9);
+      margin-bottom: 10px;
+      pointer-events: none;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.05s;
+    }
+    .chat-orb-expand .coe-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: oklch(82% 0.14 210 / 12%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-cyber-cyan);
+      flex-shrink: 0;
+    }
+    .chat-orb-expand .coe-icon svg { width: 16px; height: 16px; }
+    .chat-collapsed-orb:hover .chat-orb-expand {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .chat-orb-expand:hover {
+      border-color: oklch(82% 0.14 210 / 25%);
+      box-shadow:
+        0 0 0 1px oklch(82% 0.14 210 / 10%),
+        0 0 24px oklch(82% 0.14 210 / 12%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+    }
+
+    .chat-orb-add {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 16px 8px 8px;
+      border-radius: 100px;
+      background: oklch(16% 0.02 150 / 80%);
+      backdrop-filter: blur(24px) saturate(1.5);
+      -webkit-backdrop-filter: blur(24px) saturate(1.5);
+      border: 1px solid oklch(50% 0.03 255 / 12%);
+      box-shadow:
+        0 0 0 1px oklch(50% 0.03 255 / 6%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+      cursor: pointer;
+      color: var(--color-cyber-text);
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(20px) scale(0.9);
+      margin-bottom: 10px;
+      pointer-events: none;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) 0.1s;
+    }
+    .chat-orb-add .coa-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: oklch(72% 0.15 150 / 12%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: oklch(72% 0.15 150);
+      flex-shrink: 0;
+    }
+    .chat-orb-add .coa-icon svg { width: 16px; height: 16px; }
+    .chat-collapsed-orb:hover .chat-orb-add {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .chat-orb-add:hover {
+      border-color: oklch(72% 0.15 150 / 25%);
+      box-shadow:
+        0 0 0 1px oklch(72% 0.15 150 / 10%),
+        0 0 24px oklch(72% 0.15 150 / 12%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+    }
+
+    /* ── Push-to-talk: hold countdown + progress ring on the orb ── */
+    .chat-orb.holding {
+      border-color: oklch(82% 0.14 210 / 50%);
+      box-shadow:
+        0 0 0 1px oklch(82% 0.14 210 / 25%),
+        0 0 48px oklch(82% 0.14 210 / 35%),
+        0 12px 40px oklch(0% 0 0 / 50%);
+      transform: scale(1.06);
+    }
+    .chat-orb .hold-countdown {
+      font-size: 22px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--color-cyber-cyan);
+      line-height: 1;
+      z-index: 2;
+    }
+    .chat-orb .hold-progress {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid oklch(82% 0.14 210 / 35%);
+      pointer-events: none;
+      transition: inset 0.05s linear;
+      z-index: 1;
+    }
+    /* While holding/recording the sibling option pills stay hidden. */
+    .chat-orb.holding ~ .chat-orb-add,
+    .chat-orb.holding ~ .chat-orb-expand,
+    .chat-orb.recording ~ .chat-orb-add,
+    .chat-orb.recording ~ .chat-orb-expand {
+      opacity: 0 !important;
+      transform: translateY(20px) scale(0.9) !important;
+      pointer-events: none !important;
+    }
+    /* Tap-to-reveal: pin the sibling options open independent of hover. */
+    .chat-orb.options-open ~ .chat-orb-add,
+    .chat-orb.options-open ~ .chat-orb-expand {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .chat-orb-add.show,
+    .chat-orb-expand.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    /* ── Hover tooltip for the mic button ── */
+    .mic-tooltip {
+      position: absolute;
+      left: calc(100% + 10px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: oklch(14% 0.02 255 / 92%);
+      backdrop-filter: blur(12px) saturate(1.5);
+      -webkit-backdrop-filter: blur(12px) saturate(1.5);
+      border: 1px solid oklch(82% 0.14 210 / 25%);
+      color: var(--color-cyber-text);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 8px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 60;
+      box-shadow: 0 8px 24px oklch(0% 0 0 / 50%);
+      animation: micTooltipIn 0.15s ease-out;
+    }
+    .mic-tooltip::after {
+      content: '';
+      position: absolute;
+      right: 100%;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 5px solid transparent;
+      border-right-color: oklch(82% 0.14 210 / 25%);
+    }
+    .mic-tooltip-left {
+      left: auto;
+      right: calc(100% + 10px);
+    }
+    .mic-tooltip-left::after {
+      right: auto;
+      left: 100%;
+      border-right-color: transparent;
+      border-left-color: oklch(82% 0.14 210 / 25%);
+    }
+    @keyframes micTooltipIn {
+      from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+      to { opacity: 1; transform: translateY(-50%) translateX(0); }
+    }
+
+    .chat-orb:focus-visible,
+    .chat-orb-expand:focus-visible,
+    .chat-orb-add:focus-visible {
+      outline: 2px solid var(--color-cyber-cyan);
+      outline-offset: 2px;
+      border-radius: inherit;
+    }
+
+    .chat-inline-messages {
+      width: 100%;
+      max-width: 42rem;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-anchor: none;
+      overscroll-behavior-y: contain;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: rgb(8, 11, 19);
+      border: 1px solid rgba(0, 212, 255, 0.12);
+      border-right: 0;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
+    }
+
+    .chat-inline-messages::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .chat-inline-messages::-webkit-scrollbar-thumb {
+      background: rgba(0, 212, 255, 0.25);
+      border-radius: 3px;
+    }
+
+    .chat-inline-header {
+      width: 100%;
+      max-width: 42rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 16px 6px 20px;
+      background: rgba(8, 11, 19, 0.9);
+      border-radius: 18px 18px 0 0;
+      border: 1px solid rgba(0, 212, 255, 0.12);
+      border-bottom: 0;
+      pointer-events: auto;
+    }
+
+    .chat-inline-header-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--color-cyber-text-dim);
+    }
+
+    /* Close button — only shown in the mobile bottom-sheet toolbar. */
+    .chat-inline-close-btn {
+      display: none;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      color: var(--color-cyber-text-dim);
+      background: transparent;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .chat-inline-close-btn:hover {
+      background: rgba(255, 120, 120, 0.12);
+      color: var(--color-cyber-text);
+    }
+
+    /* Drag handle — only shown at the top of the mobile bottom-sheet. */
+    .chat-sheet-handle {
+      display: none;
+    }
+
+    .chat-inline-messages {
+      border-radius: 0 0 24px 24px;
+      border-top: 0;
+    }
+
+    .chat-inline-input-row {
+      width: 36rem;
+      max-width: 100%;
+    }
+
+    .chat-empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 2rem 1rem;
+      text-align: center;
+    }
+
+    .chat-empty-state-icon {
+      color: rgba(0, 212, 255, 0.35);
+      margin-bottom: 4px;
+    }
+
+    .chat-empty-state-icon svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    .chat-empty-state-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--color-cyber-text-dim);
+    }
+
+    .chat-empty-state-hint {
+      font-size: 12px;
+      color: rgba(145, 163, 184, 0.55);
+    }
+
+    .chat-conversation-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 26px 0 18px;
+      user-select: none;
+      position: relative;
+    }
+
+    .chat-conversation-divider::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 1px;
+      transform: translateY(-50%);
+      background: linear-gradient(
+        to right,
+        transparent 0%,
+        rgba(0, 212, 255, 0.18) 12%,
+        rgba(0, 212, 255, 0.42) 50%,
+        rgba(0, 212, 255, 0.18) 88%,
+        transparent 100%
+      );
+      box-shadow: 0 0 6px rgba(0, 212, 255, 0.14);
+    }
+
+    .chat-conversation-divider-line {
+      display: none;
+    }
+
+    .chat-conversation-divider-label {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      padding: 5px 10px 5px 16px;
+      border-radius: 999px;
+      background: rgb(8, 11, 19);
+      border: 1px solid rgba(0, 212, 255, 0.35);
+      color: var(--color-cyber-cyan);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 auto;
+      z-index: 1;
+      box-shadow:
+        0 0 12px rgba(0, 212, 255, 0.14),
+        inset 0 0 6px rgba(0, 212, 255, 0.04);
+      text-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+    }
+
+    .chat-conversation-divider-date {
+      line-height: 1;
+    }
+
+    .chat-conversation-divider-divider-dots {
+      width: 1px;
+      height: 14px;
+      background: linear-gradient(
+        to bottom,
+        transparent,
+        rgba(0, 212, 255, 0.4) 50%,
+        transparent
+      );
+      flex: 0 0 auto;
+    }
+
+    .chat-conversation-divider-active .chat-conversation-divider-label {
+      border-color: rgba(0, 212, 255, 0.6);
+      box-shadow:
+        0 0 18px rgba(0, 212, 255, 0.28),
+        inset 0 0 8px rgba(0, 212, 255, 0.08);
+      text-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+    }
+
+    .chat-conversation-divider-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--color-cyber-cyan);
+      cursor: pointer;
+      opacity: 0.55;
+      transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .chat-conversation-divider-btn:hover {
+      opacity: 1;
+      background: rgba(0, 212, 255, 0.14);
+      transform: translateY(-1px);
+    }
+
+    .chat-conversation-divider-btn:focus-visible {
+      outline: 1.5px solid rgba(0, 212, 255, 0.7);
+      outline-offset: 1px;
+      opacity: 1;
+    }
+
+    .chat-conversation-divider-delete:hover {
+      background: rgba(255, 87, 87, 0.16);
+      color: rgb(255, 120, 120);
+    }
+
+    .chat-conversation-divider-delete:focus-visible {
+      outline-color: rgba(255, 120, 120, 0.7);
+    }
+
+
+    @media (max-width: 1024px) {
+      .chat-inline-overlay {
+        left: 8px;
+        right: 8px;
+        top: auto;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+        transform: none;
+        width: auto;
+        max-width: 100%;
+      }
+
+      .chat-inline-messages {
+        max-height: 56dvh;
+      }
+    }
+
+    /* Mobile: conversation panel opens as a swipeable bottom-sheet drawer,
+       matching the HistoryPanel pattern. A backdrop dims the graph; the sheet
+       anchors to the bottom with rounded top corners, a drag handle, and a
+       dismiss-on-swipe-down gesture. */
+    @media (max-width: 768px) {
+      .chat-sheet-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        animation: chat-backdrop-in 220ms ease-out;
+        transition: opacity 280ms ease-out;
+      }
+
+      .chat-sheet-backdrop.backdrop-closing {
+        opacity: 0;
+      }
+
+      .chat-inline-overlay {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: auto;
+        bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        max-height: 92dvh;
+        padding: 0;
+        z-index: 61;
+        flex-direction: column;
+        background: var(--color-cyber-bg, #0a0e17);
+        border-radius: 20px 20px 0 0;
+        border-top: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+        box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.7), 0 -2px 24px rgba(0, 212, 255, 0.06);
+        animation: chat-sheet-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+        will-change: transform;
+        overflow: hidden;
+      }
+
+      .chat-inline-overlay.sheet-dragging {
+        transition: none;
+      }
+
+      .chat-inline-overlay.sheet-closing {
+        transform: translateY(100%);
+      }
+
+      .chat-sheet-handle {
+        display: flex;
+        justify-content: center;
+        padding: 10px 0 6px;
+        flex-shrink: 0;
+      }
+
+      .chat-sheet-handle-bar {
+        width: 40px;
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(200, 214, 229, 0.25);
+      }
+
+      .chat-inline-header {
+        max-width: 100%;
+        padding: 4px 8px 10px;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        flex-shrink: 0;
+      }
+
+      .chat-inline-header-title {
+        flex: 1;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--color-cyber-text);
+      }
+
+      .chat-inline-close-btn {
+        display: flex;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+      }
+
+      .chat-inline-header .chat-history-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+      }
+
+      .chat-inline-messages {
+        max-width: 100%;
+        max-height: none;
+        flex: 1;
+        border-radius: 0;
+        border: 0;
+        background: transparent;
+        padding: 4px 16px 8px;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+      }
+
+      .chat-collapse-row {
+        display: none;
+      }
+
+      .chat-inline-input-row {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+        background: var(--color-cyber-bg, #0a0e17);
+        flex-shrink: 0;
+        border-radius: 22px;
+        min-height: 48px;
+        height: auto;
+      }
+
+      .chat-inline-input-row > textarea {
+        min-height: 40px;
+        line-height: 1.5;
+        padding: 10px 14px;
+        font-size: 16px;
+        -webkit-appearance: none;
+        border-radius: 20px;
+      }
+
+      .chat-inline-input-row > button {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+
+      .chat-inline-input-row > textarea {
+        touch-action: auto;
+      }
+
+      .chat-orb-add,
+      .chat-orb-expand {
+        padding: 12px 20px 12px 12px;
+        font-size: 15px;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .chat-orb-add .coa-icon,
+      .chat-orb-expand .coe-icon {
+        width: 40px;
+        height: 40px;
+      }
+
+      .chat-orb-add .coa-icon svg,
+      .chat-orb-expand .coe-icon svg {
+        width: 20px;
+        height: 20px;
+      }
+    }
+
+    @keyframes chat-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes chat-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    /* ── Record countdown overlay ── */
+    .record-countdown-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: oklch(8% 0.02 260 / 94%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: var(--color-cyber-cyan);
+      font-size: 64px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 32px rgba(0, 212, 255, 0.4);
+      animation: fade-in-up 200ms ease-out;
+    }
+    .record-countdown-sub {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-cyber-text-dim);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* ══════════════════════════════════════
+       PROTOTYPE-SPECIFIC STYLES
+       ══════════════════════════════════════ */
+    .prototype-canvas {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      background: var(--color-cyber-bg);
+      overflow: hidden;
+    }
+
+    .prototype-controls {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .prototype-controls button {
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 212, 255, 0.25);
+      background: rgba(10, 14, 23, 0.9);
+      color: var(--color-cyber-cyan);
+      cursor: pointer;
+      transition: all 0.2s;
+      backdrop-filter: blur(12px);
+    }
+
+    .prototype-controls button:hover {
+      background: rgba(0, 212, 255, 0.15);
+      border-color: rgba(0, 212, 255, 0.5);
+    }
+
+    .prototype-controls button.active {
+      background: rgba(0, 212, 255, 0.2);
+      border-color: var(--color-cyber-cyan);
+      box-shadow: 0 0 12px rgba(0, 212, 255, 0.2);
+    }
+
+    .prototype-label {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 100;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--color-cyber-text-dim);
+      background: rgba(10, 14, 23, 0.85);
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 212, 255, 0.12);
+      backdrop-filter: blur(8px);
+    }
+
+    /* Show orb-option pills for prototype demo */
+    .demo-show-orbs .chat-orb-add,
+    .demo-show-orbs .chat-orb-expand {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      pointer-events: auto !important;
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="prototype-canvas" id="app">
+
+    <!-- ── PROTOTYPE CONTROLS ── -->
+    <div class="prototype-controls">
+      <button onclick="showState('orb')" id="btn-orb">Collapsed Orb</button>
+      <button onclick="showState('orb-options')" id="btn-orb-options">Orb + Options</button>
+      <button onclick="showState('panel')" id="btn-panel">Expanded Panel</button>
+      <button onclick="showState('mobile')" id="btn-mobile">Mobile Sheet</button>
+    </div>
+    <div class="prototype-label">ChatPanel Prototype</div>
+
+    <!-- ════════════════════════════════════════════
+         STATE 1: Collapsed Orb (default)
+         ════════════════════════════════════════════ -->
+    <div id="state-orb" style="display:none;">
+      <div class="chat-collapsed-orb-host" data-testid="chat-collapsed-orb">
+        <div class="chat-collapsed-orb">
+          <div class="chat-orb" role="button" tabindex="0" aria-label="Voice input" data-od-id="chat-orb" data-testid="mic-button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </div>
+          <div class="chat-orb-add" role="button" tabindex="0" aria-label="Add images" data-od-id="chat-orb-add">
+            <div class="coa-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </div>
+            <span>Add images</span>
+          </div>
+          <div class="chat-orb-expand" role="button" tabindex="0" aria-label="Type a message" data-od-id="chat-orb-expand">
+            <div class="coe-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <span>Type a message</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         STATE 2: Orb with options revealed
+         ════════════════════════════════════════════ -->
+    <div id="state-orb-options" style="display:none;">
+      <div class="orb-options-backdrop" role="presentation"></div>
+      <div class="chat-collapsed-orb-host demo-show-orbs" data-testid="chat-collapsed-orb">
+        <div class="chat-collapsed-orb">
+          <div class="chat-orb options-open" role="button" tabindex="0" aria-label="Voice input" data-od-id="chat-orb" data-testid="mic-button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </div>
+          <div class="chat-orb-add show" role="button" tabindex="0" aria-label="Add images" data-od-id="chat-orb-add">
+            <div class="coa-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </div>
+            <span>Add images</span>
+          </div>
+          <div class="chat-orb-expand show" role="button" tabindex="0" aria-label="Type a message" data-od-id="chat-orb-expand">
+            <div class="coe-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <span>Type a message</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         STATE 3: Expanded chat panel (desktop)
+         ════════════════════════════════════════════ -->
+    <div id="state-panel" style="display:none;">
+      <div class="chat-inline-overlay" data-testid="chat-inline-overlay" style="pointer-events:auto; position:relative; width:100%; max-width:28rem; height:100vh; margin:0 auto; right:auto; bottom:auto; top:auto;">
+        <!-- Sheet handle hidden on desktop -->
+        <div class="chat-sheet-handle" data-testid="chat-sheet-handle"><div class="chat-sheet-handle-bar"></div></div>
+
+        <!-- Header -->
+        <div class="chat-inline-header" data-testid="chat-inline-header">
+          <button class="chat-inline-close-btn" title="Close conversation" aria-label="Close conversation" data-testid="chat-close-button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <span class="chat-inline-header-title">Conversation</span>
+          <button class="chat-history-btn flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Chat history" aria-label="Open chat history" data-testid="chat-history-button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </button>
+        </div>
+
+        <!-- Messages -->
+        <div class="chat-inline-messages" data-testid="messages-container">
+
+          <!-- Conversation divider (active) -->
+          <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active">
+            <span class="chat-conversation-divider-line"></span>
+            <span class="chat-conversation-divider-label">
+              <span class="chat-conversation-divider-date">Today, 14:32</span>
+              <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
+              <button type="button" class="chat-conversation-divider-btn" title="Export conversation" aria-label="Export conversation">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+              <button type="button" class="chat-conversation-divider-btn chat-conversation-divider-delete" title="Delete conversation" aria-label="Delete conversation">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </span>
+            <span class="chat-conversation-divider-line"></span>
+          </div>
+
+          <!-- User message -->
+          <div class="group mb-4" data-testid="message" data-message-role="user">
+            <div class="flex justify-end">
+              <div class="max-w-[95%] space-y-1">
+                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20" data-testid="user-message-text">
+                  How does the knowledge graph handle entity deduplication when merging new documents?
+                </div>
+              </div>
+            </div>
+            <div class="mt-0.5 flex items-center justify-end gap-2">
+              <span class="text-[10px] text-cyber-text-dim/50">14:32</span>
+              <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red" title="Delete message" data-testid="delete-message-button">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                Delete
+              </button>
+              <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Resend message">
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                Resend
+              </button>
+            </div>
+          </div>
+
+          <!-- Assistant message with thinking -->
+          <div class="group mb-4" data-testid="message" data-message-role="assistant">
+            <div class="flex justify-start">
+              <div class="max-w-[95%] space-y-1.5">
+                <!-- Thinking block -->
+                <details class="group" open>
+                  <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-cyber-purple/25 bg-cyber-purple/5 px-2.5 py-1.5 text-[11px] text-cyber-purple hover:bg-cyber-purple/10 transition-colors">
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m0 16v1m-8-9H3m18 0h-1M5.636 5.636l-.707-.707M18.364 18.364l-.707-.707M5.636 18.364l-.707.707M18.364 5.636l-.707.707" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span class="font-medium">Thinking</span>
+                    <svg class="ml-auto h-3 w-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                  </summary>
+                  <div class="mt-1 max-h-96 overflow-y-auto rounded-lg border border-cyber-purple/10 bg-cyber-surface-2/50 p-2.5 text-[12px] leading-relaxed text-cyber-text-dim/80 whitespace-pre-wrap font-mono">The user is asking about entity deduplication in the knowledge graph. Let me consider the different strategies: hash-based matching, semantic similarity, and LLM-assisted merging...</div>
+                </details>
+
+                <!-- Assistant content bubble -->
+                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+                  <div class="prose-cyber" data-testid="assistant-message-text">
+                    <p>The knowledge graph uses a <strong>multi-layer deduplication pipeline</strong>:</p>
+                    <ol>
+                      <li><strong>Exact matching</strong> — hash-based comparison on normalized entity names</li>
+                      <li><strong>Fuzzy matching</strong> — semantic similarity via embeddings (threshold: 0.85)</li>
+                      <li><strong>LLM-assisted merging</strong> — for ambiguous cases, the LLM decides whether to merge or create a new entity</li>
+                    </ol>
+                    <p>This approach ensures <a href="#">high precision</a> while minimizing false merges.</p>
+                  </div>
+                </div>
+
+                <!-- Tool call indicator -->
+                <details class="group" data-testid="tool-call" data-tool-name="save_to_knowledge_graph">
+                  <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10" data-testid="tool-call-summary">
+                    <svg class="h-3.5 w-3.5 shrink-0 text-cyber-green" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L7 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                    <span class="font-medium">save_to_knowledge_graph</span>
+                    <span class="text-cyber-text-dim/50">— 3 entities, 2 relationships</span>
+                    <svg class="ml-auto h-3 w-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                  </summary>
+                </details>
+
+                <!-- Action buttons (visible on hover) -->
+                <div class="flex items-center gap-2">
+                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red" title="Delete message" data-testid="delete-message-button">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    Delete
+                  </button>
+                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Regenerate response">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                    Regenerate
+                  </button>
+                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Copy message" data-testid="copy-button">
+                    <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Second user message -->
+          <div class="group mb-4" data-testid="message" data-message-role="user">
+            <div class="flex justify-end">
+              <div class="max-w-[95%] space-y-1">
+                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20" data-testid="user-message-text">
+                  Can you show me the relationship extraction logic?
+                </div>
+              </div>
+            </div>
+            <div class="mt-0.5 flex items-center justify-end gap-2">
+              <span class="text-[10px] text-cyber-text-dim/50">14:33</span>
+            </div>
+          </div>
+
+          <!-- Streaming assistant message with processing indicator -->
+          <div class="group mb-4" data-testid="message" data-message-role="assistant">
+            <div class="flex justify-start">
+              <div class="max-w-[95%] space-y-1.5">
+                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+                  <!-- Processing indicator -->
+                  <div class="flex items-center gap-2 py-1" data-testid="processing-indicator">
+                    <div class="flex-1 h-1.5 rounded-full bg-cyber-border/40 overflow-hidden">
+                      <div class="h-full rounded-full bg-cyber-orange animate-pulse" style="width: 65%;"></div>
+                    </div>
+                    <span class="shrink-0 text-[11px] text-cyber-orange" data-testid="processing-label">Processing… 65%</span>
+                    <span class="shrink-0 font-mono text-[10px] text-cyber-text-dim">128 tokens</span>
+                  </div>
+                  <div class="prose-cyber" data-testid="assistant-message-text">
+                    <p>The relationship extraction pipeline uses <strong>dependency parsing</strong> combined with <code>spaCy</code> patterns:</p>
+                    <pre><code>def extract_relationships(doc):
+    for sent in doc.sents:
+        subj = find_subject(sent)
+        obj = find_object(sent)
+        rel = find_predicate(sent)
+        yield (subj, rel, obj)</code></pre>
+                  </div>
+                  <!-- Streaming cursor -->
+                  <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block h-4 w-1 animate-pulse bg-cyber-cyan align-text-bottom"></span>
+                    <button class="inline-flex items-center gap-0.5 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-1.5 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10" title="Stop generating">
+                      <svg class="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+                      Stop
+                    </button>
+                  </span>
+                  <!-- Token speed indicator -->
+                  <div class="mt-1.5 flex items-center gap-1.5 text-[10px]">
+                    <span class="inline-flex items-center gap-1 rounded-full bg-cyber-green/10 px-1.5 py-0.5 font-mono text-cyber-green">
+                      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                      42 t/s
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Generating indicator (no content yet) -->
+          <div class="flex justify-start">
+            <div class="max-w-[95%]">
+              <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+                <div class="flex items-center gap-2 py-1" data-testid="generating-indicator">
+                  <button class="flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10" title="Stop generating" data-testid="stop-button-inline">
+                    <svg class="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+                    Stop
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Collapse button -->
+        <div class="chat-collapse-row mb-1 flex justify-center">
+          <button class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80" title="Collapse chat" aria-label="Collapse chat" data-testid="chat-toggle">
+            <span class="inline-flex">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
+            Collapse
+          </button>
+        </div>
+
+        <!-- Input row -->
+        <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+          <textarea
+            placeholder="Continue..."
+            rows="1"
+            data-testid="chat-input"
+            class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+          ></textarea>
+          <button class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40" data-testid="mic-button" title="Hold to record">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">Hold to record</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════
+         STATE 4: Mobile bottom-sheet
+         ════════════════════════════════════════════ -->
+    <div id="state-mobile" style="display:none;">
+      <div class="chat-sheet-backdrop" role="presentation"></div>
+      <div class="chat-inline-overlay" data-testid="chat-inline-overlay" style="pointer-events:auto; position:fixed; left:0; right:0; bottom:0; width:100%; max-width:100%; max-height:92dvh; padding:0; z-index:61; flex-direction:column; background:var(--color-cyber-bg, #0a0e17); border-radius:20px 20px 0 0; border-top:1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15)); box-shadow:0 -12px 48px rgba(0, 0, 0, 0.7), 0 -2px 24px rgba(0, 212, 255, 0.06); overflow:hidden;">
+        <!-- Sheet handle -->
+        <div class="chat-sheet-handle" data-testid="chat-sheet-handle" style="display:flex;">
+          <div class="chat-sheet-handle-bar"></div>
+        </div>
+
+        <!-- Header -->
+        <div class="chat-inline-header" data-testid="chat-inline-header" style="max-width:100%; padding:4px 8px 10px; background:transparent; border:0; border-radius:0; flex-shrink:0;">
+          <button class="chat-inline-close-btn" style="display:flex;" title="Close conversation" aria-label="Close conversation" data-testid="chat-close-button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <span class="chat-inline-header-title" style="flex:1; text-align:center; font-size:13px; font-weight:600; text-transform:none; letter-spacing:0; color:var(--color-cyber-text);">Conversation</span>
+          <button class="chat-history-btn flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan" style="width:36px; height:36px; border-radius:10px;" title="Chat history" aria-label="Open chat history">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </button>
+        </div>
+
+        <!-- Messages -->
+        <div class="chat-inline-messages" data-testid="messages-container" style="max-width:100%; max-height:none; flex:1; border-radius:0; border:0; background:transparent; padding:4px 16px 8px; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain;">
+
+          <!-- Conversation divider -->
+          <div class="chat-conversation-divider chat-conversation-divider-active">
+            <span class="chat-conversation-divider-line"></span>
+            <span class="chat-conversation-divider-label">
+              <span class="chat-conversation-divider-date">Today, 14:32</span>
+              <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
+            </span>
+            <span class="chat-conversation-divider-line"></span>
+          </div>
+
+          <!-- User message -->
+          <div class="group mb-4" data-testid="message" data-message-role="user">
+            <div class="flex justify-end">
+              <div class="max-w-[95%] space-y-1">
+                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20">
+                  Explain the entity resolution algorithm.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Assistant message -->
+          <div class="group mb-4" data-testid="message" data-message-role="assistant">
+            <div class="flex justify-start">
+              <div class="max-w-[95%] space-y-1.5">
+                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30">
+                  <div class="prose-cyber">
+                    <p>Entity resolution uses a <strong>three-stage pipeline</strong>:</p>
+                    <ul>
+                      <li>String normalization + exact match</li>
+                      <li>Embedding similarity (cosine &gt; 0.85)</li>
+                      <li>LLM judgment for remaining ambiguities</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Streaming indicator -->
+          <div class="flex items-center gap-2 px-4 py-3">
+            <div class="flex items-center gap-2">
+              <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>
+              <span class="text-xs text-cyber-purple">Generating response…</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input row (mobile style) -->
+        <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40" style="width:100%; max-width:100%; margin:0; padding:8px 12px calc(10px + env(safe-area-inset-bottom, 0px)); background:var(--color-cyber-bg, #0a0e17); flex-shrink:0; border-radius:22px; min-height:48px; height:auto;">
+          <textarea
+            placeholder="Ask me anything..."
+            rows="1"
+            data-testid="chat-input"
+            class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+            style="min-height:40px; line-height:1.5; padding:10px 14px; font-size:16px; -webkit-appearance:none; border-radius:20px; touch-action:auto;"
+          ></textarea>
+          <button class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40" style="width:44px; height:44px; border-radius:50%; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;" data-testid="mic-button" title="Hold to record">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // State toggle logic
+    function showState(state) {
+      const states = ['orb', 'orb-options', 'panel', 'mobile'];
+      states.forEach(s => {
+        document.getElementById('state-' + s).style.display = 'none';
+      });
+      document.getElementById('state-' + state).style.display = '';
+
+      // Update button active states
+      document.querySelectorAll('.prototype-controls button').forEach(btn => btn.classList.remove('active'));
+      document.getElementById('btn-' + state).classList.add('active');
+
+      // Reset textarea auto-resize
+      document.querySelectorAll('#state-panel textarea, #state-mobile textarea').forEach(ta => {
+        ta.style.height = 'auto';
+      });
+    }
+
+    // Initialize — show expanded panel by default
+    showState('panel');
+
+    // Textarea auto-resize
+    document.querySelectorAll('.chat-inline-input-row textarea').forEach(ta => {
+      ta.addEventListener('input', () => {
+        ta.style.height = 'auto';
+        const lineH = parseInt(getComputedStyle(ta).lineHeight) || 24;
+        ta.style.height = Math.min(ta.scrollHeight, lineH * 4) + 'px';
+      });
+    });
+
+    // Toggle details open/close
+    document.querySelectorAll('details').forEach(det => {
+      det.addEventListener('toggle', () => {
+        const chevron = det.querySelector('summary svg:last-child');
+        if (chevron) {
+          chevron.style.transform = det.open ? 'rotate(180deg)' : '';
+        }
+      });
+    });
+  </script>
+</body>
+</html>

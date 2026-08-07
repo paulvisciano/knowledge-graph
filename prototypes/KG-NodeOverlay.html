@@ -1,0 +1,1594 @@
+<!-- Synced from: ui/src/lib/components/canvas/NodeOverlay.svelte -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0a0e17',
+              surface: '#111827',
+              'surface-2': '#1a2235',
+              border: '#1e2d45',
+              text: '#c8d6e5',
+              'text-dim': '#5a6b80',
+              cyan: '#00d4ff',
+              'cyan-dim': '#007a99',
+              purple: '#a855f7',
+              'purple-dim': '#6b21a8',
+              green: '#00ff88',
+              'green-dim': '#00804a',
+              orange: '#ff8c00',
+              red: '#ff3366',
+              yellow: '#ffd600',
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace],
+            sans: ['Inter', 'SF Pro Display', system-ui, sans-serif],
+          }
+        }
+      }
+    }
+  </script>
+<title>NodeOverlay Prototype</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   Tokens — oklch system matching the CanvasView prototype
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:          oklch(6% 0.02 260);
+  --fg:          oklch(90% 0.005 250);
+  --muted:       oklch(65% 0.02 255);
+  --faint:       oklch(55% 0.02 255);
+  --accent:      oklch(82% 0.14 210);
+  --accent-dim:  oklch(82% 0.14 210 / 18%);
+  --accent-purple: oklch(72% 0.16 295);
+  --accent-purple-dim: oklch(72% 0.16 295 / 18%);
+  --success:     oklch(72% 0.15 150);
+  --danger:      oklch(62% 0.20 18);
+  --glass:       oklch(16% 0.015 255 / 45%);
+  --glass-light: oklch(20% 0.015 255 / 30%);
+  --hairline:    oklch(50% 0.03 255 / 8%);
+
+  --font-mono:   ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --font-sans:   -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Iowan Old Style', 'Charter', Georgia, 'SF Pro Display', serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+}
+
+/* Focus-visible — keyboard accessibility */
+.close-btn:focus-visible,
+.btn-delete:focus-visible,
+.filmstrip-nav:focus-visible,
+.filmstrip-thumb:focus-visible,
+.tab:focus-visible,
+.person:focus-visible,
+.chip:focus-visible,
+.fullscreen-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+.filmstrip-thumb:focus-visible { outline-offset: 1px; }
+.tab:focus-visible { outline-offset: -2px; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Spatial scene — the overlay backdrop with radial gradients + glass
+   ════════════════════════════════════════════════════════════════════ */
+.spatial-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 3vh 2vw 2vh;
+  perspective: 1200px;
+  perspective-origin: 50% 40%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 35%, oklch(14% 0.06 270 / 40%), transparent),
+    radial-gradient(ellipse 60% 50% at 30% 80%, oklch(10% 0.04 210 / 30%), transparent),
+    radial-gradient(ellipse 50% 40% at 80% 20%, oklch(8% 0.03 180 / 20%), transparent),
+    oklch(6% 0.02 260 / 92%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  animation: fade-in 0.25s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.scene-inner {
+  position: relative;
+  width: 100%;
+  max-width: 920px;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Topbar — status pill, filename, close button
+   ════════════════════════════════════════════════════════════════════ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 2vh;
+  transform: translateZ(20px);
+}
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.status-pill.is-complete { color: var(--success); }
+.status-pill.is-processing { color: oklch(78% 0.15 60); }
+.status-pill.is-error { color: var(--danger); }
+.status-pill.is-chat { color: var(--accent); }
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-dot.is-processing {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.filename {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.close-btn {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(20% 0.02 255 / 70%);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--fg);
+  border: 2px solid oklch(60% 0.03 255 / 55%);
+  box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 12px oklch(0% 0 0 / 25%);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.close-btn:hover {
+  color: var(--danger);
+  background: oklch(62% 0.20 18 / 18%);
+  border-color: oklch(62% 0.20 18 / 70%);
+  box-shadow: 0 0 0 1px oklch(0% 0 0 / 20%), 0 4px 16px oklch(62% 0.20 18 / 25%);
+  transform: scale(1.08);
+}
+.close-btn:active { transform: scale(0.95); }
+.close-btn svg { width: 18px; height: 18px; transition: transform 0.2s; }
+.close-btn:hover svg { transform: rotate(90deg); }
+
+/* ════════════════════════════════════════════════════════════════════
+   Image stage — the hero photo with tags
+   ════════════════════════════════════════════════════════════════════ */
+.image-stage {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-bottom: 1.5vh;
+  transform: translateZ(0px);
+  gap: 14px;
+}
+
+.image-frame {
+  position: relative;
+  max-width: 840px;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  /* Fixed height prevents layout shift when switching between
+     photos with different aspect ratios. */
+  height: 65vh;
+  background: var(--glass);
+  box-shadow:
+    0 40px 100px oklch(0% 0 0 / 60%),
+    0 0 60px oklch(82% 0.14 210 / 8%),
+    0 0 0 1px oklch(50% 0.03 255 / 10%);
+  cursor: pointer;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s;
+}
+.image-frame:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 50px 120px oklch(0% 0 0 / 70%),
+    0 0 80px oklch(82% 0.14 210 / 12%),
+    0 0 0 1px oklch(82% 0.14 210 / 20%);
+}
+.image-frame .photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  transition: opacity 0.3s ease;
+}
+.image-frame .photo.photo-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.photo-skeleton {
+  width: 100%;
+  height: 100%;
+  background: var(--glass);
+  border-radius: inherit;
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(50% 0.03 255 / 8%) 40%,
+    oklch(50% 0.03 255 / 15%) 50%,
+    oklch(50% 0.03 255 / 8%) 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.photo-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 300px;
+  background: var(--glass);
+  color: var(--faint);
+}
+.photo-placeholder svg { width: 64px; height: 64px; }
+
+.image-tags {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+  pointer-events: none;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: oklch(6% 0.01 255 / 60%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tag svg { width: 12px; height: 12px; flex-shrink: 0; }
+.tag-loc { color: oklch(78% 0.13 155); }
+.tag-date { color: var(--accent); }
+
+/* ════════════════════════════════════════════════════════════════════
+   Filmstrip — same-day photos navigation
+   ════════════════════════════════════════════════════════════════════ */
+.filmstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 0;
+}
+.filmstrip-nav {
+  width: 54px; height: 54px;
+  margin-top: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid var(--hairline);
+  color: var(--muted);
+  display: grid; place-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.filmstrip-nav:hover:not(:disabled) {
+  background: var(--glass-light);
+  color: var(--fg);
+}
+.filmstrip-nav:active:not(:disabled) { transform: scale(0.92); }
+.filmstrip-nav:disabled { opacity: 0.3; cursor: default; }
+.filmstrip-nav svg { width: 26px; height: 26px; }
+
+.filmstrip-track {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) transparent;
+  padding: 2px 0;
+  min-width: 0;
+}
+.filmstrip-track::-webkit-scrollbar { height: 4px; }
+.filmstrip-track::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+
+.filmstrip-thumb {
+  flex-shrink: 0;
+  width: 82px; height: 82px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: var(--glass);
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.filmstrip-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.filmstrip-thumb:hover { transform: translateY(-2px); border-color: var(--hairline); }
+.filmstrip-thumb.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.filmstrip-day-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.filmstrip-day-photos {
+  display: flex;
+  gap: 6px;
+}
+.filmstrip-day-group + .filmstrip-day-group {
+  border-left: 1px solid var(--hairline);
+  padding-left: 8px;
+  margin-left: 4px;
+}
+.filmstrip-day-label {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 2px 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Description panel — glassmorphism card
+   ════════════════════════════════════════════════════════════════════ */
+.description-panel {
+  position: relative;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto 1.5vh;
+  padding: 18px 24px;
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-radius: 14px;
+  box-shadow:
+    0 20px 60px oklch(0% 0 0 / 30%),
+    0 0 0 1px oklch(50% 0.03 255 / 6%);
+  transform: translateZ(10px);
+}
+.description-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+  opacity: 0.95;
+}
+.description-text {
+  font-size: 15px;
+  line-height: 1.75;
+  color: oklch(86% 0.004 250);
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) transparent;
+}
+.description-text::-webkit-scrollbar { width: 2px; }
+.description-text::-webkit-scrollbar-thumb { background: var(--accent-dim); }
+.description-text .overlay-p { margin-bottom: 8px; }
+.description-text .overlay-p:last-child { margin-bottom: 0; }
+.description-text .overlay-code {
+  background: oklch(20% 0.02 255 / 40%);
+  border-radius: 8px;
+  padding: 10px;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Data row + panels — people, events, locations, entities, exif
+   ════════════════════════════════════════════════════════════════════ */
+.data-row {
+  display: flex;
+  gap: 12px;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  flex-wrap: wrap;
+  transform: translateZ(5px);
+}
+.data-panel {
+  flex: 1;
+  min-width: 200px;
+  padding: 14px 18px;
+  background: var(--glass-light);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px oklch(50% 0.03 255 / 5%);
+}
+.exif-panel {
+  flex-basis: 100%;
+  min-width: 100%;
+  padding: 16px 20px;
+}
+
+.panel-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--accent-dim);
+}
+.panel-label .count {
+  color: var(--fg);
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+/* People */
+.people-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.person {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 100px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+.person:hover { background: oklch(20% 0.02 255 / 30%); }
+.person-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  filter: saturate(0.8);
+}
+.person-initials {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: oklch(30% 0.02 255 / 60%);
+  color: var(--fg);
+}
+.person-unknown {
+  background: oklch(20% 0.02 255 / 40%);
+  color: var(--faint);
+}
+.person-unknown svg { width: 14px; height: 14px; }
+.person-name {
+  font-size: 13px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+/* Chips */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: filter 0.15s;
+  letter-spacing: 0.02em;
+}
+.chip:hover { filter: brightness(1.25); }
+.chip-loc {
+  color: oklch(78% 0.13 155);
+  background: oklch(72% 0.13 155 / 8%);
+}
+.chip-event {
+  color: oklch(80% 0.13 70);
+  background: oklch(74% 0.13 70 / 8%);
+}
+.chip-entity {
+  color: var(--muted);
+  background: oklch(20% 0.02 255 / 25%);
+}
+.chip-entity:hover { color: var(--fg); }
+.chip-accent {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+.event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   EXIF grid
+   ════════════════════════════════════════════════════════════════════ */
+.exif-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.exif-group + .exif-group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+.exif-group-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.exif-grid { display: grid; gap: 0; }
+.exif-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 8px;
+  gap: 12px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.exif-row:hover { background: oklch(50% 0.03 255 / 6%); }
+.exif-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.exif-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.connection-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.connection-name {
+  font-size: 12px;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Sidebar — tabs (details/insights/connections) restyled to fit aesthetic
+   ════════════════════════════════════════════════════════════════════ */
+.sidebar {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto 1.5vh;
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-radius: 14px;
+  box-shadow:
+    0 20px 60px oklch(0% 0 0 / 30%),
+    0 0 0 1px oklch(50% 0.03 255 / 6%);
+  transform: translateZ(8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+.tab {
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--fg); }
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) transparent;
+}
+.sidebar-content::-webkit-scrollbar { width: 4px; }
+.sidebar-content::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-text { font-size: 13px; color: var(--danger); }
+.empty-text { font-size: 13px; color: var(--faint); font-style: italic; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Action area — delete button
+   ════════════════════════════════════════════════════════════════════ */
+.action-area {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.5vh;
+  transform: translateZ(15px);
+}
+.btn-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 22px;
+  background: oklch(62% 0.20 18 / 10%);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-radius: 100px;
+  border: 1px solid oklch(62% 0.20 18 / 20%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: oklch(62% 0.20 18 / 80%);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-delete:hover:not(:disabled) {
+  color: oklch(62% 0.20 18);
+  background: oklch(62% 0.20 18 / 18%);
+  border-color: oklch(62% 0.20 18 / 50%);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px oklch(62% 0.20 18 / 15%);
+}
+.btn-delete:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+.btn-delete:disabled { opacity: 0.5; cursor: default; }
+.btn-delete svg { width: 13px; height: 13px; opacity: 0.8; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Fullscreen overlay — restyled with new tokens
+   ════════════════════════════════════════════════════════════════════ */
+.fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 50%, oklch(10% 0.02 260 / 80%), oklch(3% 0.01 260 / 96%));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in 0.2s ease;
+}
+.fullscreen-overlay img {
+  max-width: 92%;
+  max-height: 92%;
+  border-radius: 8px;
+  box-shadow: 0 30px 100px oklch(0% 0 0 / 80%);
+}
+.fullscreen-close {
+  position: absolute;
+  top: 20px; right: 20px;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: oklch(20% 0.02 255 / 70%);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 2px solid oklch(60% 0.03 255 / 55%);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fullscreen-close:hover {
+  color: var(--danger);
+  background: oklch(62% 0.20 18 / 18%);
+  border-color: oklch(62% 0.20 18 / 70%);
+  transform: scale(1.08);
+}
+.fullscreen-close svg { width: 18px; height: 18px; transition: transform 0.2s; }
+.fullscreen-close:hover svg { transform: rotate(90deg); }
+
+/* ════════════════════════════════════════════════════════════════════
+   Note reader — serif reading view
+   ════════════════════════════════════════════════════════════════════ */
+.note-reader {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) transparent;
+  padding: 8px 0;
+}
+.note-reader::-webkit-scrollbar { width: 4px; }
+.note-reader::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+
+.note-content {
+  width: 100%;
+  max-width: 680px;
+  background: oklch(92% 0.04 85);
+  color: oklch(28% 0.02 60);
+  border-radius: 16px;
+  padding: 1.5rem 1.75rem;
+  box-shadow:
+    0 0 0 1px oklch(0% 0 0 / 6%),
+    0 20px 60px oklch(0% 0 0 / 45%);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+.note-content h1,
+.note-content h2,
+.note-content h3,
+.note-content h4,
+.note-content h5,
+.note-content h6 {
+  font-family: var(--font-display);
+  color: oklch(22% 0.02 60);
+  line-height: 1.3;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+.note-content h1 { font-size: 1.5em; }
+.note-content h2 { font-size: 1.3em; }
+.note-content h3 { font-size: 1.15em; }
+.note-content h4,
+.note-content h5,
+.note-content h6 { font-size: 1em; }
+.note-content h1:first-child,
+.note-content h2:first-child,
+.note-content h3:first-child { margin-top: 0; }
+.note-content .overlay-p,
+.note-content p {
+  margin: 0 0 0.85em;
+}
+.note-content .overlay-p:last-child,
+.note-content p:last-child { margin-bottom: 0; }
+.note-content ul,
+.note-content ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
+}
+.note-content li { margin-bottom: 0.25em; }
+.note-content li:last-child { margin-bottom: 0; }
+.note-content blockquote {
+  margin: 0 0 0.85em;
+  padding: 0.25em 0.9em;
+  border-left: 3px solid oklch(43% 0.02 60 / 25%);
+  color: oklch(40% 0.02 60);
+  font-style: italic;
+}
+.note-content a {
+  color: oklch(55% 0.10 50);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.note-content a:hover { color: oklch(45% 0.10 50); }
+.note-content strong { font-weight: 600; color: oklch(22% 0.02 60); }
+.note-content em { font-style: italic; }
+.note-content .overlay-code,
+.note-content pre {
+  background: oklch(43% 0.02 60 / 8%);
+  border-radius: 8px;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: oklch(28% 0.02 60);
+  margin: 0 0 0.85em;
+}
+.note-content .overlay-code:last-child,
+.note-content pre:last-child { margin-bottom: 0; }
+.note-content code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: oklch(43% 0.02 60 / 8%);
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+}
+.note-content .overlay-code code,
+.note-content pre code {
+  background: transparent;
+  padding: 0;
+}
+.note-content hr {
+  border: none;
+  border-top: 1px solid oklch(43% 0.02 60 / 18%);
+  margin: 1.2em 0;
+}
+.note-content img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0 0 0.85em;
+}
+.note-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.85em;
+  font-size: 0.95em;
+}
+.note-content th,
+.note-content td {
+  border: 1px solid oklch(43% 0.02 60 / 18%);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.note-content th { background: oklch(43% 0.02 60 / 8%); font-weight: 600; }
+
+.note-loading,
+.note-error,
+.note-empty {
+  width: 100%;
+  max-width: 680px;
+  text-align: center;
+  padding: 2.5rem 1rem;
+  font-size: 14px;
+  color: var(--muted);
+}
+.note-loading { display: inline-flex; align-items: center; gap: 8px; }
+.note-loading-inline {
+  width: auto;
+  padding: 10px 14px;
+  margin-top: 12px;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.note-error { color: var(--danger); }
+.note-empty { font-style: italic; color: var(--faint); }
+
+/* ════════════════════════════════════════════════════════════════════
+   Float-in stagger animations
+   ════════════════════════════════════════════════════════════════════ */
+.scene-inner > * {
+  animation: float-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.topbar          { animation-delay: 0s; }
+.image-stage     { animation-delay: 0.08s; }
+.description-panel { animation-delay: 0.16s; }
+.sidebar         { animation-delay: 0.20s; }
+.data-row        { animation-delay: 0.24s; }
+.action-area     { animation-delay: 0.32s; }
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(20px) translateZ(-30px); }
+  to   { opacity: 1; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Reduced motion
+   ════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .scene-inner > *,
+  .spatial-scene,
+  .image-frame,
+  .close-btn,
+  .btn-delete {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Mobile responsive
+   ════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .spatial-scene { padding: 2vh 4vw; perspective: none; }
+  .scene-inner { transform: none !important; }
+  .image-frame { border-radius: 12px; height: 45vh; }
+  .photo-skeleton { height: 45vh; }
+  .description-panel { padding: 14px 18px; border-radius: 12px; }
+  .description-text { font-size: 13px; line-height: 1.65; }
+  .data-row { flex-direction: column; gap: 8px; }
+  .data-panel { min-width: 100%; border-radius: 10px; }
+  .topbar { margin-bottom: 1.5vh; }
+  .image-stage, .description-panel, .data-row, .action-area, .sidebar {
+    transform: none !important;
+  }
+  .chat-view-thread { max-height: 60vh; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Chat conversation view — message bubbles in a thread
+   ════════════════════════════════════════════════════════════════════ */
+.chat-view { max-width: 680px; width: 100%; transform: translateZ(10px); }
+.chat-view-header {
+  padding: 1.5vh 0 2vh;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 1vh;
+  transform: translateZ(10px);
+}
+.chat-view-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.chat-view-date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.chat-view-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 1.5vh 0 2vh;
+  max-height: 52vh;
+  overflow-y: auto;
+  scrollbar-color: var(--accent-dim) transparent;
+}
+.chat-view-thread::-webkit-scrollbar { width: 3px; }
+.chat-view-thread::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+.cv-msg {
+  max-width: 82%;
+  padding: 14px 18px;
+  border-radius: 18px;
+  font-size: 15px;
+  line-height: 1.55;
+  animation: cvFloatIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.cv-msg.cv-user {
+  align-self: flex-end;
+  background: oklch(82% 0.14 210 / 12%);
+  border: 1px solid oklch(82% 0.14 210 / 18%);
+  color: var(--fg);
+  border-bottom-right-radius: 4px;
+  font-weight: 600;
+}
+.cv-msg.cv-assistant {
+  align-self: flex-start;
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--hairline);
+  color: oklch(82% 0.008 250);
+  border-bottom-left-radius: 4px;
+}
+.cv-msg-text { white-space: pre-wrap; word-break: break-word; }
+.cv-msg-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  opacity: 0.6;
+}
+.cv-msg.cv-user .cv-msg-label { color: var(--accent); }
+.cv-msg.cv-assistant .cv-msg-label { color: var(--accent-purple); }
+@keyframes cvFloatIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-view-linked {
+  padding: 1vh 0 1.5vh;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.chat-view-linked-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  flex-shrink: 0;
+}
+.chat-view-thumbs {
+  display: flex;
+  gap: 6px;
+}
+.chat-view-thumbs img {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--hairline);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Tab switching JS helpers
+   ════════════════════════════════════════════════════════════════════ */
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     DEMO 1: Photo node with EXIF, filmstrip, people, events
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="spatial-scene" id="photo-overlay">
+  <div class="scene-inner">
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="status-pill is-complete">
+          <span class="status-dot"></span>
+          <span>Processed</span>
+        </div>
+        <span class="filename">Photos from Yesterday</span>
+      </div>
+      <button class="close-btn" aria-label="Close details (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+
+    <div class="image-stage">
+      <div class="image-frame">
+        <div class="photo-skeleton">
+          <div class="skeleton-shimmer"></div>
+        </div>
+        <img class="photo photo-hidden" src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200" alt="Sunset over mountains" onload="this.classList.remove('photo-hidden'); this.previousElementSibling.style.display='none';">
+        <div class="image-tags">
+          <span class="tag tag-loc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+            Yosemite Valley
+          </span>
+          <span class="tag tag-date">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            5:42 PM
+          </span>
+        </div>
+      </div>
+
+      <div class="filmstrip">
+        <button class="filmstrip-nav filmstrip-nav-prev" disabled aria-label="Previous photo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="filmstrip-track">
+          <div class="filmstrip-day-group">
+            <div class="filmstrip-day-label">Yesterday</div>
+            <div class="filmstrip-day-photos">
+              <button class="filmstrip-thumb is-active" aria-label="Photo Sunset">
+                <img src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=160" alt="Sunset" loading="lazy">
+              </button>
+              <button class="filmstrip-thumb" aria-label="Photo Meadow">
+                <img src="https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=160" alt="Meadow" loading="lazy">
+              </button>
+              <button class="filmstrip-thumb" aria-label="Photo Lake">
+                <img src="https://images.unsplash.com/photo-1433086606539-8d21e8b4e035?w=160" alt="Lake" loading="lazy">
+              </button>
+            </div>
+          </div>
+          <div class="filmstrip-day-group">
+            <div class="filmstrip-day-label">Today</div>
+            <div class="filmstrip-day-photos">
+              <button class="filmstrip-thumb" aria-label="Photo Sunrise">
+                <img src="https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=160" alt="Sunrise" loading="lazy">
+              </button>
+            </div>
+          </div>
+        </div>
+        <button class="filmstrip-nav filmstrip-nav-next" aria-label="Next photo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <nav class="tabs">
+        <button class="tab active" data-tab="details">Details</button>
+        <button class="tab" data-tab="insights">AI Insights</button>
+        <button class="tab" data-tab="connections">Related</button>
+      </nav>
+
+      <div class="sidebar-content">
+        <!-- Details tab -->
+        <div class="tab-content active" data-tab-content="details">
+          <div class="description-panel">
+            <div class="description-label">Description</div>
+            <div class="description-text">
+              <p class="overlay-p">Golden hour at Yosemite Valley — the sunset painted the granite walls of El Capitan in warm amber light while the Merced River reflected the sky&rsquo;s palette. Shot from Tunnel View overlook on a clear winter evening.</p>
+            </div>
+          </div>
+
+          <div class="data-row">
+            <section class="data-panel">
+              <div class="panel-label">Location</div>
+              <div class="chip-row">
+                <span class="chip chip-loc">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                  Yosemite Valley, California
+                </span>
+              </div>
+            </section>
+
+            <section class="data-panel">
+              <div class="panel-label">People<span class="count">3</span></div>
+              <div class="people-row">
+                <div class="person" tabindex="0" role="button">
+                  <div class="person-initials">AL</div>
+                  <span class="person-name">Alex Liu</span>
+                </div>
+                <div class="person" tabindex="0" role="button">
+                  <div class="person-initials">MR</div>
+                  <span class="person-name">Maya Rodriguez</span>
+                </div>
+                <div class="person" tabindex="0" role="button">
+                  <div class="person-initials person-unknown">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+                  </div>
+                  <span class="person-name">Unknown</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="data-panel">
+              <div class="panel-label">Events<span class="count">1</span></div>
+              <div class="chip-row">
+                <span class="chip chip-event">
+                  <span class="event-dot"></span>
+                  Winter Solstice Gathering
+                </span>
+              </div>
+            </section>
+          </div>
+
+          <div class="data-row" style="margin-top: 12px;">
+            <section class="data-panel exif-panel">
+              <div class="panel-label">Exif</div>
+              <div class="exif-group">
+                <div class="exif-group-label">Camera</div>
+                <div class="exif-grid">
+                  <div class="exif-row"><span class="exif-label">Camera</span><span class="exif-value">Sony A7IV</span></div>
+                  <div class="exif-row"><span class="exif-label">Date</span><span class="exif-value">2024-12-21 at 17:42</span></div>
+                  <div class="exif-row"><span class="exif-label">Lens</span><span class="exif-value">FE 24-70mm f/2.8 GM</span></div>
+                </div>
+              </div>
+              <div class="exif-group">
+                <div class="exif-group-label">Exposure</div>
+                <div class="exif-grid">
+                  <div class="exif-row"><span class="exif-label">f/</span><span class="exif-value">2.8</span></div>
+                  <div class="exif-row"><span class="exif-label">ISO</span><span class="exif-value">400</span></div>
+                  <div class="exif-row"><span class="exif-label">Focal Length</span><span class="exif-value">35mm</span></div>
+                  <div class="exif-row"><span class="exif-label">Exposure</span><span class="exif-value">1/250s</span></div>
+                </div>
+              </div>
+              <div class="exif-group">
+                <div class="exif-group-label">Image</div>
+                <div class="exif-grid">
+                  <div class="exif-row"><span class="exif-label">Width</span><span class="exif-value">6000</span></div>
+                  <div class="exif-row"><span class="exif-label">Height</span><span class="exif-value">4000</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <!-- Insights tab -->
+        <div class="tab-content" data-tab-content="insights">
+          <div class="data-row">
+            <section class="data-panel">
+              <div class="panel-label">Entities<span class="count">4</span></div>
+              <div class="chip-row">
+                <span class="chip chip-entity chip-accent">El Capitan</span>
+                <span class="chip chip-entity">Merced River</span>
+                <span class="chip chip-entity">Granite</span>
+                <span class="chip chip-entity">Tunnel View</span>
+              </div>
+            </section>
+
+            <section class="data-panel">
+              <div class="panel-label">Locations<span class="count">1</span></div>
+              <div class="chip-row">
+                <span class="chip chip-loc">Yosemite Valley, California</span>
+              </div>
+            </section>
+
+            <section class="data-panel">
+              <div class="panel-label">Events<span class="count">1</span></div>
+              <div class="chip-row">
+                <span class="chip chip-event">
+                  <span class="event-dot"></span>
+                  Winter Solstice Gathering
+                </span>
+              </div>
+            </section>
+
+            <section class="data-panel">
+              <div class="panel-label">People<span class="count">2</span></div>
+              <div class="people-row">
+                <div class="person" tabindex="0" role="button">
+                  <div class="person-initials">AL</div>
+                  <span class="person-name">Alex Liu</span>
+                </div>
+                <div class="person" tabindex="0" role="button">
+                  <div class="person-initials">MR</div>
+                  <span class="person-name">Maya Rodriguez</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <!-- Connections tab -->
+        <div class="tab-content" data-tab-content="connections">
+          <div class="data-row">
+            <section class="data-panel exif-panel">
+              <div class="panel-label">Connected Entities<span class="count">4</span></div>
+              <div class="exif-grid">
+                <div class="exif-row connection-item"><span class="exif-label connection-kind">location</span><span class="exif-value connection-name">Yosemite Valley</span></div>
+                <div class="exif-row connection-item"><span class="exif-label connection-kind">person</span><span class="exif-value connection-name">Alex Liu</span></div>
+                <div class="exif-row connection-item"><span class="exif-label connection-kind">person</span><span class="exif-value connection-name">Maya Rodriguez</span></div>
+                <div class="exif-row connection-item"><span class="exif-label connection-kind">event</span><span class="exif-value connection-name">Winter Solstice Gathering</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="action-area">
+      <button class="btn-delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Delete Photo
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     DEMO 2: Conversation node (hidden by default)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="spatial-scene" id="conv-overlay" style="display:none;">
+  <div class="scene-inner">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="status-pill is-chat">
+          <span class="status-dot"></span>
+          <span>Conversation</span>
+        </div>
+        <span class="filename" title="conversation-travel-planning.json">conversation-travel-planning.json</span>
+      </div>
+      <button class="close-btn" aria-label="Close details (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+
+    <div class="image-stage">
+      <div class="chat-view">
+        <div class="chat-view-header">
+          <div class="chat-view-kicker">Conversation · 4 turns</div>
+          <div class="chat-view-date">Jan 15, 2025, 10:30 AM</div>
+        </div>
+
+        <div class="chat-view-thread">
+          <div class="cv-msg cv-user" style="animation-delay:0s">
+            <div class="cv-msg-label">You</div>
+            <div class="cv-msg-text">What are some good hiking trails near Yosemite for beginners?</div>
+          </div>
+          <div class="cv-msg cv-assistant" style="animation-delay:0.06s">
+            <div class="cv-msg-label">Assistant</div>
+            <p class="overlay-p">Here are some excellent beginner-friendly trails near Yosemite:</p>
+            <p class="overlay-p"><strong>Lower Yosemite Falls</strong> — A flat 1-mile loop with stunning waterfall views. Accessible year-round.</p>
+            <p class="overlay-p"><strong>Mirror Lake</strong> — 2.4 miles round-trip, mostly paved. Beautiful reflections of Half Dome in spring.</p>
+            <p class="overlay-p"><strong>Bridalveil Fall</strong> — Short 0.5-mile walk to the base of the 617-foot waterfall.</p>
+          </div>
+          <div class="cv-msg cv-user" style="animation-delay:0.12s">
+            <div class="cv-msg-label">You</div>
+            <div class="cv-msg-text">Which one has the best views for photography?</div>
+          </div>
+          <div class="cv-msg cv-assistant" style="animation-delay:0.18s">
+            <div class="cv-msg-label">Assistant</div>
+            <p class="overlay-p"><strong>Mirror Lake</strong> is the photographer's choice. In spring and early summer, the still water creates perfect reflections of Half Dome. Go early morning for the best light and fewest crowds.</p>
+          </div>
+        </div>
+
+        <div class="chat-view-linked">
+          <span class="chat-view-linked-label">Linked photos</span>
+          <div class="chat-view-thumbs">
+            <img src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=80" alt="">
+            <img src="https://images.unsplash.com/photo-1433086606539-8d21e8b4e035?w=80" alt="">
+          </div>
+        </div>
+
+        <div class="action-area">
+          <button class="btn-delete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Delete Conversation
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     DEMO 3: Note node (hidden by default)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="spatial-scene" id="note-overlay" style="display:none;">
+  <div class="scene-inner">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="filename">Project Notes — January 2025</span>
+      </div>
+      <button class="close-btn" aria-label="Close details (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+
+    <div class="image-stage">
+      <div class="note-reader">
+        <div class="note-content">
+          <h1>Knowledge Graph Architecture</h1>
+          <p class="overlay-p">The knowledge graph uses a <strong>document-centric</strong> architecture where every photo, note, and conversation is indexed as a node. Relationships between entities are extracted via <code>LightRAG</code> processing.</p>
+          <h2>Key Components</h2>
+          <ul>
+            <li><strong>Graph Store</strong> — Holds all nodes and edges in memory, synced from the backend</li>
+            <li><strong>Layout Engine</strong> — Force-directed positioning with kind-based clustering</li>
+            <li><strong>Node Overlay</strong> — Detail panel showing EXIF, people, and AI insights</li>
+          </ul>
+          <h3>Rendering Pipeline</h3>
+          <pre class="overlay-code"><code>photo → process() → extract(entities) → build(edges) → layout(force) → render(canvas)</code></pre>
+          <blockquote>A well-structured knowledge graph transforms a photo library from a flat list into an explorable semantic space.</blockquote>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <nav class="tabs">
+        <button class="tab active" data-tab="details">Details</button>
+        <button class="tab" data-tab="insights">AI Insights</button>
+      </nav>
+
+      <div class="sidebar-content">
+        <div class="tab-content active" data-tab-content="details">
+          <div class="data-row">
+            <section class="data-panel">
+              <div class="panel-label">Entities<span class="count">3</span></div>
+              <div class="chip-row">
+                <span class="chip chip-entity chip-accent">LightRAG</span>
+                <span class="chip chip-entity">Force-directed layout</span>
+                <span class="chip chip-entity">EXIF</span>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="tab-content" data-tab-content="insights">
+          <div class="data-row">
+            <section class="data-panel">
+              <div class="panel-label">Entities<span class="count">3</span></div>
+              <div class="chip-row">
+                <span class="chip chip-entity chip-accent">LightRAG</span>
+                <span class="chip chip-entity">Force-directed layout</span>
+                <span class="chip chip-entity">EXIF</span>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="action-area">
+      <button class="btn-delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Delete Note
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Demo switcher + tab logic
+     ═══════════════════════════════════════════════════════════════════ -->
+<div style="position:fixed;top:12px;left:12px;z-index:3000;display:flex;gap:6px;">
+  <button onclick="showDemo('photo-overlay')" style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;padding:6px 14px;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--hairline);border-radius:100px;color:var(--fg);cursor:pointer;">Photo</button>
+  <button onclick="showDemo('conv-overlay')" style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;padding:6px 14px;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--hairline);border-radius:100px;color:var(--fg);cursor:pointer;">Conversation</button>
+  <button onclick="showDemo('note-overlay')" style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;padding:6px 14px;background:var(--glass);backdrop-filter:blur(12px);border:1px solid var(--hairline);border-radius:100px;color:var(--fg);cursor:pointer;">Note</button>
+</div>
+
+<script>
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const sidebar = tab.closest('.sidebar');
+      sidebar.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const target = tab.getAttribute('data-tab');
+      sidebar.querySelectorAll('.tab-content').forEach(tc => {
+        tc.classList.toggle('active', tc.getAttribute('data-tab-content') === target);
+      });
+    });
+  });
+
+  // Demo switcher
+  function showDemo(id) {
+    document.querySelectorAll('.spatial-scene').forEach(el => el.style.display = 'none');
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = '';
+      // Re-trigger animations
+      el.querySelectorAll('.scene-inner > *').forEach(child => {
+        child.style.animation = 'none';
+        child.offsetHeight; // reflow
+        child.style.animation = '';
+      });
+    }
+  }
+
+  // Close buttons
+  document.querySelectorAll('.close-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.spatial-scene').style.display = 'none';
+    });
+  });
+</script>
+
+</body>
+</html>

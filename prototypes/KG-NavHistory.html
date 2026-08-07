@@ -1,0 +1,1206 @@
+<!-- Synced from: ui/src/lib/components/ui/NavDrawer.svelte + HistoryPanel.svelte -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0a0e17',
+              surface: '#111827',
+              'surface-2': '#1a2235',
+              border: '#1e2d45',
+              text: '#c8d6e5',
+              'text-dim': '#5a6b80',
+              cyan: '#00d4ff',
+              'cyan-dim': '#007a99',
+              purple: '#a855f7',
+              'purple-dim': '#6b21a8',
+              green: '#00ff88',
+              'green-dim': '#00804a',
+              orange: '#ff8c00',
+              red: '#ff3366',
+              yellow: '#ffd600',
+            }
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace],
+            sans: ['Inter', 'SF Pro Display', system-ui, sans-serif],
+          }
+        }
+      }
+    }
+  </script>
+  <title>NavDrawer + HistoryPanel Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ===== Design Tokens (from app.css @theme) ===== */
+    :root {
+      --color-cyber-bg: #0a0e17;
+      --color-cyber-surface: #111827;
+      --color-cyber-surface-2: #1a2235;
+      --color-cyber-border: #1e2d45;
+      --color-cyber-text: #c8d6e5;
+      --color-cyber-text-dim: #5a6b80;
+      --color-cyber-cyan: #00d4ff;
+      --color-cyber-cyan-dim: #007a99;
+      --color-cyber-purple: #a855f7;
+      --color-cyber-purple-dim: #6b21a8;
+      --color-cyber-green: #00ff88;
+      --color-cyber-green-dim: #00804a;
+      --color-cyber-orange: #ff8c00;
+      --color-cyber-red: #ff3366;
+      --color-cyber-yellow: #ffd600;
+      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
+      color-scheme: dark;
+    }
+
+    /* ===== Base (from app.css @layer base) ===== */
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--color-cyber-bg);
+      color: var(--color-cyber-text);
+      margin: 0;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--color-cyber-surface);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--color-cyber-border);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--color-cyber-cyan-dim);
+    }
+
+    /* ===== Utility classes (from app.css) ===== */
+    .glow-cyan {
+      box-shadow: 0 0 15px rgba(0, 212, 255, 0.3), 0 0 30px rgba(0, 212, 255, 0.1);
+    }
+
+    .glow-purple {
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.3), 0 0 30px rgba(168, 85, 247, 0.1);
+    }
+
+    .glow-green {
+      box-shadow: 0 0 15px rgba(0, 255, 136, 0.3), 0 0 30px rgba(0, 255, 136, 0.1);
+    }
+
+    .text-glow-cyan {
+      text-shadow: 0 0 10px rgba(0, 212, 255, 0.5), 0 0 20px rgba(0, 212, 255, 0.2);
+    }
+
+    .text-glow-purple {
+      text-shadow: 0 0 10px rgba(168, 85, 247, 0.5), 0 0 20px rgba(168, 85, 247, 0.2);
+    }
+
+    /* ===== Keyframes (from app.css) ===== */
+    @keyframes pulse-glow-anim {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    @keyframes scan-line {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+
+    @keyframes data-flow {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+
+    @keyframes fade-in-up {
+      0% { opacity: 0; transform: translateY(10px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slide-in-right {
+      0% { opacity: 0; transform: translateX(20px); }
+      100% { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ===== NavDrawer styles (from NavDrawer.svelte <style>) ===== */
+    .nav-drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      animation: backdrop-in 200ms ease-out;
+    }
+
+    .nav-drawer-panel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 280px;
+      display: flex;
+      flex-direction: column;
+      background: var(--color-cyber-bg, #0a0e1a);
+      border-right: 1px solid var(--color-cyber-border);
+      box-shadow: 8px 0 40px rgba(0, 0, 0, 0.6), 2px 0 20px rgba(0, 212, 255, 0.05);
+      animation: slide-in-left 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .nav-drawer-bottom {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      max-height: 85dvh;
+      border-right: none;
+      border-top: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6), 0 -2px 20px rgba(0, 212, 255, 0.05);
+      animation: slide-in-bottom 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .nav-drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      background: var(--color-cyber-surface);
+      border-bottom: 1px solid var(--color-cyber-border);
+      flex-shrink: 0;
+    }
+
+    .nav-icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid var(--color-cyber-border);
+      background: var(--color-cyber-surface-2);
+      color: var(--color-cyber-text-dim);
+      transition: all 200ms ease;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .nav-icon-btn:hover {
+      border-color: var(--color-cyber-cyan-dim);
+      background: var(--color-cyber-surface-2);
+      color: var(--color-cyber-text);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.1);
+    }
+
+    .nav-icon-btn:active {
+      background: rgba(0, 212, 255, 0.1);
+      transform: scale(0.92);
+    }
+
+    @media (max-width: 768px) {
+      .nav-icon-btn {
+        width: 44px;
+        height: 44px;
+      }
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 10px 12px;
+      text-align: left;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-cyber-text-dim);
+      cursor: pointer;
+      transition: all 200ms ease;
+      position: relative;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .nav-item:hover:not(.nav-item-active) {
+      background: var(--color-cyber-surface-2);
+      color: var(--color-cyber-text);
+      border-color: var(--color-cyber-border);
+    }
+
+    .nav-item:active {
+      background: rgba(0, 212, 255, 0.1);
+      transform: scale(0.98);
+    }
+
+    .nav-item-active {
+      background: var(--color-cyber-surface);
+      color: var(--color-cyber-cyan);
+      border-color: var(--color-cyber-cyan-dim);
+      box-shadow: 0 0 12px rgba(0, 212, 255, 0.12), inset 0 0 20px rgba(0, 212, 255, 0.03);
+    }
+
+    .nav-item-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--color-cyber-surface-2);
+      border: 1px solid var(--color-cyber-border);
+      flex-shrink: 0;
+      transition: all 200ms ease;
+    }
+
+    .nav-item-active .nav-item-icon {
+      background: var(--color-cyber-cyan-dim);
+      border-color: var(--color-cyber-cyan-dim);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.25);
+    }
+
+    .nav-drawer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--color-cyber-surface);
+      border-top: 1px solid var(--color-cyber-border);
+      flex-shrink: 0;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-cyber-text-dim);
+    }
+
+    .nav-item-glow {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), transparent);
+      pointer-events: none;
+    }
+
+    @keyframes backdrop-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slide-in-left {
+      from { transform: translateX(-100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    @keyframes slide-in-bottom {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* ===== HistoryPanel styles (from HistoryPanel.svelte <style>) ===== */
+    .mobile-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      animation: backdrop-in 200ms ease-out;
+    }
+
+    .mobile-sheet {
+      display: flex;
+      flex-direction: column;
+      background: var(--color-cyber-bg, #0a0e17);
+      animation: sheet-enter 300ms cubic-bezier(0.16, 1, 0.3, 1);
+      overflow: hidden;
+    }
+
+    .mobile-sheet-bottom {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 85dvh;
+      border-radius: 16px 16px 0 0;
+      border-top: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+      box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6), 0 -2px 20px rgba(0, 212, 255, 0.05);
+    }
+
+    .mobile-sheet-handle {
+      display: flex;
+      justify-content: center;
+      padding: 8px 0 4px;
+    }
+
+    .mobile-sheet-handle-bar {
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(200, 214, 229, 0.3);
+    }
+
+    .history-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      animation: backdrop-in 200ms ease-out;
+    }
+
+    .history-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      background: var(--color-cyber-bg, #0a0e1a);
+      border-left: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+      box-shadow: -8px 0 40px rgba(0, 0, 0, 0.6), -2px 0 20px rgba(0, 212, 255, 0.05);
+      animation: slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @media (max-width: 768px) {
+      .history-panel {
+        top: auto;
+        right: 0;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: 85dvh;
+        border-left: none;
+        border-top: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6), 0 -2px 20px rgba(0, 212, 255, 0.05);
+        animation: slide-in-bottom 300ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+    }
+
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-cyber-border, rgba(0, 212, 255, 0.15));
+      background: var(--color-cyber-surface, rgba(13, 18, 36, 0.85));
+      flex-shrink: 0;
+    }
+
+    .history-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+
+    .conv-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+      padding: 10px 12px;
+      text-align: left;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-cyber-text);
+      cursor: pointer;
+      transition: all 200ms ease;
+    }
+
+    .conv-item:hover:not(.conv-item-active) {
+      background: var(--color-cyber-surface-2);
+      border-color: var(--color-cyber-border);
+    }
+
+    .conv-item-active {
+      background: var(--color-cyber-surface);
+      border-color: var(--color-cyber-cyan-dim);
+      box-shadow: 0 0 12px rgba(0, 212, 255, 0.08);
+    }
+
+    .conv-item-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--color-cyber-surface-2);
+      border: 1px solid var(--color-cyber-border);
+      flex-shrink: 0;
+      margin-top: 1px;
+      transition: all 200ms ease;
+    }
+
+    .conv-item-active .conv-item-icon {
+      background: var(--color-cyber-cyan-dim);
+      border-color: var(--color-cyber-cyan-dim);
+    }
+
+    .unread-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 9999px;
+      background: var(--color-cyber-cyan);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+      flex-shrink: 0;
+    }
+
+    @keyframes slide-in {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
+
+    @keyframes sheet-enter {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ===== StatusDot (inlined from StatusDot.svelte) ===== */
+    .status-dot {
+      display: inline-block;
+      border-radius: 9999px;
+    }
+    .status-dot-connected {
+      background: var(--color-cyber-green);
+      animation: pulse-glow 2s ease-in-out infinite;
+      box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+    }
+    .status-dot-disconnected {
+      background: rgba(90, 107, 128, 0.5);
+    }
+    .status-dot-busy {
+      background: var(--color-cyber-orange);
+      animation: pulse-glow 2s ease-in-out infinite;
+      box-shadow: 0 0 6px rgba(255, 140, 0, 0.5);
+    }
+    .status-dot-error {
+      background: var(--color-cyber-red);
+      box-shadow: 0 0 6px rgba(255, 51, 102, 0.5);
+    }
+
+    /* ===== Prototype-specific helpers ===== */
+    .proto-controls {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      display: flex;
+      gap: 10px;
+      padding: 10px 16px;
+      background: var(--color-cyber-surface);
+      border: 1px solid var(--color-cyber-border);
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    }
+    .proto-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--color-cyber-border);
+      background: var(--color-cyber-surface-2);
+      color: var(--color-cyber-text-dim);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: all 200ms ease;
+      -webkit-tap-highlight-color: transparent;
+      font-family: var(--font-sans);
+    }
+    .proto-btn:hover {
+      border-color: var(--color-cyber-cyan-dim);
+      color: var(--color-cyber-cyan);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.1);
+    }
+    .proto-btn:active {
+      background: rgba(0, 212, 255, 0.1);
+      transform: scale(0.96);
+    }
+    .proto-btn.active {
+      border-color: var(--color-cyber-cyan-dim);
+      color: var(--color-cyber-cyan);
+      background: rgba(0, 212, 255, 0.08);
+    }
+
+    /* Simple SVG icon placeholder */
+    .icon-svg {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .icon-svg svg {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ===== Mobile bottom sheet variants ===== */
+    /* NavDrawer mobile: rendered with nav-drawer-bottom class */
+    /* HistoryPanel mobile: rendered with mobile-sheet-backdrop + mobile-sheet mobile-sheet-bottom */
+
+    /* ===== Responsive toggle for prototype views ===== */
+    @media (max-width: 768px) {
+      .proto-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+        font-size: 0.7rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Prototype Toggle Controls ===== -->
+  <div class="proto-controls">
+    <button class="proto-btn" id="btn-nav" onclick="toggleNav()">&#9776; Nav</button>
+    <button class="proto-btn" id="btn-history" onclick="toggleHistory()">&#128339; History</button>
+    <button class="proto-btn" id="btn-tab" onclick="switchTab()">&#8633; Switch Tab</button>
+    <button class="proto-btn" id="btn-status" onclick="cycleStatus()">&#10227; Status</button>
+    <button class="proto-btn" id="btn-mobile" onclick="toggleMobile()">&#128241; Mobile</button>
+  </div>
+
+  <!-- ===== Main content area (simulated) ===== -->
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;opacity:0.4;">
+    <p style="font-size:0.875rem;color:var(--color-cyber-text-dim);text-align:center;padding:0 2rem;">
+      Main app content area<br>
+      <small>Use the controls above to toggle the NavDrawer and HistoryPanel</small>
+    </p>
+  </div>
+
+  <!-- ===== NavDrawer Component (Desktop: left slide-in panel) ===== -->
+  <div class="nav-drawer-backdrop hidden" id="nav-backdrop" onclick="closeNavBackdrop(event)">
+    <aside class="nav-drawer-panel" id="nav-panel">
+
+      <!-- nav-drawer-header -->
+      <div class="nav-drawer-header">
+        <div style="display:flex;align-items:center;gap:0.625rem;">
+          <div style="display:flex;height:2rem;width:2rem;align-items:center;justify-content:center;border-radius:0.5rem;border:1px solid rgba(0,212,255,0.2);background:rgba(0,212,255,0.1);">
+            <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </span>
+          </div>
+          <div>
+            <h2 style="font-size:0.875rem;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--color-cyber-text);" class="text-glow-cyan">Nexus</h2>
+          </div>
+        </div>
+        <button class="nav-icon-btn" aria-label="Close menu" onclick="toggleNav()">
+          <span class="icon-svg" style="color:currentColor;">
+            <svg width="14" height="14" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- nav items -->
+      <nav style="flex:1 1 0%;overflow-y:auto;padding:0.75rem;">
+        <div style="display:flex;flex-direction:column;gap:0.375rem;">
+
+          <!-- Graph tab (active) -->
+          <button class="nav-item nav-item-active" id="nav-tab-graph" onclick="setActiveTab('graph')">
+            <div class="nav-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+                <svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/><line x1="9.5" y1="10.5" x2="5.5" y2="7.5"/><line x1="14.5" y1="10.5" x2="18.5" y2="7.5"/><line x1="9.5" y1="13.5" x2="5.5" y2="16.5"/><line x1="14.5" y1="13.5" x2="18.5" y2="16.5"/></svg>
+              </span>
+            </div>
+            <span style="font-size:0.875rem;font-weight:500;">Graph</span>
+            <div class="nav-item-glow"></div>
+          </button>
+
+          <!-- Ingest tab -->
+          <button class="nav-item" id="nav-tab-ingestion" onclick="setActiveTab('ingestion')">
+            <div class="nav-item-icon">
+              <span class="icon-svg" style="color:currentColor;">
+                <svg width="18" height="18" viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="22"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+              </span>
+            </div>
+            <span style="font-size:0.875rem;font-weight:500;">Ingest</span>
+          </button>
+
+        </div>
+      </nav>
+
+      <!-- nav-drawer-footer -->
+      <div class="nav-drawer-footer">
+        <div class="status-row">
+          <div class="status-item" title="LightRAG">
+            <span class="status-dot status-dot-connected" id="status-lr" style="width:6px;height:6px;"></span>
+            <span class="status-label">LR</span>
+          </div>
+          <div class="status-item" title="llama-server">
+            <span class="status-dot status-dot-connected" id="status-llm" style="width:6px;height:6px;"></span>
+            <span class="status-label">LLM</span>
+          </div>
+          <span style="font-size:10px;color:rgba(90,107,128,0.5);margin-left:auto;" title="App version">v0.2.0</span>
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button class="nav-icon-btn" title="History" aria-label="Open chat history" onclick="toggleHistory()">
+            <span class="icon-svg" style="color:currentColor;">
+              <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+          </button>
+          <button class="nav-icon-btn" title="Settings" aria-label="Open settings">
+            <span class="icon-svg" style="color:currentColor;">
+              <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </span>
+          </button>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ===== NavDrawer Mobile Bottom Sheet ===== -->
+  <div class="mobile-sheet-backdrop hidden" id="nav-mobile-backdrop" onclick="closeNavMobileBackdrop(event)">
+    <div class="mobile-sheet mobile-sheet-bottom" id="nav-mobile-sheet">
+      <div class="mobile-sheet-handle"><div class="mobile-sheet-handle-bar"></div></div>
+
+      <!-- nav-drawer-header (mobile) -->
+      <div class="nav-drawer-header">
+        <div style="display:flex;align-items:center;gap:0.625rem;">
+          <div style="display:flex;height:2rem;width:2rem;align-items:center;justify-content:center;border-radius:0.5rem;border:1px solid rgba(0,212,255,0.2);background:rgba(0,212,255,0.1);">
+            <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </span>
+          </div>
+          <div>
+            <h2 style="font-size:0.875rem;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--color-cyber-text);" class="text-glow-cyan">Nexus</h2>
+          </div>
+        </div>
+        <button class="nav-icon-btn" aria-label="Close menu" onclick="toggleNav()" style="width:44px;height:44px;">
+          <span class="icon-svg" style="color:currentColor;">
+            <svg width="20" height="20" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- nav items (mobile) -->
+      <nav style="flex:1 1 0%;overflow-y:auto;padding:0.75rem;">
+        <div style="display:flex;flex-direction:column;gap:0.375rem;">
+          <button class="nav-item nav-item-active" id="nav-mobile-tab-graph" onclick="setActiveTabMobile('graph')">
+            <div class="nav-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+                <svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/><line x1="9.5" y1="10.5" x2="5.5" y2="7.5"/><line x1="14.5" y1="10.5" x2="18.5" y2="7.5"/><line x1="9.5" y1="13.5" x2="5.5" y2="16.5"/><line x1="14.5" y1="13.5" x2="18.5" y2="16.5"/></svg>
+              </span>
+            </div>
+            <span style="font-size:0.875rem;font-weight:500;">Graph</span>
+            <div class="nav-item-glow"></div>
+          </button>
+          <button class="nav-item" id="nav-mobile-tab-ingestion" onclick="setActiveTabMobile('ingestion')">
+            <div class="nav-item-icon">
+              <span class="icon-svg" style="color:currentColor;">
+                <svg width="18" height="18" viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="22"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+              </span>
+            </div>
+            <span style="font-size:0.875rem;font-weight:500;">Ingest</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- nav-drawer-footer (mobile) -->
+      <div class="nav-drawer-footer">
+        <div class="status-row">
+          <div class="status-item" title="LightRAG">
+            <span class="status-dot status-dot-connected" id="status-lr-mobile" style="width:6px;height:6px;"></span>
+            <span class="status-label">LR</span>
+          </div>
+          <div class="status-item" title="llama-server">
+            <span class="status-dot status-dot-connected" id="status-llm-mobile" style="width:6px;height:6px;"></span>
+            <span class="status-label">LLM</span>
+          </div>
+          <span style="font-size:10px;color:rgba(90,107,128,0.5);margin-left:auto;" title="App version">v0.2.0</span>
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button class="nav-icon-btn" title="History" aria-label="Open chat history" style="width:44px;height:44px;" onclick="toggleHistory()">
+            <span class="icon-svg" style="color:currentColor;">
+              <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+          </button>
+          <button class="nav-icon-btn" title="Settings" aria-label="Open settings" style="width:44px;height:44px;">
+            <span class="icon-svg" style="color:currentColor;">
+              <svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== HistoryPanel Component (Desktop: right slide-in panel) ===== -->
+  <div class="history-backdrop hidden" id="history-backdrop" onclick="closeHistoryBackdrop(event)">
+    <aside class="history-panel" id="history-panel">
+
+      <!-- history-header -->
+      <div class="history-header">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <div style="display:flex;height:1.75rem;width:1.75rem;align-items:center;justify-content:center;border-radius:0.5rem;background:rgba(0,212,255,0.1);">
+            <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+          </div>
+          <h2 style="font-size:0.875rem;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--color-cyber-text);">History</h2>
+        </div>
+        <button
+          style="display:flex;height:1.75rem;width:1.75rem;flex-shrink:0;align-items:center;justify-content:center;border-radius:0.5rem;border:1px solid rgba(30,45,69,0.3);background:rgba(26,34,53,0.5);color:var(--color-cyber-text-dim);transition:all 200ms ease;cursor:pointer;"
+          onmouseover="this.style.borderColor='rgba(30,45,69,0.6)';this.style.color='var(--color-cyber-text)';this.style.background='var(--color-cyber-surface-2)';"
+          onmouseout="this.style.borderColor='rgba(30,45,69,0.3)';this.style.color='var(--color-cyber-text-dim)';this.style.background='rgba(26,34,53,0.5)';"
+          aria-label="Close history"
+          onclick="toggleHistory()"
+        >
+          <span class="icon-svg" style="color:currentColor;">
+            <svg width="14" height="14" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- history-content -->
+      <div class="history-content" id="history-content">
+
+        <!-- Sample conversation items -->
+        <div style="display:flex;flex-direction:column;gap:0.375rem;">
+
+          <!-- Active conversation -->
+          <button class="conv-item conv-item-active">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-cyan);">Knowledge Graph Architecture</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">12 msgs &middot; 2:34 PM</div>
+            </div>
+          </button>
+
+          <!-- Conversation with unread dot -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">RAG Pipeline Setup</span>
+                <span class="unread-dot"></span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">8 msgs &middot; Yesterday</div>
+            </div>
+          </button>
+
+          <!-- Regular conversation -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">Entity Extraction Testing</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">5 msgs &middot; Mon</div>
+            </div>
+          </button>
+
+          <!-- Another conversation -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">New conversation</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">1 msg &middot; Aug 5</div>
+            </div>
+          </button>
+
+          <!-- Another conversation -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">Graph Visualization Queries</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">3 msgs &middot; Aug 1</div>
+            </div>
+          </button>
+
+        </div>
+
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ===== HistoryPanel Mobile Bottom Sheet ===== -->
+  <div class="mobile-sheet-backdrop hidden" id="history-mobile-backdrop" onclick="closeHistoryMobileBackdrop(event)">
+    <div class="mobile-sheet mobile-sheet-bottom" id="history-mobile-sheet">
+      <div class="mobile-sheet-handle"><div class="mobile-sheet-handle-bar"></div></div>
+
+      <!-- Mobile header: uses h-11 w-11 for close btn (md:h-7 md:w-7 in Svelte, but this is mobile-only) -->
+      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(30,45,69,0.5);padding:0.75rem 1rem;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <div style="display:flex;height:1.75rem;width:1.75rem;align-items:center;justify-content:center;border-radius:0.5rem;background:rgba(0,212,255,0.1);">
+            <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+          </div>
+          <h2 style="font-size:0.875rem;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--color-cyber-text);">History</h2>
+        </div>
+        <button
+          style="display:flex;height:2.75rem;width:2.75rem;flex-shrink:0;align-items:center;justify-content:center;border-radius:0.5rem;border:1px solid rgba(30,45,69,0.3);background:rgba(26,34,53,0.5);color:var(--color-cyber-text-dim);transition:all 200ms ease;cursor:pointer;"
+          class="history-mobile-close-btn"
+          aria-label="Close history"
+          onclick="toggleHistory()"
+        >
+          <span class="icon-svg" style="color:currentColor;">
+            <svg width="20" height="20" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- history content (mobile) -->
+      <div style="flex:1 1 0%;overflow-y:auto;overscroll-behavior:contain;padding:0.75rem;">
+        <div style="display:flex;flex-direction:column;gap:0.375rem;">
+
+          <!-- Active conversation (mobile) -->
+          <button class="conv-item conv-item-active">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-cyan);">Knowledge Graph Architecture</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">12 msgs &middot; 2:34 PM</div>
+            </div>
+          </button>
+
+          <!-- Conversation with unread dot (mobile) -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">RAG Pipeline Setup</span>
+                <span class="unread-dot"></span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">8 msgs &middot; Yesterday</div>
+            </div>
+          </button>
+
+          <!-- Regular conversation (mobile) -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">Entity Extraction Testing</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">5 msgs &middot; Mon</div>
+            </div>
+          </button>
+
+          <!-- New conversation (mobile) -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">New conversation</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">1 msg &middot; Aug 5</div>
+            </div>
+          </button>
+
+          <!-- Graph Visualization (mobile) -->
+          <button class="conv-item">
+            <div class="conv-item-icon">
+              <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+                <svg width="12" height="12" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </span>
+            </div>
+            <div style="min-width:0;flex:1 1 0%;">
+              <div style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;font-weight:500;color:var(--color-cyber-text);">Graph Visualization Queries</span>
+              </div>
+              <div style="font-size:10px;color:rgba(90,107,128,0.5);margin-top:0.125rem;">3 msgs &middot; Aug 1</div>
+            </div>
+          </button>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Empty State HistoryPanel (for demo) ===== -->
+  <div class="history-backdrop hidden" id="history-empty-backdrop" onclick="closeHistoryEmptyBackdrop(event)">
+    <aside class="history-panel">
+      <div class="history-header">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <div style="display:flex;height:1.75rem;width:1.75rem;align-items:center;justify-content:center;border-radius:0.5rem;background:rgba(0,212,255,0.1);">
+            <span class="icon-svg" style="color:var(--color-cyber-cyan);">
+              <svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+          </div>
+          <h2 style="font-size:0.875rem;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--color-cyber-text);">History</h2>
+        </div>
+        <button
+          style="display:flex;height:1.75rem;width:1.75rem;flex-shrink:0;align-items:center;justify-content:center;border-radius:0.5rem;border:1px solid rgba(30,45,69,0.3);background:rgba(26,34,53,0.5);color:var(--color-cyber-text-dim);transition:all 200ms ease;cursor:pointer;"
+          aria-label="Close history"
+          onclick="document.getElementById('history-empty-backdrop').classList.add('hidden');"
+        >
+          <span class="icon-svg" style="color:currentColor;">
+            <svg width="14" height="14" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </span>
+        </button>
+      </div>
+      <div class="history-content">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:4rem;padding-bottom:4rem;text-align:center;">
+          <div style="display:flex;height:3rem;width:3rem;align-items:center;justify-content:center;border-radius:0.75rem;border:1px solid rgba(30,45,69,0.3);background:rgba(26,34,53,0.3);">
+            <span class="icon-svg" style="color:var(--color-cyber-text-dim);">
+              <svg width="20" height="20" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </span>
+          </div>
+          <p style="margin-top:0.75rem;font-size:0.75rem;color:var(--color-cyber-text-dim);">No conversations yet</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // ===== State =====
+    let navOpen = false;
+    let historyOpen = false;
+    let isMobile = false;
+    let activeTab = 'graph'; // 'graph' | 'ingestion'
+    const statuses = ['connected', 'disconnected', 'busy', 'error'];
+    let statusIndex = 0;
+
+    // ===== NavDrawer =====
+    function toggleNav() {
+      navOpen = !navOpen;
+      if (isMobile) {
+        document.getElementById('nav-mobile-backdrop').classList.toggle('hidden', !navOpen);
+      } else {
+        document.getElementById('nav-backdrop').classList.toggle('hidden', !navOpen);
+      }
+      document.getElementById('btn-nav').classList.toggle('active', navOpen);
+    }
+
+    function closeNavBackdrop(e) {
+      if (e.target === e.currentTarget) {
+        navOpen = false;
+        document.getElementById('nav-backdrop').classList.add('hidden');
+        document.getElementById('btn-nav').classList.remove('active');
+      }
+    }
+
+    function closeNavMobileBackdrop(e) {
+      if (e.target === e.currentTarget) {
+        navOpen = false;
+        document.getElementById('nav-mobile-backdrop').classList.add('hidden');
+        document.getElementById('btn-nav').classList.remove('active');
+      }
+    }
+
+    // ===== HistoryPanel =====
+    function toggleHistory() {
+      historyOpen = !historyOpen;
+      if (isMobile) {
+        document.getElementById('history-mobile-backdrop').classList.toggle('hidden', !historyOpen);
+      } else {
+        document.getElementById('history-backdrop').classList.toggle('hidden', !historyOpen);
+      }
+      document.getElementById('btn-history').classList.toggle('active', historyOpen);
+      // Close nav if open
+      if (historyOpen && navOpen) {
+        navOpen = false;
+        document.getElementById('nav-backdrop').classList.add('hidden');
+        document.getElementById('nav-mobile-backdrop').classList.add('hidden');
+        document.getElementById('btn-nav').classList.remove('active');
+      }
+    }
+
+    function closeHistoryBackdrop(e) {
+      if (e.target === e.currentTarget) {
+        historyOpen = false;
+        document.getElementById('history-backdrop').classList.add('hidden');
+        document.getElementById('btn-history').classList.remove('active');
+      }
+    }
+
+    function closeHistoryMobileBackdrop(e) {
+      if (e.target === e.currentTarget) {
+        historyOpen = false;
+        document.getElementById('history-mobile-backdrop').classList.add('hidden');
+        document.getElementById('btn-history').classList.remove('active');
+      }
+    }
+
+    function closeHistoryEmptyBackdrop(e) {
+      if (e.target === e.currentTarget) {
+        document.getElementById('history-empty-backdrop').classList.add('hidden');
+      }
+    }
+
+    // ===== Tab switching =====
+    function setActiveTab(tabId) {
+      activeTab = tabId;
+      document.querySelectorAll('#nav-panel .nav-item').forEach(function(btn) {
+        btn.classList.remove('nav-item-active');
+        var glow = btn.querySelector('.nav-item-glow');
+        if (glow) glow.remove();
+      });
+      var activeBtn = document.getElementById('nav-tab-' + tabId);
+      if (activeBtn) {
+        activeBtn.classList.add('nav-item-active');
+        var glowDiv = document.createElement('div');
+        glowDiv.className = 'nav-item-glow';
+        activeBtn.appendChild(glowDiv);
+        var icon = activeBtn.querySelector('.nav-item-icon .icon-svg');
+        if (icon) icon.style.color = 'var(--color-cyber-cyan)';
+      }
+      var inactiveId = tabId === 'graph' ? 'ingestion' : 'graph';
+      var inactiveBtn = document.getElementById('nav-tab-' + inactiveId);
+      if (inactiveBtn) {
+        var inactiveIcon = inactiveBtn.querySelector('.nav-item-icon .icon-svg');
+        if (inactiveIcon) inactiveIcon.style.color = 'currentColor';
+      }
+    }
+
+    function setActiveTabMobile(tabId) {
+      activeTab = tabId;
+      document.querySelectorAll('#nav-mobile-sheet .nav-item').forEach(function(btn) {
+        btn.classList.remove('nav-item-active');
+        var glow = btn.querySelector('.nav-item-glow');
+        if (glow) glow.remove();
+      });
+      var activeBtn = document.getElementById('nav-mobile-tab-' + tabId);
+      if (activeBtn) {
+        activeBtn.classList.add('nav-item-active');
+        var glowDiv = document.createElement('div');
+        glowDiv.className = 'nav-item-glow';
+        activeBtn.appendChild(glowDiv);
+        var icon = activeBtn.querySelector('.nav-item-icon .icon-svg');
+        if (icon) icon.style.color = 'var(--color-cyber-cyan)';
+      }
+      var inactiveId = tabId === 'graph' ? 'ingestion' : 'graph';
+      var inactiveBtn = document.getElementById('nav-mobile-tab-' + inactiveId);
+      if (inactiveBtn) {
+        var inactiveIcon = inactiveBtn.querySelector('.nav-item-icon .icon-svg');
+        if (inactiveIcon) inactiveIcon.style.color = 'currentColor';
+      }
+    }
+
+    // ===== Status cycling =====
+    function cycleStatus() {
+      statusIndex = (statusIndex + 1) % statuses.length;
+      var status = statuses[statusIndex];
+      ['status-lr', 'status-llm', 'status-lr-mobile', 'status-llm-mobile'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.className = 'status-dot status-dot-' + status;
+      });
+    }
+
+    // ===== Mobile toggle =====
+    function toggleMobile() {
+      isMobile = !isMobile;
+      var btn = document.getElementById('btn-mobile');
+      btn.classList.toggle('active', isMobile);
+
+      // Hide any open panels
+      document.getElementById('nav-backdrop').classList.add('hidden');
+      document.getElementById('nav-mobile-backdrop').classList.add('hidden');
+      document.getElementById('history-backdrop').classList.add('hidden');
+      document.getElementById('history-mobile-backdrop').classList.add('hidden');
+      navOpen = false;
+      historyOpen = false;
+      document.getElementById('btn-nav').classList.remove('active');
+      document.getElementById('btn-history').classList.remove('active');
+    }
+
+    // ===== Keyboard handling =====
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        if (navOpen) toggleNav();
+        if (historyOpen) toggleHistory();
+      }
+    });
+  </script>
+
+</body>
+</html>
