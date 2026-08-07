@@ -16,6 +16,7 @@
   import { usePan, type PanCustomEvent, useComposedGesture, pinchComposition, type PinchCustomEvent, type GestureCallback, useSwipe, type SwipeCustomEvent } from 'svelte-gestures';
   import NodeOverlay from './NodeOverlay.svelte';
   import ProcessingOverlay from './ProcessingOverlay.svelte';
+  import ProcessingDock from './ProcessingDock.svelte';
   import type { CanvasNode } from './renderer/types';
 
   const client = new LightragClient();
@@ -737,6 +738,7 @@
 
 {#if sceneManager}
   <ProcessingOverlay {sceneManager} />
+  <ProcessingDock {sceneManager} />
 {/if}
 
 <style>
