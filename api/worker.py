@@ -205,9 +205,17 @@ _claim_tasks: set[asyncio.Task] = set()
 
 
 async def _run_claimed(job: Job) -> None:
-    """Run a claimed job through the both-phase pipeline, releasing the claim semaphore on exit."""
+    """Run a claimed job through the pipeline, releasing the claim semaphore on exit.
+
+    When VLM batch mode is enabled (the default), only phase 1 (EXIF extraction
+    + entity creation) runs automatically so images sit at ``exif_complete``
+    until the user triggers AI processing via the "Process AI Queue" button or
+    the overnight scheduler fires. When batch mode is off, both phases run
+    immediately (legacy behavior).
+    """
+    phase = "exif" if config.vlm_batch_enabled() else "both"
     try:
-        await start_processing(job, phase="both")
+        await start_processing(job, phase=phase)
     finally:
         _claim_semaphore.release()
 
