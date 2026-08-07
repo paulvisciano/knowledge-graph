@@ -900,7 +900,7 @@
   .timeline-pill {
     position: absolute;
     right: 24px;
-    bottom: 24px;
+    top: 24px;
     z-index: 20;
     pointer-events: auto;
   }
@@ -940,7 +940,7 @@
   @media (max-width: 768px) {
     .timeline-pill {
       right: 20px;
-      bottom: 20px;
+      top: 20px;
     }
     .timeline-header {
       padding: 8px 16px;

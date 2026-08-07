@@ -286,7 +286,7 @@
 
   .processing-dock {
     position: absolute;
-    left: 24px;
+    right: 24px;
     bottom: 24px;
     z-index: 30;
     width: 320px;
