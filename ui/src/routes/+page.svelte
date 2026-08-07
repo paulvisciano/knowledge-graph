@@ -935,10 +935,8 @@
       const { att, job } = r.value;
       const photoNodeId = `${att.name} (Photo)`;
       imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
-      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
-      if (att.thumbnailUrl ?? att.dataUrl) {
-        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
-      }
+      // Don't add the Photo node to the graph yet — defer until EXIF data arrives
+      // so it lands in the correct time bucket from the start instead of shifting.
       toTrack.push({ jobId: job.job_id, photoNodeId, att });
     }
 
@@ -1223,10 +1221,8 @@
     try {
       const job = await kgApiClient.createJob(att.file, { insert: true, note });
       imageProcessingStore.startProcessing(photoNodeId, att.name, att.thumbnailUrl ?? att.dataUrl ?? '', job.job_id);
-      graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: att.name });
-      if (att.thumbnailUrl ?? att.dataUrl) {
-        graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
-      }
+      // Don't add the Photo node to the graph yet — defer until EXIF data arrives
+      // so it lands in the correct time bucket from the start instead of shifting.
       consumeJobEvents(job.job_id, photoNodeId, att);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -1306,13 +1302,26 @@
           if (eventName === 'exif_complete' && eventData.exif && typeof eventData.exif === 'object') {
             const exif = eventData.exif as Record<string, unknown>;
             imageProcessingStore.setExifData(photoNodeId, exif);
-            graphStore.mergeNodeProperties(photoNodeId, ['Photo'], exif);
+            // Create the Photo node with EXIF data so it lands in the correct
+            // time bucket immediately — no shifting after layout. If the node
+            // already exists (e.g. from server data or resume), merge EXIF in.
+            const existingNode = graphStore.nodes.find((n) => n.id === photoNodeId);
+            if (existingNode) {
+              graphStore.mergeNodeProperties(photoNodeId, ['Photo'], exif);
+            } else {
+              graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: photoNodeId.replace(' (Photo)', ''), ...exif });
+              if (att.thumbnailUrl ?? att.dataUrl) {
+                graphStore.setPhotoImage(photoNodeId, att.thumbnailUrl ?? att.dataUrl ?? '');
+              }
+            }
           }
 
           if (eventName === 'photo_node_created' || eventName === 'exif_node_created') {
             const nodeId = String(eventData.entity_name ?? eventData.name ?? eventData.id ?? '');
             const labels = Array.isArray(eventData.labels) ? eventData.labels : [eventName === 'photo_node_created' ? 'Photo' : 'ExifEntity'];
-            graphStore.upsertNode(nodeId, labels, eventData as Record<string, unknown>);
+            // Use mergeNodeProperties so we don't wipe EXIF data that was
+            // already merged in from the exif_complete event above.
+            graphStore.mergeNodeProperties(nodeId, labels, eventData as Record<string, unknown>);
             if (eventName === 'photo_node_created' && (att.thumbnailUrl ?? att.dataUrl)) {
               graphStore.setPhotoImage(nodeId, att.thumbnailUrl ?? att.dataUrl);
             }
@@ -1393,7 +1402,8 @@
         const photoNodeId = `${job.file_source} (Photo)`;
         if (imageProcessingStore.getByJobId(job.job_id)) continue;
         imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
-        graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: job.file_source });
+        // Don't add the Photo node to the graph yet — defer until EXIF data arrives
+        // via SSE events so it lands in the correct time bucket from the start.
       }
 
       for (const job of processing) {
@@ -1403,7 +1413,8 @@
           const stage = job.stage === 'exif_complete' ? 'queued_for_ai' : 'extracting_exif';
           imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
           if (stage === 'queued_for_ai') imageProcessingStore.updateStage(photoNodeId, 'queued_for_ai');
-          graphStore.upsertNode(photoNodeId, ['Photo'], { entity_type: 'Photo', source_id: job.file_source });
+          // Don't add the Photo node to the graph yet — defer until EXIF data arrives
+          // via SSE events so it lands in the correct time bucket from the start.
         }
       }
 
