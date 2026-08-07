@@ -167,6 +167,12 @@ async def save_conversation(payload: ExportedConversation):
 
             await conn.execute("DELETE FROM messages WHERE conv_id = $1", conv.id)
             for msg in payload.messages:
+                # Debug: log if a user message has no audio in extra (potential data loss)
+                if msg.role == "user" and msg.extra is None and len(msg.content) > 0:
+                    logger.warning(
+                        "sync PUT conv=%s: user message %s has extra=None (no audio/attachments), content=%r",
+                        conv.id, msg.id, msg.content[:80],
+                    )
                 extra_json = json.dumps(msg.extra) if msg.extra else None
                 children_json = json.dumps(msg.children) if msg.children else "[]"
                 msg_ts = msg.timestamp if msg.timestamp < 1e12 else msg.timestamp / 1000
@@ -180,7 +186,8 @@ async def save_conversation(payload: ExportedConversation):
                        type = EXCLUDED.type, timestamp = EXCLUDED.timestamp,
                        role = EXCLUDED.role, content = EXCLUDED.content,
                        parent = EXCLUDED.parent, children = EXCLUDED.children,
-                       extra = EXCLUDED.extra, reasoning_content = EXCLUDED.reasoning_content,
+                       extra = COALESCE(EXCLUDED.extra, messages.extra),
+                       reasoning_content = EXCLUDED.reasoning_content,
                        tool_calls = EXCLUDED.tool_calls, completion_id = EXCLUDED.completion_id,
                        tool_call_id = EXCLUDED.tool_call_id, timings = EXCLUDED.timings,
                        model = EXCLUDED.model""",

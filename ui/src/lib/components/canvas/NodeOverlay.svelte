@@ -9,6 +9,7 @@
   import { classifyKind } from './Layout';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import AudioPlayer from '$lib/components/ui/AudioPlayer.svelte';
 
   const KG_API_PROXY_BASE = '/api/kg';
 
@@ -855,6 +856,9 @@
                   {#if m.role === 'user' || m.role === 'assistant'}
                     <div class="cv-msg {m.role === 'user' ? 'cv-user' : 'cv-assistant'}" style="animation-delay:{i * 0.06}s">
                       <div class="cv-msg-label">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                      {#if m.role === 'user' && m.audioUrl}
+                        <AudioPlayer src={m.audioUrl} label="Voice message" />
+                      {/if}
                       {#if m.role === 'assistant'}
                         {@html renderMarkdown(m.content)}
                       {:else}

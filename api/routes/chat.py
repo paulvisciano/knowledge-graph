@@ -78,6 +78,12 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
 
     # Build the DBMessage from the simple payload if not provided directly
     if payload.message:
+        logger.info(
+            "submit_message conv=%s: using payload.message path (no audio extraction), "
+            "message.extra=%s",
+            conv_id,
+            "present" if payload.message.extra else "null",
+        )
         msg = payload.message
         if msg.convId != conv_id:
             msg.convId = conv_id
@@ -88,7 +94,19 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
         if payload.audioUrl:
             extra = (extra or []) + [{"audioUrl": payload.audioUrl}]
         if payload.audioData:
+            audio_len = len(payload.audioData) if payload.audioData else 0
+            logger.info(
+                "submit_message conv=%s: audioData present, len=%d, format=%s",
+                conv_id, audio_len, payload.audioFormat,
+            )
             extra = (extra or []) + [{"audioData": payload.audioData, "audioFormat": payload.audioFormat or "wav"}]
+        else:
+            logger.info(
+                "submit_message conv=%s: no audioData in payload (audioUrl=%s, content_len=%d)",
+                conv_id,
+                "present" if payload.audioUrl else "null",
+                len(payload.content) if payload.content else 0,
+            )
         msg = DBMessage(
             id=str(uuid.uuid4()),
             convId=conv_id,
@@ -163,7 +181,8 @@ async def submit_message(conv_id: str, payload: SubmitMessageRequest):
                    type = EXCLUDED.type, timestamp = EXCLUDED.timestamp,
                    role = EXCLUDED.role, content = EXCLUDED.content,
                    parent = EXCLUDED.parent, children = EXCLUDED.children,
-                   extra = EXCLUDED.extra, reasoning_content = EXCLUDED.reasoning_content,
+                   extra = COALESCE(EXCLUDED.extra, messages.extra),
+                   reasoning_content = EXCLUDED.reasoning_content,
                    tool_calls = EXCLUDED.tool_calls, completion_id = EXCLUDED.completion_id,
                    tool_call_id = EXCLUDED.tool_call_id, timings = EXCLUDED.timings,
                    model = EXCLUDED.model""",
@@ -292,6 +311,40 @@ async def conversation_statuses(conv_ids: str = ""):
         if r["status"] in ("pending", "streaming")
     ]
     return result
+
+
+class RegenerateRequest(BaseModel):
+    model: str | None = None
+    system_prompt: str | None = None
+
+
+@router.post("/conversations/{conv_id}/regenerate")
+async def regenerate_conversation(conv_id: str, payload: RegenerateRequest | None = None):
+    """Re-trigger an LLM job for an existing conversation without creating a new message.
+
+    Used by the "Regenerate" button to re-run the assistant on the existing
+    conversation history. Unlike ``submit_message``, this does NOT insert a new
+    user message — it only enqueues a new LLM job.
+    """
+    payload = payload or RegenerateRequest()
+
+    job = await create_llm_job(
+        conv_id=conv_id,
+        model=payload.model,
+        system_prompt=payload.system_prompt,
+    )
+
+    await event_bus.publish(
+        conv_id,
+        {
+            "type": "status_change",
+            "conv_id": conv_id,
+            "status": "pending" if job["status"] == "pending" else "streaming",
+            "job_id": job["id"],
+        },
+    )
+
+    return SubmitMessageResponse(job_id=job["id"], conv_id=conv_id)
 
 
 @router.post("/conversations/{conv_id}/cancel")
