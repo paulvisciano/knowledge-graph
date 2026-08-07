@@ -1390,7 +1390,12 @@
   let chatSheetClosing = $state(false);
 
   export function closeChat() {
-    if ($isMobile) {
+    if (!chatExpanded) return;
+    if (suppressCloseChat) {
+      suppressCloseChat = false;
+      return;
+    }
+    if ($isMobile && !chatSheetClosing) {
       if (chatSheetEl) chatSheetEl.style.transform = '';
       chatSheetClosing = true;
       saveMessagesToConversation();
