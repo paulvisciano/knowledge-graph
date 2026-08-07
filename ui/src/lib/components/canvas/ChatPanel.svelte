@@ -28,7 +28,7 @@
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
 
   // ── Expose handler methods for parent via ref prop ──
-  let { ref }: { ref?: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void } } = $props();
+  let { ref }: { ref?: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void; closeChat: () => void } } = $props();
 
   interface Conversation {
     id: string;
@@ -1381,6 +1381,7 @@
     if (ref) {
       ref.handleQueryAbout = handleQueryAbout;
       ref.handleSelectConversation = handleSelectConversation;
+      ref.closeChat = closeChat;
     }
   });
 

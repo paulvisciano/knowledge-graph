@@ -6,12 +6,31 @@
   import NodeDetail from '$lib/components/graph/NodeDetail.svelte';
   import ChatPanel from '$lib/components/canvas/ChatPanel.svelte';
 
-  let chatPanelRef: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void } = $state({ handleQueryAbout: () => {}, handleSelectConversation: () => {} });
+  type ChatPanelRef = {
+    handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void;
+    handleSelectConversation: (id: string) => void;
+    closeChat: () => void;
+  };
+  let chatPanelRef: ChatPanelRef = $state({ handleQueryAbout: () => {}, handleSelectConversation: () => {}, closeChat: () => {} });
+  let pointerDownXY: { x: number; y: number } | null = null;
+  const CLICK_MAX_DRIFT = 6;
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div class="relative h-full w-full overflow-hidden">
+<div class="relative h-full w-full overflow-hidden"
+  onpointerdown={(e) => { pointerDownXY = { x: e.clientX, y: e.clientY }; }}
+  onclick={(e) => {
+    if (pointerDownXY) {
+      const dx = e.clientX - pointerDownXY.x;
+      const dy = e.clientY - pointerDownXY.y;
+      if (dx * dx + dy * dy > CLICK_MAX_DRIFT * CLICK_MAX_DRIFT) return;
+    }
+    if (!(e.target as HTMLElement).closest('[data-testid="chat-inline-overlay"]')) {
+      chatPanelRef.closeChat();
+    }
+  }}
+>
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
       <CanvasView
