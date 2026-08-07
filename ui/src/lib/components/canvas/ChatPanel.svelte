@@ -27,8 +27,8 @@
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
 
-  // ── Props from parent (+page.svelte) ──
-  let { onqueryAbout, onselectconversation }: { onqueryAbout?: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; onselectconversation?: (id: string) => void } = $props();
+  // ── Expose handler methods for parent via ref prop ──
+  let { ref }: { ref?: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void } } = $props();
 
   interface Conversation {
     id: string;
@@ -1375,6 +1375,14 @@
     suppressCloseChat = true;
     switchConversation(id);
   }
+
+  // Wire ref so parent can call these methods
+  $effect(() => {
+    if (ref) {
+      ref.handleQueryAbout = handleQueryAbout;
+      ref.handleSelectConversation = handleSelectConversation;
+    }
+  });
 
   async function fetchModels() {
     try {

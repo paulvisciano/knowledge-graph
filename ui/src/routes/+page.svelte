@@ -6,7 +6,7 @@
   import NodeDetail from '$lib/components/graph/NodeDetail.svelte';
   import ChatPanel from '$lib/components/canvas/ChatPanel.svelte';
 
-  let chatPanelRef: any = $state();
+  let chatPanelRef: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void } = $state({ handleQueryAbout: () => {}, handleSelectConversation: () => {} });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -15,12 +15,12 @@
   {#if $activeTab === 'graph'}
     <div class="absolute inset-0">
       <CanvasView
-        onqueryAbout={(node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => chatPanelRef?.handleQueryAbout(node)}
-        onselectconversation={(id: string) => chatPanelRef?.handleSelectConversation(id)}
+        onqueryAbout={(node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => chatPanelRef.handleQueryAbout(node)}
+        onselectconversation={(id: string) => chatPanelRef.handleSelectConversation(id)}
       />
     </div>
 
-    <ChatPanel bind:this={chatPanelRef} />
+    <ChatPanel ref={chatPanelRef} />
 
     {#if $selectedNodeId}
       {@const selNode = graphStore.nodes.find(n => n.id === $selectedNodeId)}
