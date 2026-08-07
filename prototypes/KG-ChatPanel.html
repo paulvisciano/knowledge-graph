@@ -38,8 +38,9 @@
   </script>
   <title>ChatPanel Prototype</title>
   <style>
-    /* ── Design tokens (from app.css) ── */
+    /* ── Design tokens ── */
     :root {
+      /* Legacy hex palette (kept for Tailwind class compat) */
       --color-cyber-bg: #0a0e17;
       --color-cyber-surface: #111827;
       --color-cyber-surface-2: #1a2235;
@@ -55,8 +56,26 @@
       --color-cyber-orange: #ff8c00;
       --color-cyber-red: #ff3366;
       --color-cyber-yellow: #ffd600;
-      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
-      --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
+
+      /* Semantic oklch tokens — matches NodeOverlay / CanvasView system */
+      --bg:          oklch(6% 0.02 260);
+      --fg:          oklch(90% 0.005 250);
+      --muted:       oklch(65% 0.02 255);
+      --faint:       oklch(55% 0.02 255);
+      --accent:      oklch(82% 0.14 210);
+      --accent-dim:  oklch(82% 0.14 210 / 18%);
+      --accent-purple: oklch(72% 0.16 295);
+      --accent-purple-dim: oklch(72% 0.16 295 / 18%);
+      --success:     oklch(72% 0.15 150);
+      --danger:      oklch(62% 0.20 18);
+      --glass:       oklch(16% 0.015 255 / 45%);
+      --glass-light: oklch(20% 0.015 255 / 30%);
+      --hairline:    oklch(50% 0.03 255 / 8%);
+
+      --font-mono:   ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+      --font-sans:   -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --font-display: 'Iowan Old Style', 'Charter', Georgia, 'SF Pro Display', serif;
+
       color-scheme: dark;
     }
 
@@ -82,7 +101,7 @@
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: var(--color-cyber-surface); }
     ::-webkit-scrollbar-thumb { background: var(--color-cyber-border); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--color-cyber-cyan-dim); }
+    ::-webkit-scrollbar-thumb:hover { background: oklch(50% 0.03 255 / 30%); }
 
     /* ── Utility classes used inline in the Svelte template ── */
     .hidden { display: none; }
@@ -661,6 +680,113 @@
       border-right-color: transparent;
       border-left-color: oklch(82% 0.14 210 / 25%);
     }
+
+    /* User message bubble — subtle accent tint, restrained border */
+    .msg-user-bubble {
+      background: var(--accent-dim);
+      border: 1px solid oklch(82% 0.14 210 / 12%);
+      color: var(--fg);
+    }
+
+    /* Assistant message bubble */
+    .msg-assistant-bubble {
+      background: oklch(16% 0.015 255 / 80%);
+      border: 1px solid var(--hairline);
+      color: var(--fg);
+    }
+
+    /* Thinking block */
+    .msg-thinking-summary {
+      border: 1px solid oklch(72% 0.16 295 / 20%);
+      background: oklch(72% 0.16 295 / 5%);
+      color: var(--accent-purple);
+    }
+    .msg-thinking-summary:hover {
+      background: oklch(72% 0.16 295 / 10%);
+    }
+    .msg-thinking-content {
+      border: 1px solid oklch(72% 0.16 295 / 8%);
+      background: oklch(16% 0.015 255 / 50%);
+      color: var(--muted);
+    }
+
+    /* Tool call indicator */
+    .msg-tool-summary {
+      border: 1px solid oklch(72% 0.15 150 / 25%);
+      background: oklch(72% 0.15 150 / 5%);
+    }
+    .msg-tool-summary:hover {
+      background: oklch(72% 0.15 150 / 10%);
+    }
+
+    /* Message action buttons — muted by default */
+    .msg-action-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 10px;
+      color: var(--faint);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: color 0.15s ease;
+      padding: 0;
+    }
+    .msg-action-btn:hover {
+      color: var(--muted);
+    }
+    .msg-action-btn.msg-action-danger:hover {
+      color: var(--danger);
+    }
+    .msg-action-btn.msg-action-accent:hover {
+      color: var(--accent);
+    }
+    .msg-action-btn:focus-visible {
+      outline: 1.5px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 3px;
+    }
+
+    /* Streaming cursor */
+    .stream-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 16px;
+      background: var(--accent);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    /* Stop button */
+    .stop-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      border: 1px solid oklch(62% 0.20 18 / 25%);
+      background: oklch(62% 0.20 18 / 5%);
+      color: oklch(62% 0.20 18);
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .stop-btn:hover {
+      border-color: oklch(62% 0.20 18 / 50%);
+      background: oklch(62% 0.20 18 / 10%);
+    }
+
+    /* Token speed badge */
+    .token-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      border-radius: 9999px;
+      background: oklch(72% 0.15 150 / 8%);
+      padding: 2px 6px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--success);
+    }
     @keyframes micTooltipIn {
       from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
       to { opacity: 1; transform: translateY(-50%) translateX(0); }
@@ -669,9 +795,23 @@
     .chat-orb:focus-visible,
     .chat-orb-expand:focus-visible,
     .chat-orb-add:focus-visible {
-      outline: 2px solid var(--color-cyber-cyan);
+      outline: 2px solid var(--accent);
       outline-offset: 2px;
       border-radius: inherit;
+    }
+
+    /* Focus-visible — all interactive elements */
+    .msg-action-btn:focus-visible,
+    .chat-conversation-divider-btn:focus-visible,
+    .stop-btn:focus-visible,
+    .chat-inline-close-btn:focus-visible,
+    .chat-history-btn:focus-visible,
+    .chat-collapse-row button:focus-visible,
+    .prototype-controls button:focus-visible,
+    details summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 4px;
     }
 
     .chat-inline-messages {
@@ -687,10 +827,10 @@
       flex-direction: column;
       gap: 8px;
       background: rgb(8, 11, 19);
-      border: 1px solid rgba(0, 212, 255, 0.12);
+      border: 1px solid var(--hairline);
       border-right: 0;
       scrollbar-width: thin;
-      scrollbar-color: rgba(0, 212, 255, 0.25) transparent;
+      scrollbar-color: oklch(50% 0.03 255 / 20%) transparent;
     }
 
     .chat-inline-messages::-webkit-scrollbar {
@@ -698,7 +838,7 @@
     }
 
     .chat-inline-messages::-webkit-scrollbar-thumb {
-      background: rgba(0, 212, 255, 0.25);
+      background: oklch(50% 0.03 255 / 20%);
       border-radius: 3px;
     }
 
@@ -709,19 +849,21 @@
       align-items: center;
       justify-content: space-between;
       padding: 6px 16px 6px 20px;
-      background: rgba(8, 11, 19, 0.9);
+      background: oklch(8% 0.02 260 / 90%);
+      backdrop-filter: blur(20px) saturate(1.4);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
       border-radius: 18px 18px 0 0;
-      border: 1px solid rgba(0, 212, 255, 0.12);
+      border: 1px solid var(--hairline);
       border-bottom: 0;
       pointer-events: auto;
     }
 
     .chat-inline-header-title {
-      font-size: 12px;
-      font-weight: 700;
+      font-size: 11px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--color-cyber-text-dim);
+      letter-spacing: 0.1em;
+      color: var(--muted);
     }
 
     /* Close button — only shown in the mobile bottom-sheet toolbar. */
@@ -739,8 +881,8 @@
     }
 
     .chat-inline-close-btn:hover {
-      background: rgba(255, 120, 120, 0.12);
-      color: var(--color-cyber-text);
+      background: oklch(62% 0.20 18 / 10%);
+      color: var(--fg);
     }
 
     /* Drag handle — only shown at the top of the mobile bottom-sheet. */
@@ -780,16 +922,16 @@
     }
 
     .chat-empty-state-title {
-      font-size: 13px;
-      font-weight: 700;
+      font-size: 11px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--color-cyber-text-dim);
+      letter-spacing: 0.08em;
+      color: var(--muted);
     }
 
     .chat-empty-state-hint {
       font-size: 12px;
-      color: rgba(145, 163, 184, 0.55);
+      color: var(--faint);
     }
 
     .chat-conversation-divider {
@@ -812,12 +954,11 @@
       background: linear-gradient(
         to right,
         transparent 0%,
-        rgba(0, 212, 255, 0.18) 12%,
-        rgba(0, 212, 255, 0.42) 50%,
-        rgba(0, 212, 255, 0.18) 88%,
+        oklch(50% 0.03 255 / 15%) 12%,
+        oklch(50% 0.03 255 / 30%) 50%,
+        oklch(50% 0.03 255 / 15%) 88%,
         transparent 100%
       );
-      box-shadow: 0 0 6px rgba(0, 212, 255, 0.14);
     }
 
     .chat-conversation-divider-line {
@@ -831,20 +972,19 @@
       gap: 14px;
       padding: 5px 10px 5px 16px;
       border-radius: 999px;
-      background: rgb(8, 11, 19);
-      border: 1px solid rgba(0, 212, 255, 0.35);
-      color: var(--color-cyber-cyan);
-      font-size: 12px;
+      background: var(--bg);
+      border: 1px solid oklch(82% 0.14 210 / 25%);
+      color: var(--accent);
+      font-size: 11px;
       font-weight: 600;
       white-space: nowrap;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       margin: 0 auto;
       z-index: 1;
       box-shadow:
-        0 0 12px rgba(0, 212, 255, 0.14),
-        inset 0 0 6px rgba(0, 212, 255, 0.04);
-      text-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+        0 0 8px oklch(82% 0.14 210 / 8%);
+      text-shadow: 0 0 4px oklch(82% 0.14 210 / 15%);
     }
 
     .chat-conversation-divider-date {
@@ -864,11 +1004,10 @@
     }
 
     .chat-conversation-divider-active .chat-conversation-divider-label {
-      border-color: rgba(0, 212, 255, 0.6);
+      border-color: oklch(82% 0.14 210 / 35%);
       box-shadow:
-        0 0 18px rgba(0, 212, 255, 0.28),
-        inset 0 0 8px rgba(0, 212, 255, 0.08);
-      text-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+        0 0 12px oklch(82% 0.14 210 / 12%);
+      text-shadow: 0 0 6px oklch(82% 0.14 210 / 20%);
     }
 
     .chat-conversation-divider-btn {
@@ -881,7 +1020,7 @@
       border: none;
       border-radius: 6px;
       background: transparent;
-      color: var(--color-cyber-cyan);
+      color: var(--muted);
       cursor: pointer;
       opacity: 0.55;
       transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
@@ -889,23 +1028,23 @@
 
     .chat-conversation-divider-btn:hover {
       opacity: 1;
-      background: rgba(0, 212, 255, 0.14);
+      background: var(--accent-dim);
       transform: translateY(-1px);
     }
 
     .chat-conversation-divider-btn:focus-visible {
-      outline: 1.5px solid rgba(0, 212, 255, 0.7);
+      outline: 1.5px solid var(--accent);
       outline-offset: 1px;
       opacity: 1;
     }
 
     .chat-conversation-divider-delete:hover {
-      background: rgba(255, 87, 87, 0.16);
-      color: rgb(255, 120, 120);
+      background: oklch(62% 0.20 18 / 10%);
+      color: oklch(62% 0.20 18);
     }
 
     .chat-conversation-divider-delete:focus-visible {
-      outline-color: rgba(255, 120, 120, 0.7);
+      outline-color: oklch(62% 0.20 18 / 60%);
     }
 
 
@@ -1107,8 +1246,8 @@
       justify-content: center;
       gap: 12px;
       background: oklch(8% 0.02 260 / 94%);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(20px) saturate(1.4);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
       color: var(--color-cyber-cyan);
       font-size: 64px;
       font-weight: 700;
@@ -1146,30 +1285,30 @@
     }
 
     .prototype-controls button {
-      font-family: var(--font-sans);
-      font-size: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       padding: 8px 16px;
       border-radius: 8px;
-      border: 1px solid rgba(0, 212, 255, 0.25);
-      background: rgba(10, 14, 23, 0.9);
-      color: var(--color-cyber-cyan);
+      border: 1px solid var(--hairline);
+      background: var(--glass);
+      color: var(--accent);
       cursor: pointer;
       transition: all 0.2s;
       backdrop-filter: blur(12px);
     }
 
     .prototype-controls button:hover {
-      background: rgba(0, 212, 255, 0.15);
-      border-color: rgba(0, 212, 255, 0.5);
+      background: var(--accent-dim);
+      border-color: var(--accent);
     }
 
     .prototype-controls button.active {
-      background: rgba(0, 212, 255, 0.2);
-      border-color: var(--color-cyber-cyan);
-      box-shadow: 0 0 12px rgba(0, 212, 255, 0.2);
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      box-shadow: 0 0 12px oklch(82% 0.14 210 / 20%);
     }
 
     .prototype-label {
@@ -1177,15 +1316,16 @@
       top: 16px;
       right: 16px;
       z-index: 100;
-      font-size: 11px;
-      font-weight: 600;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--color-cyber-text-dim);
-      background: rgba(10, 14, 23, 0.85);
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      background: var(--glass);
       padding: 6px 12px;
       border-radius: 6px;
-      border: 1px solid rgba(0, 212, 255, 0.12);
+      border: 1px solid var(--hairline);
       backdrop-filter: blur(8px);
     }
 
@@ -1278,7 +1418,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
           <span class="chat-inline-header-title">Conversation</span>
-          <button class="chat-history-btn flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-cyan/10 hover:text-cyber-cyan" title="Chat history" aria-label="Open chat history" data-testid="chat-history-button">
+          <button class="chat-history-btn flex h-7 w-7 items-center justify-center rounded-md bg-cyber-surface-2/50 text-cyber-text-dim/70 transition-all duration-200 hover:bg-cyber-surface-2/80 hover:text-cyber-text" title="Chat history" aria-label="Open chat history" data-testid="chat-history-button">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           </button>
         </div>
@@ -1287,7 +1427,7 @@
         <div class="chat-inline-messages" data-testid="messages-container">
 
           <!-- Conversation divider (active) -->
-          <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active">
+          <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-od-id="conversation-divider">
             <span class="chat-conversation-divider-line"></span>
             <span class="chat-conversation-divider-label">
               <span class="chat-conversation-divider-date">Today, 14:32</span>
@@ -1303,43 +1443,42 @@
           </div>
 
           <!-- User message -->
-          <div class="group mb-4" data-testid="message" data-message-role="user">
+          <div class="group mb-4" data-testid="message" data-message-role="user" data-od-id="msg-user-1">
             <div class="flex justify-end">
               <div class="max-w-[95%] space-y-1">
-                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20" data-testid="user-message-text">
+                <div class="rounded-2xl rounded-br-sm msg-user-bubble px-4 py-2.5 text-sm" data-testid="user-message-text">
                   How does the knowledge graph handle entity deduplication when merging new documents?
                 </div>
               </div>
             </div>
             <div class="mt-0.5 flex items-center justify-end gap-2">
               <span class="text-[10px] text-cyber-text-dim/50">14:32</span>
-              <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red" title="Delete message" data-testid="delete-message-button">
+              <button class="msg-action-btn msg-action-danger opacity-0 group-hover:opacity-100" title="Delete message" data-testid="delete-message-button">
                 <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 Delete
               </button>
-              <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Resend message">
+              <button class="msg-action-btn msg-action-accent opacity-0 group-hover:opacity-100" title="Resend message">
                 <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                 Resend
-              </button>
             </div>
           </div>
 
           <!-- Assistant message with thinking -->
-          <div class="group mb-4" data-testid="message" data-message-role="assistant">
+          <div class="group mb-4" data-testid="message" data-message-role="assistant" data-od-id="msg-assistant-1">
             <div class="flex justify-start">
               <div class="max-w-[95%] space-y-1.5">
                 <!-- Thinking block -->
                 <details class="group" open>
-                  <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-cyber-purple/25 bg-cyber-purple/5 px-2.5 py-1.5 text-[11px] text-cyber-purple hover:bg-cyber-purple/10 transition-colors">
+                  <summary class="msg-thinking-summary flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors">
                     <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m0 16v1m-8-9H3m18 0h-1M5.636 5.636l-.707-.707M18.364 18.364l-.707-.707M5.636 18.364l-.707.707M18.364 5.636l-.707.707" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span class="font-medium">Thinking</span>
                     <svg class="ml-auto h-3 w-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                   </summary>
-                  <div class="mt-1 max-h-96 overflow-y-auto rounded-lg border border-cyber-purple/10 bg-cyber-surface-2/50 p-2.5 text-[12px] leading-relaxed text-cyber-text-dim/80 whitespace-pre-wrap font-mono">The user is asking about entity deduplication in the knowledge graph. Let me consider the different strategies: hash-based matching, semantic similarity, and LLM-assisted merging...</div>
+                  <div class="msg-thinking-content mt-1 max-h-96 overflow-y-auto rounded-lg p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap font-mono">The user is asking about entity deduplication in the knowledge graph. Let me consider the different strategies: hash-based matching, semantic similarity, and LLM-assisted merging...</div>
                 </details>
 
                 <!-- Assistant content bubble -->
-                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+                <div class="rounded-2xl rounded-bl-sm msg-assistant-bubble px-4 py-2.5 text-sm" data-testid="assistant-message">
                   <div class="prose-cyber" data-testid="assistant-message-text">
                     <p>The knowledge graph uses a <strong>multi-layer deduplication pipeline</strong>:</p>
                     <ol>
@@ -1353,8 +1492,8 @@
 
                 <!-- Tool call indicator -->
                 <details class="group" data-testid="tool-call" data-tool-name="save_to_knowledge_graph">
-                  <summary class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors border-cyber-green/30 bg-cyber-green/5 hover:bg-cyber-green/10" data-testid="tool-call-summary">
-                    <svg class="h-3.5 w-3.5 shrink-0 text-cyber-green" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L7 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                  <summary class="msg-tool-summary flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] transition-colors" data-testid="tool-call-summary">
+                    <svg class="h-3.5 w-3.5 shrink-0" style="color: var(--success)" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L7 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
                     <span class="font-medium">save_to_knowledge_graph</span>
                     <span class="text-cyber-text-dim/50">— 3 entities, 2 relationships</span>
                     <svg class="ml-auto h-3 w-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -1363,15 +1502,15 @@
 
                 <!-- Action buttons (visible on hover) -->
                 <div class="flex items-center gap-2">
-                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-red" title="Delete message" data-testid="delete-message-button">
+                  <button class="msg-action-btn msg-action-danger opacity-0 group-hover:opacity-100" title="Delete message" data-testid="delete-message-button">
                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     Delete
                   </button>
-                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Regenerate response">
+                  <button class="msg-action-btn msg-action-accent opacity-0 group-hover:opacity-100" title="Regenerate response">
                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                     Regenerate
                   </button>
-                  <button class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-cyber-text-dim/50 hover:text-cyber-cyan" title="Copy message" data-testid="copy-button">
+                  <button class="msg-action-btn msg-action-accent opacity-0 group-hover:opacity-100" title="Copy message" data-testid="copy-button">
                     <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
                     Copy
                   </button>
@@ -1381,10 +1520,10 @@
           </div>
 
           <!-- Second user message -->
-          <div class="group mb-4" data-testid="message" data-message-role="user">
+          <div class="group mb-4" data-testid="message" data-message-role="user" data-od-id="msg-user-2">
             <div class="flex justify-end">
               <div class="max-w-[95%] space-y-1">
-                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20" data-testid="user-message-text">
+                <div class="rounded-2xl rounded-br-sm msg-user-bubble px-4 py-2.5 text-sm" data-testid="user-message-text">
                   Can you show me the relationship extraction logic?
                 </div>
               </div>
@@ -1395,16 +1534,16 @@
           </div>
 
           <!-- Streaming assistant message with processing indicator -->
-          <div class="group mb-4" data-testid="message" data-message-role="assistant">
+          <div class="group mb-4" data-testid="message" data-message-role="assistant" data-od-id="msg-assistant-2">
             <div class="flex justify-start">
               <div class="max-w-[95%] space-y-1.5">
-                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+                <div class="rounded-2xl rounded-bl-sm msg-assistant-bubble px-4 py-2.5 text-sm" data-testid="assistant-message">
                   <!-- Processing indicator -->
                   <div class="flex items-center gap-2 py-1" data-testid="processing-indicator">
-                    <div class="flex-1 h-1.5 rounded-full bg-cyber-border/40 overflow-hidden">
-                      <div class="h-full rounded-full bg-cyber-orange animate-pulse" style="width: 65%;"></div>
-                    </div>
-                    <span class="shrink-0 text-[11px] text-cyber-orange" data-testid="processing-label">Processing… 65%</span>
+                  <div class="flex-1 h-1.5 rounded-full bg-cyber-border/40 overflow-hidden">
+                    <div class="h-full rounded-full animate-pulse" style="width: 65%; background: oklch(82% 0.10 70);"></div>
+                  </div>
+                  <span class="shrink-0 text-[11px] font-medium" style="color: oklch(82% 0.10 70);" data-testid="processing-label">Processing… 65%</span>
                     <span class="shrink-0 font-mono text-[10px] text-cyber-text-dim">128 tokens</span>
                   </div>
                   <div class="prose-cyber" data-testid="assistant-message-text">
@@ -1418,15 +1557,15 @@
                   </div>
                   <!-- Streaming cursor -->
                   <span class="inline-flex items-center gap-1.5">
-                    <span class="inline-block h-4 w-1 animate-pulse bg-cyber-cyan align-text-bottom"></span>
-                    <button class="inline-flex items-center gap-0.5 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-1.5 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10" title="Stop generating">
+                    <span class="stream-cursor"></span>
+                    <button class="stop-btn" title="Stop generating">
                       <svg class="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
                       Stop
                     </button>
                   </span>
                   <!-- Token speed indicator -->
                   <div class="mt-1.5 flex items-center gap-1.5 text-[10px]">
-                    <span class="inline-flex items-center gap-1 rounded-full bg-cyber-green/10 px-1.5 py-0.5 font-mono text-cyber-green">
+                    <span class="token-badge">
                       <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                       42 t/s
                     </span>
@@ -1439,9 +1578,9 @@
           <!-- Generating indicator (no content yet) -->
           <div class="flex justify-start">
             <div class="max-w-[95%]">
-              <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30" data-testid="assistant-message">
+              <div class="rounded-2xl rounded-bl-sm msg-assistant-bubble px-4 py-2.5 text-sm" data-testid="assistant-message">
                 <div class="flex items-center gap-2 py-1" data-testid="generating-indicator">
-                  <button class="flex items-center gap-1 rounded-md border border-cyber-red/30 bg-cyber-red/5 px-2 py-0.5 text-[10px] text-cyber-red transition-colors hover:border-cyber-red/50 hover:bg-cyber-red/10" title="Stop generating" data-testid="stop-button-inline">
+                    <button class="stop-btn" title="Stop generating" data-testid="stop-button-inline">
                     <svg class="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
                     Stop
                   </button>
@@ -1463,7 +1602,7 @@
         </div>
 
         <!-- Input row -->
-        <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+        <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40" data-od-id="chat-input-row">
           <textarea
             placeholder="Continue..."
             rows="1"
@@ -1504,7 +1643,7 @@
         <div class="chat-inline-messages" data-testid="messages-container" style="max-width:100%; max-height:none; flex:1; border-radius:0; border:0; background:transparent; padding:4px 16px 8px; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain;">
 
           <!-- Conversation divider -->
-          <div class="chat-conversation-divider chat-conversation-divider-active">
+          <div class="chat-conversation-divider chat-conversation-divider-active" data-od-id="conversation-divider-mobile">
             <span class="chat-conversation-divider-line"></span>
             <span class="chat-conversation-divider-label">
               <span class="chat-conversation-divider-date">Today, 14:32</span>
@@ -1517,7 +1656,7 @@
           <div class="group mb-4" data-testid="message" data-message-role="user">
             <div class="flex justify-end">
               <div class="max-w-[95%] space-y-1">
-                <div class="rounded-2xl rounded-br-sm bg-cyber-cyan/10 px-4 py-2.5 text-sm text-cyber-text border border-cyber-cyan/20">
+                <div class="rounded-2xl rounded-br-sm msg-user-bubble px-4 py-2.5 text-sm">
                   Explain the entity resolution algorithm.
                 </div>
               </div>
@@ -1528,7 +1667,7 @@
           <div class="group mb-4" data-testid="message" data-message-role="assistant">
             <div class="flex justify-start">
               <div class="max-w-[95%] space-y-1.5">
-                <div class="rounded-2xl rounded-bl-sm bg-cyber-surface-2/80 px-4 py-2.5 text-sm text-cyber-text border border-cyber-border/30">
+                <div class="rounded-2xl rounded-bl-sm msg-assistant-bubble px-4 py-2.5 text-sm">
                   <div class="prose-cyber">
                     <p>Entity resolution uses a <strong>three-stage pipeline</strong>:</p>
                     <ul>
@@ -1545,8 +1684,8 @@
           <!-- Streaming indicator -->
           <div class="flex items-center gap-2 px-4 py-3">
             <div class="flex items-center gap-2">
-              <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>
-              <span class="text-xs text-cyber-purple">Generating response…</span>
+              <div class="h-2 w-2 rounded-full animate-pulse" style="background: var(--accent-purple);"></div>
+              <span class="text-xs" style="color: var(--accent-purple);">Generating response…</span>
             </div>
           </div>
         </div>
