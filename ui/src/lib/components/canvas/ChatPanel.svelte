@@ -27,9 +27,6 @@
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
 
-  // ── Expose handler methods for parent via ref prop ──
-  let { ref }: { ref?: { handleQueryAbout: (node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) => void; handleSelectConversation: (id: string) => void; closeChat: () => void } } = $props();
-
   interface Conversation {
     id: string;
     title: string;
@@ -1357,7 +1354,8 @@
     handleSend(undefined, undefined, undefined, false);
   }
 
-  function handleQueryAbout(node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) {
+  // ── Expose methods for parent via bind:this ──
+  export function handleQueryAbout(node: { id: string; labels?: string[]; properties?: Record<string, unknown> }) {
     if (isActiveConversationStreaming) return;
     const name = (node.properties?.name as string) ?? node.id;
     chatInput = `Tell me about ${name}`;
@@ -1371,19 +1369,10 @@
     handleSend(undefined, undefined, undefined, true);
   }
 
-  function handleSelectConversation(id: string) {
+  export function handleSelectConversation(id: string) {
     suppressCloseChat = true;
     switchConversation(id);
   }
-
-  // Wire ref so parent can call these methods
-  $effect(() => {
-    if (ref) {
-      ref.handleQueryAbout = handleQueryAbout;
-      ref.handleSelectConversation = handleSelectConversation;
-      ref.closeChat = closeChat;
-    }
-  });
 
   async function fetchModels() {
     try {
@@ -1400,7 +1389,7 @@
 
   let chatSheetClosing = $state(false);
 
-  function closeChat() {
+  export function closeChat() {
     if ($isMobile) {
       if (chatSheetEl) chatSheetEl.style.transform = '';
       chatSheetClosing = true;
