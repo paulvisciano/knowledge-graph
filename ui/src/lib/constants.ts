@@ -79,6 +79,7 @@ export const API = {
     events: '/api/chat/events',
     statuses: '/api/chat/conversations/statuses',
     cancel: (convId: string) => `/api/chat/conversations/${convId}/cancel`,
+    regenerate: (convId: string) => `/api/chat/conversations/${convId}/regenerate`,
   },
 } as const;
 

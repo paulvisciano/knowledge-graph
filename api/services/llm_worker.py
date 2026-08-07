@@ -67,6 +67,14 @@ DEFAULT_MODEL = os.environ.get("LLM_DEFAULT_MODEL", "Bonsai-27B-Q1_0")
 # if the llama-server is started with reasoning enabled.
 REASONING_ENABLED = os.environ.get("LLM_REASONING_ENABLED", "").lower() in ("1", "true", "yes")
 
+# Maximum characters of a tool result to feed back into the LLM conversation.
+# Tool results (especially KG queries) can be very large; exceeding the
+# context window causes "payload string too long" errors from llama-server.
+# The 8K-char limit keeps each tool result under ~2K tokens (roughly 4
+# chars/token), leaving plenty of room for the system prompt, history, and
+# the model's response within the 32K context window.
+MAX_TOOL_RESULT_CHARS = int(os.environ.get("LLM_MAX_TOOL_RESULT_CHARS", "8000"))
+
 import re
 
 _LEAKED_PREFIX_RE = re.compile(r"^\s*<\s*assistant\s*>\s*", re.IGNORECASE)
@@ -555,10 +563,13 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                     pass
             api_messages.append(entry)
         elif msg.get("role") == "tool":
+            tool_content = msg.get("content", "")
+            if len(tool_content) > MAX_TOOL_RESULT_CHARS:
+                tool_content = tool_content[:MAX_TOOL_RESULT_CHARS] + "\n[...truncated]"
             api_messages.append({
                 "role": "tool",
                 "tool_call_id": msg.get("tool_call_id", ""),
-                "content": msg.get("content", ""),
+                "content": tool_content,
             })
 
     # Fetch MCP tools
@@ -897,11 +908,22 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                     conv_id=conv_id,
                 )
 
-                # Feed tool result back as a tool role message
+                # Truncate tool result before feeding back into the conversation
+                # to avoid "payload string too long" errors from llama-server
+                # when the total prompt exceeds the context window.
+                if len(tool_result) > MAX_TOOL_RESULT_CHARS:
+                    logger.warning(
+                        "Job %s: truncating tool '%s' result from %d to %d chars",
+                        job_id, tool_name, len(tool_result), MAX_TOOL_RESULT_CHARS,
+                    )
+                    tool_result_for_llm = tool_result[:MAX_TOOL_RESULT_CHARS] + "\n[...truncated]"
+                else:
+                    tool_result_for_llm = tool_result
+
                 api_messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": tool_result,
+                    "content": tool_result_for_llm,
                 })
 
             # Save the intermediate assistant message (with tool calls) to DB
@@ -967,7 +989,11 @@ async def poll_and_process() -> None:
         await process_llm_job(job)
     except Exception as exc:
         logger.exception("Job %s failed with unhandled exception", job_id)
-        err_msg = f"Unhandled exception: {exc}"
+        raw_err = str(exc)
+        if "payload string too long" in raw_err.lower() or "context" in raw_err.lower() and "exceed" in raw_err.lower():
+            err_msg = "Context window exceeded — the conversation and tool results are too long for the model. Try a shorter query."
+        else:
+            err_msg = f"Unhandled exception: {exc}"
         try:
             await update_llm_job_status(job_id, "error", err_msg)
             await append_llm_job_event(

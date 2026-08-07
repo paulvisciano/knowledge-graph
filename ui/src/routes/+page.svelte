@@ -1187,7 +1187,7 @@
     // streaming — the SSE event handlers will update the UI reactively.
     const convId = activeConversationId;
     try {
-      await fetch(API.chat.messages(convId), {
+      const res = await fetch(API.chat.messages(convId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1201,6 +1201,10 @@
           ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
         }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Submit failed: ${res.status} ${body}`);
+      }
       // Add this conversation to the streaming set immediately so the UI
       // shows the thinking indicator before the first SSE event arrives.
       streamingConvIds = new Set([...streamingConvIds, convId]);
@@ -1208,6 +1212,7 @@
     } catch (err) {
       console.error('Failed to submit message to server:', err);
       isProcessing = false;
+      isPending = false;
       processingLabel = '';
     }
   }
@@ -1478,19 +1483,23 @@
     isPending = true;
     processingLabel = 'Regenerating...';
 
-    // Re-submit the last user message to the server API
+    // Re-trigger LLM job without creating a duplicate user message
     const convId = activeConversationId;
     try {
-      await fetch(API.chat.messages(convId), {
+      const res = await fetch(API.chat.regenerate(convId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: msg.content }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Regenerate failed: ${res.status} ${body}`);
+      }
       streamingConvIds = new Set([...streamingConvIds, convId]);
       graphStore.setStreamingConversations(streamingConvIds);
     } catch (err) {
-      console.error('Failed to resend message:', err);
+      console.error('Failed to regenerate response:', err);
       isProcessing = false;
+      isPending = false;
       processingLabel = '';
     }
   }
