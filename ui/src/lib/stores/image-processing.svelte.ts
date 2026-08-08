@@ -52,6 +52,32 @@ const STAGE_LABELS: Record<ImageStage, string> = {
   error: 'Processing failed',
 };
 
+/** Map backend job.stage values (from phases.py _map_event_to_stage) to UI ImageStage.
+ *
+ * Backend stages: claimed, starting, extracting_metadata, creating_entities,
+ * exif_complete, processing_ai, linking_entities, complete, error
+ * UI stages: extracting_exif, detecting_faces, building_captions, creating_entities,
+ * queued_for_ai, describing_image, uploading_to_graph, graph_processing,
+ * linking_visual_entities, complete, error
+ */
+const BACKEND_STAGE_MAP: Record<string, ImageStage> = {
+  claimed: 'extracting_exif',
+  starting: 'extracting_exif',
+  extracting_metadata: 'extracting_exif',
+  creating_entities: 'creating_entities',
+  exif_complete: 'queued_for_ai',
+  processing_ai: 'describing_image',
+  linking_entities: 'linking_visual_entities',
+  pipeline_complete: 'complete',
+  complete: 'complete',
+  error: 'error',
+  cancelled: 'error',
+};
+
+export function backendStageToUi(stage: string): ImageStage {
+  return BACKEND_STAGE_MAP[stage] ?? 'extracting_exif';
+}
+
 const EXIF_DISPLAY_KEYS: Record<string, string> = {
   camera: 'Camera',
   date_taken_friendly: 'Date',
@@ -70,8 +96,11 @@ const EXIF_DISPLAY_KEYS: Record<string, string> = {
 
 class ImageProcessingStore {
   statuses = $state<Record<string, ImageProcessingStatus>>({});
+  private _dismissed = new Set<string>();
+  private _pollTimer: ReturnType<typeof setInterval> | null = null;
 
   startProcessing(nodeId: string, fileName: string, dataUrl: string, jobId?: string) {
+    this._dismissed.delete(nodeId);
     this.statuses[nodeId] = {
       nodeId,
       fileName,
@@ -134,8 +163,135 @@ class ImageProcessingStore {
   }
 
   remove(nodeId: string) {
+    const status = this.statuses[nodeId];
+    if (status && (status.stage === 'complete' || status.stage === 'error')) {
+      this._dismissed.add(nodeId);
+    }
     delete this.statuses[nodeId];
     this.statuses = { ...this.statuses };
+  }
+
+  syncFromApi(jobs: { job_id: string; file_source: string; status: string; stage: string; error?: string | null }[]) {
+    const seenIds = new Set<string>();
+    for (const job of jobs) {
+      const nodeId = `${job.file_source} (Photo)`;
+      seenIds.add(nodeId);
+
+      if (this._dismissed.has(nodeId)) continue;
+
+      const uiStage = backendStageToUi(job.stage);
+
+      if (job.status === 'complete') {
+        const existing = this.statuses[nodeId];
+        if (existing && existing.stage !== 'complete') {
+          existing.stage = 'complete';
+          existing.updatedAt = Date.now();
+          this.statuses = { ...this.statuses };
+        } else if (!existing) {
+          this.statuses[nodeId] = {
+            nodeId,
+            fileName: job.file_source,
+            dataUrl: '',
+            jobId: job.job_id,
+            stage: 'complete',
+            get stageLabel() { return STAGE_LABELS[this.stage] ?? this.stage; },
+            get stepper() {
+              const idx = PIPELINE_ORDER.indexOf(this.stage);
+              return PIPELINE_ORDER.map((s): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' } => ({
+                stage: s, label: STAGE_LABELS[s],
+                state: idx < 0 ? 'pending' : idx > PIPELINE_ORDER.indexOf(s) ? 'done' : idx === PIPELINE_ORDER.indexOf(s) ? 'current' : 'pending',
+              }));
+            },
+            updatedAt: Date.now(),
+          };
+          this.statuses = { ...this.statuses };
+        }
+        continue;
+      }
+
+      if (job.status === 'failed') {
+        const existing = this.statuses[nodeId];
+        const errorMsg = job.error ?? 'Processing failed';
+        if (existing && existing.stage !== 'error') {
+          existing.stage = 'error';
+          existing.error = errorMsg;
+          existing.updatedAt = Date.now();
+          this.statuses = { ...this.statuses };
+        } else if (!existing) {
+          this.statuses[nodeId] = {
+            nodeId,
+            fileName: job.file_source,
+            dataUrl: '',
+            jobId: job.job_id,
+            stage: 'error',
+            error: errorMsg,
+            get stageLabel() { return STAGE_LABELS[this.stage] ?? this.stage; },
+            get stepper() {
+              return PIPELINE_ORDER.map((s): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' } => ({
+                stage: s, label: STAGE_LABELS[s], state: 'pending' as const,
+              }));
+            },
+            updatedAt: Date.now(),
+          };
+          this.statuses = { ...this.statuses };
+        }
+        continue;
+      }
+
+      const existing = this.statuses[nodeId];
+      if (existing) {
+        if (existing.stage === 'complete' || existing.stage === 'error') continue;
+        if (existing.stage !== uiStage) {
+          existing.stage = uiStage;
+          existing.updatedAt = Date.now();
+          this.statuses = { ...this.statuses };
+        }
+      } else {
+        this.statuses[nodeId] = {
+          nodeId,
+          fileName: job.file_source,
+          dataUrl: '',
+          jobId: job.job_id,
+          stage: uiStage,
+          get stageLabel() { return STAGE_LABELS[this.stage] ?? this.stage; },
+          get stepper() {
+            const currentIdx = PIPELINE_ORDER.indexOf(this.stage);
+            return PIPELINE_ORDER.map((s): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' } => {
+              const sIdx = PIPELINE_ORDER.indexOf(s);
+              const state: 'pending' | 'current' | 'done' =
+                currentIdx < 0 ? 'pending' : currentIdx > sIdx ? 'done' : currentIdx === sIdx ? 'current' : 'pending';
+              return { stage: s, label: STAGE_LABELS[s], state };
+            });
+          },
+          updatedAt: Date.now(),
+        };
+        this.statuses = { ...this.statuses };
+      }
+    }
+
+    for (const nodeId of Object.keys(this.statuses)) {
+      if (this._dismissed.has(nodeId)) continue;
+      const jobId = this.statuses[nodeId].jobId;
+      if (jobId && !seenIds.has(nodeId) && this.statuses[nodeId].stage !== 'complete' && this.statuses[nodeId].stage !== 'error') {
+        const existing = this.statuses[nodeId];
+        existing.stage = 'complete';
+        existing.updatedAt = Date.now();
+        this.statuses = { ...this.statuses };
+      }
+    }
+  }
+
+  startPolling(fetchFn: () => Promise<void>, intervalMs: number = 3000) {
+    this.stopPolling();
+    fetchFn();
+    this._pollTimer = setInterval(fetchFn, intervalMs);
+  }
+
+  stopPolling() {
+    if (this._pollTimer) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
   }
 
   mapEventToStage(eventName: string): ImageStage | null {
