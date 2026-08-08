@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ChatMessage, MCPToolCall } from '$lib/constants';
   import { API } from '$lib/constants';
-  import { tick, onMount } from 'svelte';
+  import { tick, onMount, onDestroy } from 'svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { activeTab, selectedNodeId, navDrawerOpen, historyPanelOpen } from '$lib/stores/ui';
   import { mcpClient } from '$lib/services/mcp-client.svelte';
@@ -23,7 +23,7 @@
   import { syncClient } from '$lib/services/sync-client.svelte';
   import { sseClient, type LlmEvent } from '$lib/services/sse-client.svelte';
   import { fileToAttachment, revokeAttachmentUrls, isImageType, MAX_ATTACHMENTS, MAX_FILE_SIZE, type Attachment } from '$lib/utils/file-utils';
-  import { imageProcessingStore } from '$lib/stores/image-processing.svelte';
+  import { imageProcessingStore, backendStageToUi } from '$lib/stores/image-processing.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
 
@@ -513,6 +513,10 @@
     };
   });
 
+  onDestroy(() => {
+    imageProcessingStore.stopPolling();
+  });
+
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
   let isStreaming = $state(false);
@@ -931,12 +935,10 @@
           const eventData = event.data as Record<string, unknown>;
 
           if (eventName === 'progress') {
-            const stage = String(eventData.stage ?? '');
-            if (stage) {
-              imageProcessingStore.updateStage(photoNodeId, stage);
+            const rawStage = String(eventData.stage ?? '');
+            if (rawStage) {
+              imageProcessingStore.updateStage(photoNodeId, backendStageToUi(rawStage));
             }
-            const progress = Number(eventData.progress ?? 0);
-            imageProcessingStore.updateProgress(photoNodeId, progress);
           } else if (eventName === 'exif_complete') {
             imageProcessingStore.updateStage(photoNodeId, 'queued_for_ai');
           } else if (eventName === 'node_created' || eventName === 'edge_created') {
@@ -992,55 +994,37 @@
   }
 
   async function resumeInProgressJobs() {
-    try {
-      const [pending, processing] = await Promise.all([
-        kgApiClient.listJobs('pending'),
-        kgApiClient.listJobs('processing'),
-      ]);
-      for (const job of pending) {
-        const photoNodeId = `${job.file_source} (Photo)`;
-        if (imageProcessingStore.getByJobId(job.job_id)) continue;
-        imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
+    const syncFromApi = async () => {
+      try {
+        const [pending, processing] = await Promise.all([
+          kgApiClient.listJobs('pending'),
+          kgApiClient.listJobs('processing'),
+        ]);
+        const active = [...pending, ...processing];
+        imageProcessingStore.syncFromApi(active);
+      } catch (err) {
+        console.warn('Failed to sync job statuses from API:', err);
       }
-      for (const job of processing) {
-        const photoNodeId = `${job.file_source} (Photo)`;
-        const existing = imageProcessingStore.getByJobId(job.job_id);
-        if (!existing) {
-          const stage = job.stage === 'exif_complete' ? 'queued_for_ai' : 'extracting_exif';
-          imageProcessingStore.startProcessing(photoNodeId, job.file_source, '', job.job_id);
-          if (stage === 'queued_for_ai') imageProcessingStore.updateStage(photoNodeId, 'queued_for_ai');
-        }
+    };
+
+    const syncRecentTerminal = async () => {
+      try {
+        const [complete, failed] = await Promise.all([
+          kgApiClient.listJobs('complete').then((j: JobInfo[]) => j.slice(0, 10)),
+          kgApiClient.listJobs('failed').then((j: JobInfo[]) => j.slice(0, 10)),
+        ]);
+        const active = await Promise.all([
+          kgApiClient.listJobs('pending'),
+          kgApiClient.listJobs('processing'),
+        ]);
+        imageProcessingStore.syncFromApi([...active.flat(), ...complete, ...failed]);
+      } catch (err) {
+        console.warn('Failed to sync recent terminal jobs:', err);
       }
-      const allJobs = [...pending, ...processing];
-      pollJobBatch(allJobs);
-    } catch (err) {
-      console.warn('Failed to resume in-progress jobs:', err);
-    }
-  }
+    };
 
-  async function pollJobBatch(jobs: JobInfo[]) {
-    const activeSSE = new Set<string>();
-    const pollIntervalMs = 5000;
-
-    while (true) {
-      await new Promise((r) => setTimeout(r, pollIntervalMs));
-      const liveJobs = jobs.filter((j) => {
-        const photoNodeId = `${j.file_source} (Photo)`;
-        const status = imageProcessingStore.statuses[photoNodeId];
-        if (!status) return false;
-        return status.stage !== 'complete' && status.stage !== 'error';
-      });
-      if (liveJobs.length === 0) break;
-
-      for (const job of liveJobs) {
-        if (activeSSE.has(job.job_id)) continue;
-        if (activeSSE.size >= MAX_CONCURRENT_SSE) break;
-        const photoNodeId = `${job.file_source} (Photo)`;
-        activeSSE.add(job.job_id);
-        processSingleImage({ id: '', file: undefined as any, mimeType: '', dataUrl: '', name: job.file_source, size: 0 }, '', job.job_id)
-          .finally(() => { activeSSE.delete(job.job_id); });
-      }
-    }
+    syncRecentTerminal();
+    imageProcessingStore.startPolling(syncFromApi, 3000);
   }
 
   function startNewConversation() {

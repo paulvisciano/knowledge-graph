@@ -1,5 +1,6 @@
 <script lang="ts">
   import { imageProcessingStore, type ImageStage } from '$lib/stores/image-processing.svelte';
+  import { kgApiClient } from '$lib/services/kg-api-client';
   import type { SceneManager } from './renderer/SceneManager';
 
   let { sceneManager }: { sceneManager: SceneManager } = $props();
@@ -27,29 +28,29 @@
   let completedNodeIds = $state<Set<string>>(new Set());
 
   const entries = $derived.by(() => {
-    return Object.values(imageProcessingStore.statuses);
+    return Object.values(imageProcessingStore.statuses).filter(
+      (e) => e.stage !== 'complete' && e.stage !== 'queued_for_ai',
+    );
   });
 
   const total = $derived(entries.length);
 
-  const completedCount = $derived(
-    entries.filter((e) => e.stage === 'complete').length,
+  const errorCount = $derived(
+    entries.filter((e) => e.stage === 'error').length,
   );
 
   const allDone = $derived(
-    total > 0 && entries.every((e) => e.stage === 'complete' || e.stage === 'error'),
+    total > 0 && entries.every((e) => e.stage === 'error'),
   );
 
-  const progressPercent = $derived(
-    total === 0 ? 0 : Math.round((completedCount / total) * 100),
-  );
+  const progressPercent = $derived(0);
 
   const countLabel = $derived(
-    total === 0 ? 'All done' : `${total} image${total !== 1 ? 's' : ''}`,
+    total === 0 ? '' : `${total} processing${errorCount > 0 ? ` · ${errorCount} error${errorCount !== 1 ? 's' : ''}` : ''}`,
   );
 
   const footerLabel = $derived(
-    total === 0 ? 'All done' : `${completedCount} of ${total} complete`,
+    total === 0 ? '' : `${entries.filter((e) => e.stage !== 'error').length} in progress`,
   );
 
   function getProgressRingOffset(stepper: { state: string }[]): number {
@@ -84,6 +85,36 @@
 
   function cancelItem(nodeId: string): void {
     imageProcessingStore.remove(nodeId);
+  }
+
+  let reprocessingIds = $state<Set<string>>(new Set());
+
+  async function reprocessItem(nodeId: string): Promise<void> {
+    const entry = imageProcessingStore.statuses[nodeId];
+    if (!entry) return;
+    const fileSource = entry.fileName;
+    reprocessingIds = new Set([...reprocessingIds, nodeId]);
+    imageProcessingStore.updateStage(nodeId, 'extracting_exif');
+    try {
+      const { stream } = kgApiClient.reprocessImageSse(fileSource);
+      for await (const { data } of stream) {
+        try {
+          const parsed = JSON.parse(data);
+          const eventName: string = parsed.event ?? '';
+          const stage = imageProcessingStore.mapEventToStage(eventName);
+          if (stage) imageProcessingStore.updateStage(nodeId, stage);
+          if (eventName === 'pipeline_complete' || eventName === 'upload_failed') {
+            const error = parsed.data?.error ?? parsed.data?.reason;
+            if (error) imageProcessingStore.updateStage(nodeId, 'error', String(error));
+            break;
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    } catch (err) {
+      imageProcessingStore.updateStage(nodeId, 'error', String(err));
+    } finally {
+      reprocessingIds = new Set([...reprocessingIds].filter(id => id !== nodeId));
+    }
   }
 
   function toggleCollapse(): void {
@@ -143,6 +174,19 @@
       // Active processing — ensure visible
       visible = true;
     }
+  });
+
+  // Auto-dismiss completed and queued-for-AI items after a short delay
+  $effect(() => {
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    for (const entry of Object.values(imageProcessingStore.statuses)) {
+      if (entry.stage === 'complete' || entry.stage === 'queued_for_ai') {
+        timers.set(entry.nodeId, setTimeout(() => imageProcessingStore.remove(entry.nodeId), 2000));
+      }
+    }
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+    };
   });
 
   // Re-show dock when new items appear
@@ -246,10 +290,16 @@
               {/if}
             </span>
           </div>
-          <div class="dock-actions">
-            <button class="dock-action-btn" aria-label="Cancel processing" onclick={() => cancelItem(entry.nodeId)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-            </button>
+           <div class="dock-actions">
+            {#if entry.stage === 'error'}
+              <button class="dock-action-btn dock-retry-btn" aria-label="Retry processing" onclick={() => reprocessItem(entry.nodeId)} disabled={reprocessingIds.has(entry.nodeId)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+              </button>
+            {:else}
+              <button class="dock-action-btn" aria-label="Cancel processing" onclick={() => cancelItem(entry.nodeId)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            {/if}
           </div>
         </div>
       {/each}
@@ -815,6 +865,26 @@
   .dock-action-btn svg {
     width: 12px;
     height: 12px;
+  }
+
+  .dock-retry-btn {
+    background: oklch(82% 0.14 210 / 15%);
+    color: var(--dock-accent);
+  }
+
+  .dock-retry-btn:hover {
+    background: oklch(82% 0.14 210 / 30%);
+  }
+
+  .dock-retry-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   /* ── Footer ── */
