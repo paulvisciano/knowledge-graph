@@ -1805,6 +1805,236 @@
                               {resultText}
 {/if}
 
+                          </div>
+                        {:else if toolCall.isError}
+                          <div class="rounded-lg border border-cyber-red/20 bg-cyber-red/5 p-2 text-cyber-red/80 whitespace-pre-wrap font-mono">{typeof toolCall.isError === 'string' ? toolCall.isError : 'Error'}</div>
+                        {:else}
+                          <div class="rounded-lg border border-cyber-orange/20 bg-cyber-orange/5 p-2 text-cyber-orange/80">
+                            Running…
+                          </div>
+                        {/if}
+                      </div>
+                    </details>
+                  {/each}
+                {/if}
+
+                {#if msg.model && !msg.isStreaming}
+                  <div class="flex items-center gap-2 text-[10px] text-cyber-text-dim/50">
+                    <span>{formatModelName(msg.model)}</span>
+                    {#if msg.timings}
+                      <span>·</span>
+                      <span>{formatTokens(msg.timings.prompt_tokens)}↑ {formatTokens(msg.timings.completion_tokens)}↓</span>
+                      {#if msg.timings.time_to_first_token_ms}
+                        <span>·</span>
+                        <span>TTFT {formatDuration(msg.timings.time_to_first_token_ms)}</span>
+                      {/if}
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/snippet}
+
+      {#if showActiveDivider}
+        <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-conversation-id={activeConversationId}>
+          <span class="chat-conversation-divider-line"></span>
+          <span class="chat-conversation-divider-label">
+            <span class="chat-conversation-divider-date">{formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}</span>
+            <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
+            <button
+              type="button"
+              class="chat-conversation-divider-btn"
+              title="Export conversation"
+              aria-label="Export conversation"
+              onclick={(e) => {
+                e.stopPropagation();
+                exportConversationToJsonl(activeConversationId);
+              }}
+            >
+              <Icon name="download" size={13} color="var(--muted)" />
+            </button>
+            <button
+              type="button"
+              class="chat-conversation-divider-btn chat-conversation-divider-delete"
+              title="Delete conversation"
+              aria-label="Delete conversation"
+              onclick={(e) => {
+                e.stopPropagation();
+                if (confirm('Delete this conversation? This cannot be undone.')) {
+                  deleteConversation(activeConversationId);
+                }
+              }}
+            >
+              <Icon name="trash-2" size={13} color="var(--muted)" />
+            </button>
+          </span>
+          <span class="chat-conversation-divider-line"></span>
+        </div>
+      {/if}
+
+      {#each messages as msg (msg.id)}
+        {@render messageRow(msg)}
+      {/each}
+
+      {#if isPending}
+        <div class="flex items-center gap-2 px-4 py-3" data-testid="pending-indicator">
+          <div class="flex items-center gap-2">
+            <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>
+            <span class="text-xs text-cyber-purple">Queued — waiting for response…</span>
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Input row (only visible when a conversation is active and the panel is expanded) -->
+  {#if activeConversationId && chatExpanded}
+    <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
+
+    {#if messages.length > 0}
+      <div class="chat-collapse-row mb-1 flex justify-center">
+        <button
+          onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
+          class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
+          title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+          aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
+          data-testid="chat-toggle"
+        >
+          <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
+            <Icon name="chevron-down" size={16} />
+          </span>
+          {chatExpanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+    {/if}
+
+    <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+      <textarea
+        bind:this={panelTextareaEl}
+        bind:value={panelChatInput}
+        oninput={autoResizePanel}
+        onkeydown={handlePanelKeydown}
+        placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
+        rows="1"
+        data-testid="chat-input"
+        class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+        disabled={isActiveConversationStreaming}
+      ></textarea>
+      <AttachmentMenu
+        fluid
+        disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
+        onPickDocument={openDocumentPicker}
+      />
+      <button
+        onclick={handlePanelSend}
+        disabled={isActiveConversationStreaming || (!panelChatInput.trim() && attachments.length === 0)}
+        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-cyan/20 text-cyber-cyan transition-all duration-200 hover:bg-cyber-cyan/30 disabled:opacity-40 disabled:cursor-not-allowed"
+        title="Send message"
+        aria-label="Send message"
+        data-testid="send-button"
+      >
+        <Icon name="send" size={18} />
+      </button>
+    </div>
+  {/if}
+
+  </div>
+
+<!-- Collapsed chat orb — independent overlay, center-bottom of screen.
+     Rendered whenever the chat panel is not expanded, regardless of
+     whether a conversation is active, so it always floats over the graph. -->
+{#if !chatExpanded}
+  <div class="chat-collapsed-orb-host" data-testid="chat-collapsed-orb">
+    <div class="chat-collapsed-orb">
+      {#if orbOptionsOpen}
+        <div class="orb-options-backdrop" onclick={() => { orbOptionsOpen = false; }} role="presentation"></div>
+      {/if}
+      <div
+        class="chat-orb-add"
+        class:show={orbOptionsOpen}
+        role="button"
+        tabindex="0"
+        aria-label="Add images"
+        data-od-id="chat-orb-add"
+        onclick={(e) => { e.stopPropagation(); orbOptionsOpen = false; imageFileInput?.click(); }}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); orbOptionsOpen = false; imageFileInput?.click(); } }}
+      >
+        <div class="coa-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+        <span>Add images</span>
+      </div>
+      <div
+        class="chat-orb-expand"
+        class:show={orbOptionsOpen}
+        role="button"
+        tabindex="0"
+        aria-label="Type a message"
+        data-od-id="chat-orb-expand"
+        onclick={(e) => { e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); }}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); } }}
+      >
+        <div class="coe-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <span>Type a message</span>
+      </div>
+
+      <!-- Orb mic button -->
+      <div
+        class="chat-orb {isRecording ? 'recording' : ''} {isStreamActive ? 'streaming' : ''} {holdActive ? 'holding' : ''} {orbOptionsOpen ? 'options-open' : ''}"
+        role="button"
+        tabindex="0"
+        aria-label="Voice input"
+        data-od-id="chat-orb"
+        data-testid="mic-button"
+        onclick={handleMicTap}
+        onpointerdown={handleMicPointerDown}
+        onpointerup={handleMicPointerUp}
+        onpointerleave={handleMicPointerLeave}
+        onpointercancel={handleMicPointerCancel}
+        ontouchstart={handleMicTouchStart}
+        ontouchmove={handleMicTouchMove}
+        ontouchend={handleMicTouchEnd}
+      >
+        {#if holdActive && !isRecording}
+          <span class="hold-countdown">{holdCountdown}</span>
+          <div class="hold-progress" style="inset: {4 + (holdElapsed / HOLD_TO_RECORD_MS) * 22}px;"></div>
+        {:else if isTranscribing}
+          <svg class="h-6 w-6 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><line x1="19" y1="10" x2="19" y2="12" /><line x1="5" y1="10" x2="5" y2="12" /></svg>
+        {:else if isRecording}
+          <div class="h-5 w-5 rounded-full bg-cyber-red"></div>
+        {:else}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        {/if}
+        {#if micTooltipVisible && !holdActive && !isRecording && !isTranscribing}
+          <div class="mic-tooltip">{micTooltipMessage}</div>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if holdActive && !isRecording}
+  <div class="record-countdown-overlay" data-testid="record-countdown">
+    <div class="record-countdown-ring">
+      <svg viewBox="0 0 120 120" class="record-countdown-svg">
+        <circle class="record-countdown-track" cx="60" cy="60" r="54" />
+        <circle
+          class="record-countdown-progress"
+          cx="60"
+          cy="60"
+          r="54"
+          style="stroke-dashoffset: {339.292 * (1 - holdElapsed / HOLD_TO_RECORD_MS)}"
+        />
+      </svg>
+      <span class="record-countdown-number">{holdCountdown}</span>
+    </div>
+    <span class="record-countdown-label">Hold to record</span>
+  </div>
+{/if}
 <style>
   .chat-inline-overlay {
     position: absolute;
@@ -1851,8 +2081,9 @@
 
   .chat-collapsed-orb {
     display: flex;
-    flex-direction: column-reverse;
+    flex-direction: column;
     align-items: center;
+    justify-content: flex-end;
     gap: 0;
     pointer-events: auto;
   }
@@ -2768,260 +2999,3 @@
     100% { opacity: 1; transform: translateY(0); }
   }
 </style>
-                          </div>
-                        {:else if toolCall.isError}
-                          <div class="rounded-lg border border-cyber-red/20 bg-cyber-red/5 p-2 text-cyber-red/80 whitespace-pre-wrap font-mono">{typeof toolCall.isError === 'string' ? toolCall.isError : 'Error'}</div>
-                        {:else}
-                          <div class="rounded-lg border border-cyber-orange/20 bg-cyber-orange/5 p-2 text-cyber-orange/80">
-                            Running…
-                          </div>
-                        {/if}
-                      </div>
-                    </details>
-                  {/each}
-                {/if}
-
-                {#if msg.model && !msg.isStreaming}
-                  <div class="flex items-center gap-2 text-[10px] text-cyber-text-dim/50">
-                    <span>{formatModelName(msg.model)}</span>
-                    {#if msg.timings}
-                      <span>·</span>
-                      <span>{formatTokens(msg.timings.prompt_tokens)}↑ {formatTokens(msg.timings.completion_tokens)}↓</span>
-                      {#if msg.timings.time_to_first_token_ms}
-                        <span>·</span>
-                        <span>TTFT {formatDuration(msg.timings.time_to_first_token_ms)}</span>
-                      {/if}
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/if}
-        </div>
-      {/snippet}
-
-      {#if showActiveDivider}
-        <div class="chat-conversation-divider chat-conversation-divider-active" data-testid="conversation-divider-active" data-conversation-id={activeConversationId}>
-          <span class="chat-conversation-divider-line"></span>
-          <span class="chat-conversation-divider-label">
-            <span class="chat-conversation-divider-date">{formatConversationDate(activeConvForDivider?.createdAt ?? Date.now())}</span>
-            <span class="chat-conversation-divider-divider-dots" aria-hidden="true"></span>
-            <button
-              type="button"
-              class="chat-conversation-divider-btn"
-              title="Export conversation"
-              aria-label="Export conversation"
-              onclick={(e) => {
-                e.stopPropagation();
-                exportConversationToJsonl(activeConversationId);
-              }}
-            >
-              <Icon name="download" size={13} color="var(--muted)" />
-            </button>
-            <button
-              type="button"
-              class="chat-conversation-divider-btn chat-conversation-divider-delete"
-              title="Delete conversation"
-              aria-label="Delete conversation"
-              onclick={(e) => {
-                e.stopPropagation();
-                if (confirm('Delete this conversation? This cannot be undone.')) {
-                  deleteConversation(activeConversationId);
-                }
-              }}
-            >
-              <Icon name="trash-2" size={13} color="var(--muted)" />
-            </button>
-          </span>
-          <span class="chat-conversation-divider-line"></span>
-        </div>
-      {/if}
-
-      {#each messages as msg (msg.id)}
-        {@render messageRow(msg)}
-      {/each}
-
-      {#if isPending}
-        <div class="flex items-center gap-2 px-4 py-3" data-testid="pending-indicator">
-          <div class="flex items-center gap-2">
-            <div class="h-2 w-2 rounded-full bg-cyber-purple animate-pulse"></div>
-            <span class="text-xs text-cyber-purple">Queued — waiting for response…</span>
-          </div>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Input row (always visible when a conversation exists) -->
-  {#if activeConversationId}
-    <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-
-    {#if chatExpanded}
-      {#if messages.length > 0}
-        <div class="chat-collapse-row mb-1 flex justify-center">
-          <button
-            onclick={() => (chatExpanded ? closeChat() : (chatExpanded = true))}
-            class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium uppercase tracking-wider text-cyber-text-dim/45 transition-colors duration-200 hover:text-cyber-text-dim/80"
-            title={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-            aria-label={chatExpanded ? 'Collapse chat' : 'Expand chat'}
-            data-testid="chat-toggle"
-          >
-            <span class="inline-flex {chatExpanded ? '' : 'rotate-180'}">
-              <Icon name="chevron-down" size={16} />
-            </span>
-            {chatExpanded ? 'Collapse' : 'Expand'}
-          </button>
-        </div>
-      {/if}
-
-      <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
-        <textarea
-          bind:this={panelTextareaEl}
-          bind:value={panelChatInput}
-          oninput={autoResizePanel}
-          onkeydown={handlePanelKeydown}
-          placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
-          rows="1"
-          data-testid="chat-input"
-          class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
-          disabled={isActiveConversationStreaming}
-        ></textarea>
-        <AttachmentMenu
-          fluid
-          disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-          onPickDocument={openDocumentPicker}
-        />
-        <button
-          onclick={handlePanelSend}
-          disabled={isActiveConversationStreaming || (!panelChatInput.trim() && attachments.length === 0)}
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-cyan/20 text-cyber-cyan transition-all duration-200 hover:bg-cyber-cyan/30 disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Send message"
-          aria-label="Send message"
-          data-testid="send-button"
-        >
-          <Icon name="send" size={18} />
-        </button>
-      </div>
-    {:else}
-      <!-- Collapsed chat orb (bottom center) -->
-      <div class="chat-collapsed-orb-host" data-testid="chat-collapsed-orb">
-        <div class="chat-collapsed-orb">
-          {#if orbOptionsOpen}
-            <div class="orb-options-backdrop" onclick={() => { orbOptionsOpen = false; }} role="presentation"></div>
-          {/if}
-          <div
-            class="chat-orb-add"
-            class:show={orbOptionsOpen}
-            role="button"
-            tabindex="0"
-            aria-label="Add images"
-            data-od-id="chat-orb-add"
-            onclick={(e) => { e.stopPropagation(); orbOptionsOpen = false; imageFileInput?.click(); }}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); orbOptionsOpen = false; imageFileInput?.click(); } }}
-          >
-            <div class="coa-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            </div>
-            <span>Add images</span>
-          </div>
-          <div
-            class="chat-orb-expand"
-            class:show={orbOptionsOpen}
-            role="button"
-            tabindex="0"
-            aria-label="Type a message"
-            data-od-id="chat-orb-expand"
-            onclick={(e) => { e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); }}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); orbOptionsOpen = false; startNewConversation(); chatExpanded = true; tick().then(() => requestAnimationFrame(() => panelTextareaEl?.focus())); } }}
-          >
-            <div class="coe-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            </div>
-            <span>Type a message</span>
-          </div>
-
-          <!-- Orb mic button -->
-          <div
-            class="chat-orb {isRecording ? 'recording' : ''} {isStreamActive ? 'streaming' : ''} {holdActive ? 'holding' : ''} {orbOptionsOpen ? 'options-open' : ''}"
-            role="button"
-            tabindex="0"
-            aria-label="Voice input"
-            data-od-id="chat-orb"
-            data-testid="mic-button"
-            onclick={handleMicTap}
-            onpointerdown={handleMicPointerDown}
-            onpointerup={handleMicPointerUp}
-            onpointerleave={handleMicPointerLeave}
-            onpointercancel={handleMicPointerCancel}
-            ontouchstart={handleMicTouchStart}
-            ontouchmove={handleMicTouchMove}
-            ontouchend={handleMicTouchEnd}
-          >
-            {#if holdActive && !isRecording}
-              <span class="hold-countdown">{holdCountdown}</span>
-              <div class="hold-progress" style="inset: {4 + (holdElapsed / HOLD_TO_RECORD_MS) * 22}px;"></div>
-            {:else if isTranscribing}
-              <svg class="h-6 w-6 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><line x1="19" y1="10" x2="19" y2="12" /><line x1="5" y1="10" x2="5" y2="12" /></svg>
-            {:else if isRecording}
-              <div class="h-5 w-5 rounded-full bg-cyber-red"></div>
-            {:else}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            {/if}
-            {#if micTooltipVisible && !holdActive && !isRecording && !isTranscribing}
-              <div class="mic-tooltip">{micTooltipMessage}</div>
-            {/if}
-          </div>
-        </div>
-      </div>
-
-      <!-- Collapsed input bar (one-line, for quick messages) -->
-      <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
-        <textarea
-          bind:this={textareaEl}
-          bind:value={chatInput}
-          oninput={autoResize}
-          onkeydown={handleKeydown}
-          placeholder="Ask me anything..."
-          rows="1"
-          data-testid="chat-input"
-          class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
-          disabled={isActiveConversationStreaming}
-        ></textarea>
-        <AttachmentMenu
-          disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
-          onPickDocument={openDocumentPicker}
-        />
-        <button
-          onclick={() => handleSend(undefined, undefined, undefined, false)}
-          disabled={isActiveConversationStreaming || (!chatInput.trim() && attachments.length === 0)}
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-cyan/20 text-cyber-cyan transition-all duration-200 hover:bg-cyber-cyan/30 disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Send message"
-          aria-label="Send message"
-          data-testid="send-button"
-        >
-          <Icon name="send" size={18} />
-        </button>
-      </div>
-    {/if}
-  {/if}
-
-  </div>
-
-{#if holdActive && !isRecording}
-  <div class="record-countdown-overlay" data-testid="record-countdown">
-    <div class="record-countdown-ring">
-      <svg viewBox="0 0 120 120" class="record-countdown-svg">
-        <circle class="record-countdown-track" cx="60" cy="60" r="54" />
-        <circle
-          class="record-countdown-progress"
-          cx="60"
-          cy="60"
-          r="54"
-          style="stroke-dashoffset: {339.292 * (1 - holdElapsed / HOLD_TO_RECORD_MS)}"
-        />
-      </svg>
-      <span class="record-countdown-number">{holdCountdown}</span>
-    </div>
-    <span class="record-countdown-label">Hold to record</span>
-  </div>
-{/if}
