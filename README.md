@@ -1,12 +1,14 @@
 # Knowledge Graph
 
-A private, spatial knowledge environment that runs entirely on your own machine.
+![Knowledge Graph](https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/narration-poster.jpg)
 
-Conversations, photos, and voice notes are no longer trapped in chat logs or folders. They live as floating elements on an infinite canvas of time. Scroll and you move through your days and months. Speak, and a local AI listens, understands, and weaves everything into a growing personal knowledge graph that only you control.
+A private spatial interface for memory and knowledge.
 
-Inspired by cinematic interfaces like JARVIS and the holographic evidence systems in *Mercy*, the experience is designed to feel less like using software and more like stepping into a personal command interface — ambient, spatial, and fully sovereign.
+Conversations, photos, and voice notes live as floating elements on an infinite canvas of time. Scroll to move through days and months. Speak to query or add. Everything runs locally on your own machine — no cloud, no external models.
 
-**No cloud. No external models. Everything stays local.**
+Built as a reimagining of AI interaction: not a chat window, but a living personal command space inspired by cinematic interfaces (JARVIS, *Mercy*), where your data stays sovereign.
+
+**[Live portfolio write-up →](https://paulvisciano.vercel.app/)**
 
 ---
 
