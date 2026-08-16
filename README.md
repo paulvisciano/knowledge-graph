@@ -1,8 +1,10 @@
 # Knowledge Graph
 
-![Knowledge Graph — tablet](https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/knowledge-graph-1.jpg)
-
-![Knowledge Graph — spatial / AR](https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/knowledge-graph-2.jpg)
+<p align="center">
+  <img src="https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/knowledge-graph-1.jpg" alt="Knowledge Graph — tablet" width="48%" />
+  &nbsp;
+  <img src="https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/knowledge-graph-2.jpg" alt="Knowledge Graph — spatial / AR" width="48%" />
+</p>
 
 A private spatial interface for memory and knowledge.
 
