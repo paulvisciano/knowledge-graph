@@ -1,5 +1,8 @@
 # Knowledge Graph
 
+> Part of **[Sci-Fi Labs](https://github.com/paulvisciano)** — spatial apps for web, mobile, and XR.  
+> [Where is Paul?](https://paulvisciano.github.io/) · [Knowledge Graph](https://github.com/paulvisciano/knowledge-graph) · [Musical Cubes](https://musical-cubes.vercel.app)
+
 <p align="center">
   <img src="https://pub-9466bb5132e74aeba333004ad0c21f21.r2.dev/knowledge-graph-1.jpg" alt="Knowledge Graph — tablet" width="48%" />
   &nbsp;
@@ -11,6 +14,8 @@ A private spatial interface for memory and knowledge.
 Conversations, photos, and voice notes live as floating elements on an infinite canvas of time. Scroll to move through days and months. Speak to query or add. Everything runs locally on your own machine — no cloud, no external models.
 
 Built as a reimagining of AI interaction: not a chat window, but a living personal command space inspired by cinematic interfaces (JARVIS, *Mercy*), where your data stays sovereign.
+
+A Sci-Fi app: spatial memory designed for web and local surfaces first, with the same environment meant to extend into XR.
 
 **[Live portfolio write-up →](https://paulvisciano.vercel.app/)**
 
@@ -155,7 +160,7 @@ open http://localhost:3000              # Nexus UI
 
 ## Vision
 
-The long-term direction is a fully local, cinematic knowledge interface:
+The long-term direction is a fully local, cinematic knowledge interface — a Sci-Fi Labs surface for web, mobile, and XR:
 
 - Floating, glassy panels instead of chat bubbles
 - Hierarchical expansion of related knowledge (one node can open deeper layers)
