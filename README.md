@@ -13,6 +13,8 @@ A private spatial interface for memory and knowledge.
 
 Conversations, photos, and voice notes live as floating elements on an infinite canvas of time. Scroll to move through days and months. Speak to query or add. Everything runs locally on your own machine — no cloud, no external models.
 
+This is the evolution of [Neuro Graph](https://github.com/paulvisciano/neuro-graph) — the first attempt to map memory as a connected network of people, places, emotions, and time. Neuro Graph showed what a living memory graph looks like; Knowledge Graph asks what happens when a local AI can see your photos, hear your voice, extract entities automatically, and write them back into the graph. Same goal — map the content of a life, visualize the connections, relive memories, go back in time — but with intelligence on-device instead of a static dataset. Neuro Graph remains the public face of the lived experience; Knowledge Graph is the private engine behind it.
+
 Built as a reimagining of AI interaction: not a chat window, but a living personal command space inspired by cinematic interfaces (JARVIS, *Mercy*), where your data stays sovereign.
 
 A Sci-Fi app: spatial memory designed for web and local surfaces first, with the same environment meant to extend into XR.
@@ -168,3 +170,5 @@ The long-term direction is a fully local, cinematic knowledge interface — a Sc
 - Ambient presence rather than a transactional chat window
 
 All of it running on hardware you own, with data that never leaves your machine.
+
+Knowledge Graph sits alongside [Neuro Graph](https://github.com/paulvisciano/neuro-graph) (the public memory network it evolved from), [Where is Paul?](https://github.com/paulvisciano/where-is-paul) (the experience layer — moments on a globe that feed the graph), and [Musical Cubes](https://github.com/paulvisciano/musical-cubes) (spatial music production) under one thesis: spatial products for web, mobile, and XR. Memory as a place is the product constraint — not a feature list bolted onto a chat window, and not a stack that only works when you rent more RAM in the cloud.
