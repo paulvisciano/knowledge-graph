@@ -513,7 +513,7 @@ def _filter_response_by_date(response: str, query_date: datetime) -> str:
 
         # Drop if relationship description has a taken_on date that doesn't match (±1 day tolerance)
         m = re.search(r"(\d{4}-\d{2}-\d{2})", desc)
-        if m and "taken_on" in desc.lower():
+        if m and ("taken_on" in desc.lower() or "taken on" in desc.lower()):
             date_str = m.group(1)
             if date_str not in valid_dates_tolerance:
                 continue
@@ -649,6 +649,37 @@ def _filter_response_by_date_range(
     kept_date_entities: set[str] = set()
     has_matching_photos = False
 
+    # Build a photo→date map from taken_on relationships so Photo entities
+    # can be filtered by their EXIF date (from the Date entity they link to),
+    # not by parsing dates from filenames (which may use UTC timestamps).
+    # Also extracts dates directly from the description text as a fallback
+    # when the Date entity isn't in the response but the relationship is.
+    photo_dates: dict[str, str] = {}
+    for rel in parsed_relations:
+        e1, e2, desc = rel.get("entity1", ""), rel.get("entity2", ""), rel.get("description", "")
+        if "taken on" not in desc.lower() and "taken_on" not in desc.lower():
+            continue
+        photo_entity = None
+        date_str = None
+        if "(Photo)" in e1:
+            photo_entity = e1
+        elif "(Photo)" in e2:
+            photo_entity = e2
+        if "(Date)" in e1:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", e1)
+            if m:
+                date_str = m.group(1)
+        elif "(Date)" in e2:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", e2)
+            if m:
+                date_str = m.group(1)
+        if not date_str:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", desc)
+            if m:
+                date_str = m.group(1)
+        if photo_entity and date_str:
+            photo_dates[photo_entity] = date_str
+
     for obj in parsed_entities:
         entity_name = obj.get("entity", "")
         entity_type = obj.get("type", "")
@@ -665,6 +696,12 @@ def _filter_response_by_date_range(
                 else:
                     dropped_entities.add(entity_name)
             # else: Date entity without parseable date — keep it
+        elif entity_type == "Photo":
+            photo_date = photo_dates.get(entity_name)
+            if photo_date and _in_range(photo_date):
+                has_matching_photos = True
+            else:
+                dropped_entities.add(entity_name)
         elif _RE_DATE_IN_NAME.search(entity_name):
             extracted = _extract_date_from_name(entity_name)
             if extracted and not _in_range(extracted):
@@ -685,7 +722,7 @@ def _filter_response_by_date_range(
             continue
 
         # Drop relationships whose taken_on date is outside the range.
-        if "taken_on" in desc.lower():
+        if "taken on" in desc.lower() or "taken_on" in desc.lower():
             date_matches = re.findall(r"(\d{4}-\d{2}-\d{2})", desc)
             if date_matches:
                 if not any(_in_range(d) for d in date_matches):
@@ -722,6 +759,15 @@ def _filter_response_by_date_range(
             return f"\nNo knowledge graph data found for {start_iso} to {end_iso}.\n"
 
     kept_entity_objs = [e for e in parsed_entities if e.get("entity", "") not in dropped_entities]
+
+    # LightRAG sometimes returns taken_on relationships for Photo entities
+    # that aren't in the entity list. Inject them so the LLM sees the photos.
+    existing_entity_names = {e.get("entity", "") for e in kept_entity_objs}
+    for photo_name, photo_date in photo_dates.items():
+        if _in_range(photo_date) and photo_name not in existing_entity_names:
+            kept_entity_objs.append({"entity": photo_name, "type": "Photo", "description": f"Photo: {photo_name}"})
+            existing_entity_names.add(photo_name)
+            has_matching_photos = True
 
     result_lines: list[str] = []
     result_lines.append("")
@@ -983,7 +1029,7 @@ async def query_knowledge_graph(
     hl_keywords, ll_keywords = _extract_keywords(query)
     query_range = _scan_text_for_date_range(query)
     if query_range is not None:
-        top_k = max(top_k, 30)
+        top_k = max(top_k, 60)
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
