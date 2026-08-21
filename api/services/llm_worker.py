@@ -73,7 +73,7 @@ REASONING_ENABLED = os.environ.get("LLM_REASONING_ENABLED", "").lower() in ("1",
 # The 8K-char limit keeps each tool result under ~2K tokens (roughly 4
 # chars/token), leaving plenty of room for the system prompt, history, and
 # the model's response within the 32K context window.
-MAX_TOOL_RESULT_CHARS = int(os.environ.get("LLM_MAX_TOOL_RESULT_CHARS", "8000"))
+MAX_TOOL_RESULT_CHARS = int(os.environ.get("LLM_MAX_TOOL_RESULT_CHARS", "24000"))
 
 import re
 
