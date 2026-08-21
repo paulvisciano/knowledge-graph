@@ -135,15 +135,26 @@ export class ChunkManager {
 
   /**
    * Finds the `NodePlane` for `nodeId` among the mounted chunks, or
-   * `undefined` if the node's chunk is not currently mounted.
+   * `undefined` if the node's chunk is not currently mounted. When a node
+   * appears in multiple buckets (e.g. a today-conversation duplicated into
+   * the "This Month" bucket), the plane nearest the camera is returned so
+   * `flyToNode` doesn't yank the camera across buckets.
    */
-  findPlaneByNodeId(nodeId: string): NodePlane | undefined {
+  findPlaneByNodeId(nodeId: string, cameraZ?: number): NodePlane | undefined {
+    let best: NodePlane | undefined;
+    let bestDist = Infinity;
     for (const chunk of this._mounted.values()) {
       for (const plane of chunk.planes) {
-        if (plane.node.id === nodeId) return plane;
+        if (plane.node.id !== nodeId) continue;
+        if (cameraZ === undefined) return plane;
+        const dist = Math.abs(plane.node.cellZ * CHUNK_SIZE - cameraZ);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = plane;
+        }
       }
     }
-    return undefined;
+    return best;
   }
 
   /**

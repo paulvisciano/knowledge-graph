@@ -353,6 +353,7 @@ export class SceneManager {
   flyTo(targetZ: number): void {
     if (this._disposed) return;
     const clampedZ = Math.max(this._minCameraZ, Math.min(this._maxCameraZ, targetZ));
+    this._userMoved = true;
     this._flyFrom.copy(this._basePos);
     this._flyTo = new THREE.Vector3(0, 0, clampedZ);
     this._flyElapsed = 0;
@@ -384,7 +385,7 @@ export class SceneManager {
    */
   flyToNode(nodeId: string): void {
     if (this._disposed) return;
-    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
+    const plane = this._chunkManager.findPlaneByNodeId(nodeId, this._basePos.z);
     if (!plane) return;
     const node = plane.node;
     const worldX = node.cellX * CHUNK_SIZE + node.localX;
