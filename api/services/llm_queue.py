@@ -11,6 +11,29 @@ logger = logging.getLogger(__name__)
 
 VALID_STATUSES = ("pending", "streaming", "complete", "error", "cancelled")
 
+# Postgres NOTIFY has an 8KB payload limit. Events are stored in full in the
+# llm_job_events table (jsonb, no limit), but the NOTIFY payload must be capped
+# to avoid asyncpg InvalidParameterValueError. Clients read full event data
+# from the table via get_llm_job_events(); the NOTIFY is just a wake-up signal.
+_NOTIFY_MAX_BYTES = 8000
+_NOTIFY_FIELD_MAX_CHARS = 2000
+
+
+def _cap_for_notify(event_data: dict | str) -> dict | str:
+    """Truncate large string values in event_data so the NOTIFY payload fits in 8KB."""
+    if not isinstance(event_data, dict):
+        if isinstance(event_data, str) and len(event_data) > _NOTIFY_FIELD_MAX_CHARS:
+            return event_data[:_NOTIFY_FIELD_MAX_CHARS] + "...[truncated]"
+        return event_data
+
+    capped = {}
+    for key, value in event_data.items():
+        if isinstance(value, str) and len(value) > _NOTIFY_FIELD_MAX_CHARS:
+            capped[key] = value[:_NOTIFY_FIELD_MAX_CHARS] + "...[truncated]"
+        else:
+            capped[key] = value
+    return capped
+
 
 async def create_llm_job(
     conv_id: str,
@@ -102,12 +125,13 @@ async def append_llm_job_event(
         )
         event_id = row["id"] if row else None
 
+        notify_data = _cap_for_notify(event_data)
         payload = json.dumps({
             "id": event_id,
             "job_id": job_id,
             "conv_id": conv_id,
             "event_type": event_type,
-            "data": event_data,
+            "data": notify_data,
         })
         await conn.execute("SELECT pg_notify($1, $2)", "llm_job_events", payload)
 

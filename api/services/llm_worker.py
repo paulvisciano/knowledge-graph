@@ -808,6 +808,24 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                     conv_id=conv_id,
                 )
                 return
+            except httpx.HTTPError as exc:
+                # Catches ReadError, RemoteProtocolError, etc. that escape
+                # the specific handlers above and would otherwise hit the
+                # outer handler with a misleading "context window exceeded" message.
+                err_msg = f"llama-server connection error: {exc}"
+                logger.error("Job %s: %s", job_id, err_msg)
+                await update_llm_job_status(job_id, "error", err_msg)
+                await append_llm_job_event(
+                    job_id, "status_change",
+                    {"conv_id": conv_id, "status": "error"},
+                    conv_id=conv_id,
+                )
+                await append_llm_job_event(
+                    job_id, "error",
+                    {"error": err_msg},
+                    conv_id=conv_id,
+                )
+                return
 
             # Publish timing info if we got any
             if timings:
@@ -896,8 +914,10 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                 tool_result = await _mcp_call_tool(http_client, tool_name, tool_args)
 
                 # Publish tool_call_result event
-                # Truncate very long results in the event to avoid huge payloads
-                display_result = tool_result[:50000] if len(tool_result) > 50000 else tool_result
+                # Cap for the event payload — llm_queue._cap_for_notify also
+                # truncates, but keeping this small avoids bloating the DB row
+                # and the NOTIFY payload for the UI's tool-result display.
+                display_result = tool_result[:2000] if len(tool_result) > 2000 else tool_result
                 await append_llm_job_event(
                     job_id, "tool_call_result",
                     {
@@ -989,8 +1009,10 @@ async def poll_and_process() -> None:
         await process_llm_job(job)
     except Exception as exc:
         logger.exception("Job %s failed with unhandled exception", job_id)
-        raw_err = str(exc)
-        if "payload string too long" in raw_err.lower() or "context" in raw_err.lower() and "exceed" in raw_err.lower():
+        raw_err = str(exc).lower()
+        if "payload string too long" in raw_err:
+            err_msg = "Database notification payload too long — tool result exceeded the Postgres NOTIFY 8KB limit. Try a shorter query."
+        elif "context" in raw_err and "exceed" in raw_err:
             err_msg = "Context window exceeded — the conversation and tool results are too long for the model. Try a shorter query."
         else:
             err_msg = f"Unhandled exception: {exc}"
