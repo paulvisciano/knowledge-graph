@@ -515,12 +515,10 @@ export class SceneManager {
   private applyKeyboard(): void {
     const k = this._keys;
     let moved = false;
-    if (k.has('ArrowLeft') || k.has('a')) { this._targetVel.x -= KEYBOARD_SPEED; moved = true; }
-    if (k.has('ArrowRight') || k.has('d')) { this._targetVel.x += KEYBOARD_SPEED; moved = true; }
-    if (k.has('ArrowUp') || k.has('w')) { this._targetVel.y += KEYBOARD_SPEED; moved = true; }
-    if (k.has('ArrowDown') || k.has('s')) { this._targetVel.y -= KEYBOARD_SPEED; moved = true; }
-    if (k.has('q')) { this._targetVel.z += KEYBOARD_SPEED; moved = true; }
-    if (k.has('e')) { this._targetVel.z -= KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowLeft')) { this._targetVel.x -= KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowRight')) { this._targetVel.x += KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowUp')) { this._targetVel.y += KEYBOARD_SPEED; moved = true; }
+    if (k.has('ArrowDown')) { this._targetVel.y -= KEYBOARD_SPEED; moved = true; }
     if (moved) {
       this._userMoved = true;
       this.cancelFly();
@@ -579,10 +577,14 @@ export class SceneManager {
   // --- input handlers --------------------------------------------------
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
     this._keys.add(e.key);
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
     this._keys.delete(e.key);
   };
 
