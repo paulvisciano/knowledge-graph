@@ -20,6 +20,7 @@ _LIGHTRAG_API_URL = os.getenv("LIGHTRAG_API_URL", "http://localhost:9621")
 _LIGHTRAG_API_KEY = os.getenv("LIGHTRAG_API_KEY", "")
 _MCP_PORT = int(os.getenv("MEMORY_SEARCH_MCP_PORT", "9653"))
 _IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "0"))
+_KG_API_URL = os.getenv("KG_API_URL", "http://localhost:8000")
 
 # Response-size guard. LightRAG with only_need_context=True returns raw
 # entities + relationships + document chunks (no synthesis). Broad queries
@@ -47,8 +48,8 @@ asyncio_monotonic = time.monotonic
 mcp = MCPServer(
     "KnowledgeGraph",
     instructions=(
-        "This server exposes two tools for a personal knowledge graph (LightRAG-backed): "
-        "save_to_knowledge_graph and query_knowledge_graph.\n"
+        "This server exposes three tools for a personal knowledge graph (LightRAG-backed): "
+        "save_to_knowledge_graph, query_knowledge_graph, and navigate_knowledge_graph.\n"
         "\n"
         "## save_to_knowledge_graph(text, file_source)\n"
         "Insert text into the graph. Entities and relations are extracted automatically server-side. "
@@ -68,6 +69,15 @@ mcp = MCPServer(
         "- Supports relative date expressions in the query: 'this month', 'last month', "
         "'this week', 'last week', 'this year', 'last year', 'today', 'yesterday'. "
         "These resolve to a date range and return all entities/relationships/chunks within it.\n"
+        "\n"
+        "## navigate_knowledge_graph(target)\n"
+        "Navigate the graph UI's timeline to a specific time period. Call this when the user asks "
+        "to go to or look at a time period — e.g. 'what have I been up to last month', 'take me to "
+        "August 2025', 'show me yesterday'. The target string accepts the same relative date "
+        "expressions as query_knowledge_graph ('last month', 'this week', 'today', 'yesterday', "
+        "'August 2025', etc.). This flies the camera to the corresponding time bucket on the spatial "
+        "canvas — it does NOT retrieve graph data. Always pair it with query_knowledge_graph when "
+        "the user wants both navigation and information retrieval.\n"
         "\n"
         "Conversational behavior, phrasing, and persona are owned by the host client's system prompt, "
         "not by these instructions."
@@ -580,14 +590,15 @@ def _filter_response_by_date(response: str, query_date: datetime) -> str:
     return "\n".join(result_lines)
 
 
-def _fetch_photos_for_dates(start_iso: str, end_iso: str) -> list[str]:
-    """Fetch all Photo entity names connected to Date entities in [start, end].
+def _fetch_entities_for_dates(start_iso: str, end_iso: str) -> list[tuple[str, str]]:
+    """Fetch all Photo and Note entity names connected to Date entities in [start, end].
 
     Uses LightRAG's graph traversal API (/graphs?label=...) to get the complete
-    set of photos for each date, bypassing the top_k limit of the vector query.
+    set of entities for each date, bypassing the top_k limit of the vector query.
+    Returns a list of (entity_name, entity_type) tuples.
     """
     import httpx
-    photos: list[str] = []
+    entities: list[tuple[str, str]] = []
     seen: set[str] = set()
     cur = datetime.strptime(start_iso, "%Y-%m-%d")
     end_dt = datetime.strptime(end_iso, "%Y-%m-%d")
@@ -603,13 +614,20 @@ def _fetch_photos_for_dates(start_iso: str, end_iso: str) -> list[str]:
             if r.status_code == 200:
                 for node in r.json().get("nodes", []):
                     for label in node.get("labels", []):
-                        if "(Photo)" in label and label not in seen:
+                        if label == date_label:
+                            continue
+                        if label in seen:
+                            continue
+                        if "(Photo)" in label:
                             seen.add(label)
-                            photos.append(label)
+                            entities.append((label, "Photo"))
+                        elif "(Note)" in label:
+                            seen.add(label)
+                            entities.append((label, "Note"))
         except Exception:
             pass
         cur = cur + timedelta(days=1)
-    return photos
+    return entities
 
 
 def _filter_response_by_date_range(
@@ -790,27 +808,36 @@ def _filter_response_by_date_range(
         if not any_match:
             return f"\nNo knowledge graph data found for {start_iso} to {end_iso}.\n"
 
-    kept_entity_objs = [e for e in parsed_entities if e.get("entity", "") not in dropped_entities]
+    kept_entity_objs = [
+        e for e in parsed_entities
+        if e.get("entity", "") not in dropped_entities
+        and e.get("type", "") != "Photo"
+    ]
 
-    # LightRAG sometimes returns taken_on relationships for Photo entities
-    # that aren't in the entity list. Inject them so the LLM sees the photos.
+    # Track photo names for IMAGE_REFS without injecting bare filename entities
+    # into the entity JSON — filenames are useless to the LLM without VLM
+    # descriptions. The UI reads ---IMAGE_REFS--- to display thumbnails.
     existing_entity_names = {e.get("entity", "") for e in kept_entity_objs}
+    photo_refs: list[str] = []
     for photo_name, photo_date in photo_dates.items():
-        if _in_range(photo_date) and photo_name not in existing_entity_names:
-            kept_entity_objs.append({"entity": photo_name, "type": "Photo", "description": f"Photo: {photo_name}"})
-            existing_entity_names.add(photo_name)
+        if _in_range(photo_date):
             has_matching_photos = True
+            if photo_name not in photo_refs:
+                photo_refs.append(photo_name)
 
-    # LightRAG's vector query (top_k) only returns a subset of taken_on
-    # relationships. Use the graph traversal API to fetch ALL photos
-    # connected to in-range Date entities, ensuring the LLM sees the
-    # complete set of photos for the queried period.
-    graph_photos = _fetch_photos_for_dates(start_iso, end_iso)
-    for photo_name in graph_photos:
-        if photo_name not in existing_entity_names:
-            kept_entity_objs.append({"entity": photo_name, "type": "Photo", "description": f"Photo: {photo_name}"})
-            existing_entity_names.add(photo_name)
+    # Graph traversal: fetch ALL photos AND notes connected to in-range Date
+    # entities. Photos are tracked for IMAGE_REFS only; notes are injected as
+    # entities so their content can be fetched and sent to the LLM.
+    graph_entities = _fetch_entities_for_dates(start_iso, end_iso)
+    for entity_name, entity_type in graph_entities:
+        if entity_type == "Photo":
             has_matching_photos = True
+            if entity_name not in photo_refs:
+                photo_refs.append(entity_name)
+        elif entity_type == "Note":
+            if entity_name not in existing_entity_names:
+                kept_entity_objs.append({"entity": entity_name, "type": "Note", "description": f"Note: {entity_name}"})
+                existing_entity_names.add(entity_name)
 
     result_lines: list[str] = []
     result_lines.append("")
@@ -832,6 +859,9 @@ def _filter_response_by_date_range(
     remaining = _extract_trailing_sections_range(response, valid_dates_range, start_year, end_year)
     if remaining:
         result_lines.append(remaining)
+
+    if photo_refs:
+        result_lines.append("\n---IMAGE_REFS---\n" + "\n".join(photo_refs))
 
     return "\n".join(result_lines)
 
@@ -1106,12 +1136,19 @@ async def query_knowledge_graph(
         # time is redundant — the structured graph data already captures people,
         # places, and activities. Set IMG_DESC_MAX_CHARS > 0 to re-enable.
         has_active_date = (query_range is not None) or (query_date is not None)
-        if _IMG_DESC_MAX_CHARS > 0 and has_active_date and response and "No knowledge graph data found" not in response:
-            photo_names = _extract_photo_names(response)
-            if photo_names:
-                image_descs = await _fetch_image_descriptions(photo_names)
-                if image_descs:
-                    response = response + "\n\nImage Descriptions:\n\n" + image_descs
+        if has_active_date and response and "No knowledge graph data found" not in response:
+            if _IMG_DESC_MAX_CHARS > 0:
+                photo_names = _extract_photo_names(response)
+                if photo_names:
+                    image_descs = await _fetch_image_descriptions(photo_names)
+                    if image_descs:
+                        response = response + "\n\nImage Descriptions:\n\n" + image_descs
+
+            note_names = _extract_note_names(response)
+            if note_names:
+                note_contents = await _fetch_note_contents(note_names)
+                if note_contents:
+                    response = response + "\n\nNote Contents:\n\n" + note_contents
 
         image_refs: list[str] = []
         for ref in result.get("references") or []:
@@ -1120,7 +1157,12 @@ async def query_knowledge_graph(
                 image_refs.append(fp)
 
         if image_refs:
-            response = (response or "No results found.") + "\n\n---IMAGE_REFS---\n" + "\n".join(image_refs)
+            existing_refs = ""
+            if "---IMAGE_REFS---" in response:
+                response, existing_refs = response.split("---IMAGE_REFS---", 1)
+                existing_refs = existing_refs.strip()
+            all_refs = existing_refs + "\n" + "\n".join(image_refs) if existing_refs else "\n".join(image_refs)
+            response = (response or "No results found.") + "\n\n---IMAGE_REFS---\n" + all_refs
         response = _truncate_response(response)
         return response if response else "No results found."
     except Exception as e:
@@ -1131,6 +1173,16 @@ def _extract_photo_names(response: str) -> list[str]:
     """Extract photo filenames from Photo entity names in the filtered response."""
     names: list[str] = []
     for m in re.finditer(r"((?:PXL_|IMG_|DSC_|DCIM_)[\w.-]+\.jpg)", response):
+        name = m.group(1)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _extract_note_names(response: str) -> list[str]:
+    """Extract note entity names from the filtered response."""
+    names: list[str] = []
+    for m in re.finditer(r"([^\s\"]+)\s*\(Note\)", response):
         name = m.group(1)
         if name not in names:
             names.append(name)
@@ -1188,6 +1240,49 @@ async def _fetch_image_descriptions(photo_names: list[str]) -> str:
             except Exception:
                 continue
     return "\n\n---\n\n".join(descriptions)
+
+
+async def _fetch_note_contents(note_names: list[str]) -> str:
+    """Fetch full text of notes from LightRAG documents.
+
+    note_names are entity names like "mcp-20260817-043848-978853 (Note)" —
+    the file_path is the name without the " (Note)" suffix.
+    """
+    import httpx
+    file_paths = [n.replace(" (Note)", "") for n in note_names]
+    contents: list[str] = []
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        list_r = await client.get(
+            f"{_LIGHTRAG_API_URL}/documents",
+            params={"limit": 500},
+            headers=_headers(),
+        )
+        if list_r.status_code != 200:
+            return ""
+        data = list_r.json()
+        processed = data.get("statuses", {}).get("processed", [])
+        fp_set = set(file_paths)
+        doc_ids: list[tuple[str, str]] = []
+        for doc in processed:
+            fp = doc.get("file_path", "")
+            if fp and fp in fp_set:
+                doc_ids.append((fp, doc.get("id", "")))
+        for fp, doc_id in doc_ids:
+            if not doc_id:
+                continue
+            try:
+                content_r = await client.get(
+                    f"{_LIGHTRAG_API_URL}/documents/{doc_id}/full_content",
+                    headers=_headers(),
+                )
+                if content_r.status_code != 200:
+                    continue
+                content = content_r.json().get("content", "")
+                if content:
+                    contents.append(f"Note: {fp}\n{content}")
+            except Exception:
+                continue
+    return "\n\n---\n\n".join(contents)
 
 
 # LightRAG /documents/text returns HTTP 409 in three distinct situations.
@@ -1823,6 +1918,48 @@ async def save_to_knowledge_graph(text: str, file_source: str = "") -> str:
         f"pipeline remained busy after {_TRANSIENT_409_MAX_ATTEMPTS} retries. "
         f"Last detail: {last_detail}"
     )
+
+
+@mcp.tool()
+async def navigate_knowledge_graph(target: str) -> str:
+    """Navigate the graph UI's timeline to a specific time period. Call this when the user asks to go to or look at a time period — e.g. 'what have I been up to last month', 'take me to August 2025', 'show me yesterday'. The target accepts relative date expressions ('last month', 'this week', 'today', 'yesterday', 'this year', 'last year') and month+year strings ('August 2025', 'Aug 2025'). This flies the camera to the matching time bucket — it does NOT retrieve graph data. Pair with query_knowledge_graph when the user also wants information about that period."""
+    query_range = _scan_text_for_date_range(target)
+    query_date = _scan_text_for_date(target) if query_range is None else None
+
+    start_iso: str | None = None
+    end_iso: str | None = None
+    display_target: str = target.strip()
+
+    if query_range is not None:
+        start_iso = query_range[0].strftime("%Y-%m-%d")
+        end_iso = query_range[1].strftime("%Y-%m-%d")
+    elif query_date is not None:
+        start_iso = query_date.strftime("%Y-%m-%d")
+        end_iso = query_date.strftime("%Y-%m-%d")
+
+    url = f"{_KG_API_URL}/api/chat/navigate"
+    payload = {
+        "target": display_target,
+        "start_date": start_iso,
+        "end_date": end_iso,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            result = r.json()
+    except httpx.HTTPStatusError as e:
+        return f"Error navigating graph (target={target}): {e.response.status_code} {e.response.text[:200]}"
+    except Exception as e:
+        return f"Error navigating graph (target={target}): {e}"
+
+    if start_iso and end_iso and start_iso != end_iso:
+        date_part = f"{start_iso} → {end_iso}"
+    elif start_iso:
+        date_part = start_iso
+    else:
+        date_part = "unresolved date"
+    return f"Navigated to '{display_target}' ({date_part}). The graph UI should now show this time period."
 
 
 def main() -> None:

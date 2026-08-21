@@ -352,7 +352,7 @@
       const msgId = data?.message_id ?? sseStreamingMsgId;
       if (!convId || !msgId) return;
 
-      processingLabel = data?.tool_name === 'save_to_knowledge_graph' ? 'Saving to knowledge graph...' : 'Searching knowledge graph...';
+      processingLabel = data?.tool_name === 'save_to_knowledge_graph' ? 'Saving to knowledge graph...' : data?.tool_name === 'navigate_knowledge_graph' ? 'Navigating timeline...' : 'Searching knowledge graph...';
 
       const updateMsg = (m: ChatMessage): ChatMessage => {
         const existing = m.mcpToolCalls ?? [];

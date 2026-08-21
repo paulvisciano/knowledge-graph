@@ -15,7 +15,8 @@ export type SseEventType =
   | 'status_change'
   | 'complete'
   | 'error'
-  | 'start';
+  | 'start'
+  | 'navigate';
 
 /** A single parsed SSE event dispatched to subscribers. */
 export interface LlmEvent {

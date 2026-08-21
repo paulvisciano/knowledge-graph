@@ -91,6 +91,7 @@ services:
       MEMORY_SEARCH_MCP_PORT: ${MEMORY_SEARCH_MCP_PORT:-9653}
       LIGHTRAG_API_URL: http://lightrag:${LIGHTRAG_PORT:-9621}
       LIGHTRAG_API_KEY: ${LIGHTRAG_BINDING_API_KEY:-}
+      KG_API_URL: http://api:${API_PORT:-8000}
     ports:
     - ${MEMORY_SEARCH_MCP_PORT:-9653}:${MEMORY_SEARCH_MCP_PORT:-9653}
     depends_on:

@@ -13,6 +13,7 @@
   import type { TimeIndex } from './Layout';
   import { configStore } from '$lib/stores/config.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
+  import { sseClient, type LlmEvent } from '$lib/services/sse-client.svelte';
   import { usePan, type PanCustomEvent, useComposedGesture, pinchComposition, type PinchCustomEvent, type GestureCallback, useSwipe, type SwipeCustomEvent } from 'svelte-gestures';
   import NodeOverlay from './NodeOverlay.svelte';
   import ProcessingOverlay from './ProcessingOverlay.svelte';
@@ -493,6 +494,92 @@
     }
   }
 
+  let navigateUnsub: (() => void) | null = null;
+  let navigatePollTimer: ReturnType<typeof setInterval> | null = null;
+  let lastNavigateSeq = 0;
+
+  function findBucketForDateRange(startIso: string | null, endIso: string | null, target: string): number {
+    if (!timeIndex || timeIndex.indexToBucket.length === 0) return -1;
+
+    const labels = timeIndex.indexToLabel;
+    const buckets = timeIndex.indexToBucket;
+
+    const targetLower = target.toLowerCase().trim();
+    const labelIdx = labels.findIndex((l) => l.toLowerCase() === targetLower);
+    if (labelIdx >= 0) return labelIdx;
+
+    const relativeMap: Record<string, string[]> = {
+      'last month': ['Last Month'],
+      'this month': ['This Month'],
+      'this week': ['This Month', 'Today'],
+      'last week': ['Last Month', 'Yesterday'],
+      'today': ['Today'],
+      'yesterday': ['Yesterday'],
+      'this year': ['This Month', 'Today'],
+      'last year': [],
+    };
+    const relLabels = relativeMap[targetLower];
+    if (relLabels) {
+      for (const rl of relLabels) {
+        const idx = labels.findIndex((l) => l === rl);
+        if (idx >= 0) return idx;
+      }
+    }
+
+    if (!startIso) return -1;
+    const startDate = new Date(startIso + 'T00:00:00');
+    const monthKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+    const monthIdx = buckets.findIndex((b) => b === monthKey);
+    if (monthIdx >= 0) return monthIdx;
+
+    if (endIso) {
+      const endDate = new Date(endIso + 'T00:00:00');
+      const endMonthKey = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}`;
+      const endMonthIdx = buckets.findIndex((b) => b === endMonthKey);
+      if (endMonthIdx >= 0) return endMonthIdx;
+    }
+
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < buckets.length; i++) {
+      const b = buckets[i];
+      if (/^\d{4}-\d{2}$/.test(b)) {
+        const dist = Math.abs(new Date(b + '-01T00:00:00').getTime() - startDate.getTime());
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+    }
+    return bestIdx;
+  }
+
+  function applyNavigate(target: string, startDate: string | null, endDate: string | null): void {
+    if (!target || !sceneManager || !timeIndex) return;
+    const idx = findBucketForDateRange(startDate, endDate, target);
+    if (idx >= 0) flyToBucket(idx, false);
+  }
+
+  function handleNavigateEvent(event: LlmEvent): void {
+    const data = event.data as { target?: string; start_date?: string | null; end_date?: string | null; seq?: number };
+    if (data?.seq) lastNavigateSeq = data.seq;
+    applyNavigate(data?.target ?? '', data?.start_date ?? null, data?.end_date ?? null);
+  }
+
+  async function pollNavigate(): Promise<void> {
+    try {
+      const res = await fetch('/api/chat/navigate/last');
+      if (!res.ok) return;
+      const body = await res.json();
+      const nav = body?.navigate;
+      const seq = body?.seq ?? 0;
+      if (nav && seq > lastNavigateSeq) {
+        lastNavigateSeq = seq;
+        applyNavigate(nav.target ?? '', nav.start_date ?? null, nav.end_date ?? null);
+      }
+    } catch { /* ignore — will retry next poll */ }
+  }
+
   onMount(() => {
     mounted = true;
     if (containerEl && graphStore.nodes.length > 0) {
@@ -508,9 +595,20 @@
         loadGraph();
     }
     containerEl?.addEventListener('pointermove', onContainerPointerMove);
+    navigateUnsub = sseClient.on('navigate', handleNavigateEvent);
+    navigatePollTimer = setInterval(pollNavigate, 2000);
+    pollNavigate();
   });
 
   onDestroy(() => {
+    if (navigateUnsub) {
+      navigateUnsub();
+      navigateUnsub = null;
+    }
+    if (navigatePollTimer) {
+      clearInterval(navigatePollTimer);
+      navigatePollTimer = null;
+    }
     if (pendingTimer) {
       clearTimeout(pendingTimer);
       pendingTimer = null;

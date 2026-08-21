@@ -363,6 +363,39 @@ async def regenerate_conversation(conv_id: str, payload: RegenerateRequest | Non
     return SubmitMessageResponse(job_id=job["id"], conv_id=conv_id)
 
 
+class NavigateRequest(BaseModel):
+    target: str
+    start_date: str | None = None
+    end_date: str | None = None
+
+
+_last_navigate: dict[str, Any] | None = None
+_navigate_counter: int = 0
+
+
+@router.post("/navigate")
+async def navigate_graph(payload: NavigateRequest):
+    global _last_navigate, _navigate_counter
+    _last_navigate = {
+        "type": "navigate",
+        "target": payload.target,
+        "start_date": payload.start_date,
+        "end_date": payload.end_date,
+    }
+    _navigate_counter += 1
+    await event_bus.publish(
+        "navigate",
+        _last_navigate | {"seq": _navigate_counter},
+    )
+    return {"status": "ok", "target": payload.target}
+
+
+@router.get("/navigate/last")
+async def get_last_navigate():
+    global _last_navigate, _navigate_counter
+    return {"navigate": _last_navigate, "seq": _navigate_counter}
+
+
 @router.post("/conversations/{conv_id}/cancel")
 async def cancel_conversation(conv_id: str):
     """Cancel a pending LLM job for a conversation.

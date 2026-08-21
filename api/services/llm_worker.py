@@ -147,6 +147,14 @@ DEFAULT_SYSTEM_PROMPT = os.environ.get(
     "\n"
     "## 2. Retrieval — when the user asks about themselves, their past, their "
     "people, or their photos\n"
+    "- When the user mentions a time range (\"this month\", \"last month\", "
+    "\"this week\", \"last week\", \"this year\", \"last year\", \"today\", "
+    "\"yesterday\", or a month name like \"August\" or \"August 2026\"), "
+    "call navigate_knowledge_graph FIRST with that same phrase as the target, "
+    "then call query_knowledge_graph. navigate_knowledge_graph flies the "
+    "graph UI's timeline to that period so the user sees it while you "
+    "retrieve the data. Always call them together — navigate first, then "
+    "query.\n"
     "- Query the knowledge graph first (mode='mix', top_k=15). Never say \"I "
     "don't have that information\" without querying first.\n"
     "- When the user says a date without a year (e.g. \"June 27th\"), assume "
@@ -155,6 +163,16 @@ DEFAULT_SYSTEM_PROMPT = os.environ.get(
     "- Call query_knowledge_graph ONCE per user question. Do not call it again "
     "after you've already received results — use the results you have to "
     "answer. Repeated tool calls waste time and will not return different data.\n"
+    "- CRITICAL: When the user mentions a time range (\"this month\", \"last "
+    "month\", \"this week\", \"last week\", \"this year\", \"last year\", "
+    "\"today\", \"yesterday\", or a month name like \"August\" or \"August "
+    "2026\"), you MUST include that exact phrase in the query argument to "
+    "query_knowledge_graph. Do NOT paraphrase it away. The tool relies on "
+    "seeing the date phrase to filter results.\n"
+    "  - Good: query=\"what have I been up to this month\" — preserves \"this month\"\n"
+    "  - Bad: query=\"what have I been doing recently activities recent memories\" — stripped the date phrase, tool can't filter\n"
+    "  - Good: query=\"what did I do last week\" — preserves \"last week\"\n"
+    "  - Bad: query=\"recent activities\" — no date range detected\n"
     "- NEVER call save_to_knowledge_graph during a retrieval query. If the user "
     "asked \"Tell me about June 27th\", they want to hear about it — not save "
     "it again. save_to_knowledge_graph is ONLY for Logging mode, when the user "
@@ -222,6 +240,7 @@ SAVE_AND_QUERY_TOOLS = frozenset({
     "save_to_knowledge_graph",
     "query_knowledge_graph",
     "query_knowledge_graph_stream",
+    "navigate_knowledge_graph",
 })
 
 # Poll interval when no jobs are pending
@@ -465,6 +484,49 @@ def _normalize_tool_calls(raw: list[dict[str, Any]] | dict[str, Any]) -> list[di
             "function": {"name": tc_name, "arguments": tc_args},
         })
     return result
+
+
+_DATE_RANGE_PATTERNS = [
+    re.compile(r"\bthis month\b", re.IGNORECASE),
+    re.compile(r"\blast month\b", re.IGNORECASE),
+    re.compile(r"\bthis week\b", re.IGNORECASE),
+    re.compile(r"\blast week\b", re.IGNORECASE),
+    re.compile(r"\bthis year\b", re.IGNORECASE),
+    re.compile(r"\blast year\b", re.IGNORECASE),
+    re.compile(r"\btoday\b", re.IGNORECASE),
+    re.compile(r"\byesterday\b", re.IGNORECASE),
+    re.compile(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b\s+\d{4}\b", re.IGNORECASE),
+    re.compile(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", re.IGNORECASE),
+]
+
+
+def _inject_date_range_into_query(tool_args: dict[str, Any], user_msg: str) -> None:
+    """If the user's message contains a date-range phrase but the LLM's
+    query argument doesn't, append the phrase to the query.
+
+    The LLM frequently rewrites "what have I been up to this month?" as
+    "what have I been doing recently activities recent memories" — stripping
+    the date phrase that the MCP server's _scan_text_for_date_range needs.
+    This is a deterministic safety net that doesn't rely on the LLM
+    following system-prompt instructions.
+    """
+    if not user_msg or "query" not in tool_args:
+        return
+    query = tool_args.get("query", "")
+    if not isinstance(query, str):
+        return
+    user_has_range = any(p.search(user_msg) for p in _DATE_RANGE_PATTERNS)
+    query_has_range = any(p.search(query) for p in _DATE_RANGE_PATTERNS)
+    if user_has_range and not query_has_range:
+        for p in _DATE_RANGE_PATTERNS:
+            m = p.search(user_msg)
+            if m:
+                tool_args["query"] = f"{query} {m.group(0)}"
+                logger.info(
+                    "Injected date range '%s' into query: %s",
+                    m.group(0), tool_args["query"],
+                )
+                return
 
 
 def _parse_sse_lines(buffer: str) -> tuple[list[dict[str, Any]], str]:
@@ -910,6 +972,13 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                 "tool_calls": openai_tool_calls,
             })
 
+            # Find the most recent user message for date-range injection
+            latest_user_msg = ""
+            for m in reversed(api_messages):
+                if m.get("role") == "user" and m.get("content"):
+                    latest_user_msg = m["content"]
+                    break
+
             # Execute each tool call via MCP
             for tc in tool_calls:
                 tool_name = tc["name"]
@@ -917,6 +986,15 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                     tool_args = json.loads(tc["arguments"]) if tc["arguments"] else {}
                 except (json.JSONDecodeError, TypeError):
                     tool_args = {}
+
+                # Safety net: if the LLM calls query_knowledge_graph but
+                # stripped the date-range phrase from the query argument,
+                # inject it back. The LLM often rewrites "what have I been
+                # up to this month?" as "what have I been doing recently
+                # activities recent memories" — losing the date phrase that
+                # _scan_text_for_date_range needs in the MCP server.
+                if tool_name in ("query_knowledge_graph", "query_knowledge_graph_stream"):
+                    _inject_date_range_into_query(tool_args, latest_user_msg)
 
                 # Publish tool_call_start event
                 await append_llm_job_event(

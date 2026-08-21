@@ -616,6 +616,8 @@ function photoFilename(node: KGNode): string | null {
 export interface TimeIndex {
   /** Dense bucket index → human-readable date label. */
   readonly indexToLabel: readonly string[];
+  /** Dense bucket index → raw bucket key (e.g. "2026-07", "today", "yesterday"). */
+  readonly indexToBucket: readonly string[];
 }
 
 /**
@@ -627,6 +629,7 @@ export function buildTimeIndex(nodes: KGNode[], edges: KGEdge[]): TimeIndex {
   const plan = buildTimePlan(nodes, edges);
   return {
     indexToLabel: plan.indexToBucket.map((k) => plan.bucketLabel.get(k) ?? k),
+    indexToBucket: plan.indexToBucket,
   };
 }
 
