@@ -181,33 +181,11 @@ class ImageProcessingStore {
 
       const uiStage = backendStageToUi(job.stage);
 
-      if (job.status === 'complete') {
-        const existing = this.statuses[nodeId];
-        if (existing && existing.stage !== 'complete') {
-          existing.stage = 'complete';
-          existing.updatedAt = Date.now();
-          this.statuses = { ...this.statuses };
-        } else if (!existing) {
-          this.statuses[nodeId] = {
-            nodeId,
-            fileName: job.file_source,
-            dataUrl: '',
-            jobId: job.job_id,
-            stage: 'complete',
-            get stageLabel() { return STAGE_LABELS[this.stage] ?? this.stage; },
-            get stepper() {
-              const idx = PIPELINE_ORDER.indexOf(this.stage);
-              return PIPELINE_ORDER.map((s): { stage: ImageStage; label: string; state: 'pending' | 'current' | 'done' } => ({
-                stage: s, label: STAGE_LABELS[s],
-                state: idx < 0 ? 'pending' : idx > PIPELINE_ORDER.indexOf(s) ? 'done' : idx === PIPELINE_ORDER.indexOf(s) ? 'current' : 'pending',
-              }));
-            },
-            updatedAt: Date.now(),
-          };
-          this.statuses = { ...this.statuses };
-        }
-        continue;
-      }
+      // Don't re-hydrate completed jobs from the poll. Completed jobs are
+      // only shown transiently when they finish via the live SSE stream;
+      // the 3s poll fetching 10 recent completed jobs from Postgres would
+      // otherwise keep them pinned in the UI forever.
+      if (job.status === 'complete') continue;
 
       if (job.status === 'failed') {
         const existing = this.statuses[nodeId];
