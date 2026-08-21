@@ -659,7 +659,7 @@
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
       if (isTranscribing || micBusy) return;
       e.preventDefault();
-      handleMicTap();
+      toggleRecording();
     }
     window.addEventListener('keydown', onSpacePress);
     return () => window.removeEventListener('keydown', onSpacePress);
@@ -739,6 +739,24 @@
     chatExpanded = true;
     await tick();
     requestAnimationFrame(() => panelTextareaEl?.focus());
+  }
+
+  function toggleRecording() {
+    if (!audioRecorder || !recordingSupported) return;
+    if (isTranscribing || micBusy) return;
+    if (isStreamActive && !isActiveConversationStreaming) {
+      openStreamingConversation();
+      return;
+    }
+    if (isActiveConversationStreaming) {
+      cancelStreaming();
+      return;
+    }
+    if (isRecording) {
+      stopAndSendRecording();
+    } else {
+      startRecording();
+    }
   }
 
   async function stopAndSendRecording() {
@@ -1040,7 +1058,7 @@
     activeConversationId = id;
     messages = [];
     graphStore.upsertNode(id, ['Conversation'], { entity_type: 'Conversation', name: 'New conversation' });
-    syncClient.createConversation(id);
+    syncClient.saveConversation(conv);
   }
 
   function deleteMessage(msgId: string) {
@@ -1927,6 +1945,38 @@
         disabled={isActiveConversationStreaming || attachments.length >= MAX_ATTACHMENTS}
         onPickDocument={openDocumentPicker}
       />
+      <button
+        onclick={toggleRecording}
+        onpointerdown={handleMicPointerDown}
+        onpointerup={handleMicPointerUp}
+        onpointerleave={handleMicPointerLeave}
+        onpointercancel={handleMicPointerCancel}
+        ontouchstart={handleMicTouchStart}
+        ontouchmove={handleMicTouchMove}
+        ontouchend={handleMicTouchEnd}
+        oncontextmenu={(e) => e.preventDefault()}
+        onmouseenter={() => { micTooltipVisible = true; }}
+        onmouseleave={() => { micTooltipVisible = false; }}
+        disabled={(isTranscribing || !recordingSupported) && !isActiveConversationStreaming}
+        data-testid="mic-button"
+        title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : isActiveConversationStreaming ? 'Stop generating' : 'Hold to record'}
+        class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isActiveConversationStreaming ? 'bg-cyber-red/20 text-cyber-red hover:bg-cyber-red/30 ring-2 ring-cyber-red/40' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+      >
+        {#if isRecording}
+          <Icon name="square" size={14} />
+        {:else if isTranscribing}
+          <div class="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+        {:else if isActiveConversationStreaming}
+          <Icon name="square" size={14} />
+        {:else if holdActive}
+          <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
+        {:else}
+          <Icon name="mic" size={22} />
+        {/if}
+        {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile}
+          <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
+        {/if}
+      </button>
       <button
         onclick={handlePanelSend}
         disabled={isActiveConversationStreaming || (!panelChatInput.trim() && attachments.length === 0)}
