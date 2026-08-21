@@ -36,6 +36,7 @@
   let searchQuery = $state('');
   let error = $state('');
   let reprocessingIds: string[] = $state([]);
+  let reprocessingImages = $state<Set<string>>(new Set());
   let aiQueueLoading = $state(false);
   let aiQueueResult = $state<{ processed: number } | null>(null);
 
@@ -124,17 +125,27 @@
     return STAGE_TONE[stage];
   }
 
-  // Auto-hide completed images 30s after they finish. Re-runs whenever the set
-  // of completed node ids changes; timers are cleaned up for vanished ids.
+  // Auto-hide completed images 30s after they finish.  Only applies to
+  // entries set to 'complete' via the live SSE stream — syncFromApi no
+  // longer re-hydrates completed jobs from Postgres, so there's no poll
+  // fighting the timer.
+  const _hideTimers = new Map<string, ReturnType<typeof setTimeout>>();
   $effect(() => {
-    const completedIds = completedProcessing.map((s) => s.nodeId);
-    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const completedIds = new Set(completedProcessing.map((s) => s.nodeId));
     for (const id of completedIds) {
-      timers.set(id, setTimeout(() => imageProcessingStore.remove(id), 30_000));
+      if (!_hideTimers.has(id)) {
+        _hideTimers.set(id, setTimeout(() => {
+          imageProcessingStore.remove(id);
+          _hideTimers.delete(id);
+        }, 30_000));
+      }
     }
-    return () => {
-      for (const t of timers.values()) clearTimeout(t);
-    };
+    for (const id of [..._hideTimers.keys()]) {
+      if (!completedIds.has(id)) {
+        clearTimeout(_hideTimers.get(id)!);
+        _hideTimers.delete(id);
+      }
+    }
   });
 
   async function loadDocs() {
@@ -272,6 +283,62 @@
       aiQueueLoading = false;
     }
   }
+
+  // Re-run the full processing pipeline for an image that already exists in
+  // INPUT_DIR.  Mirrors ProcessingDock.reprocessItem: resets the store entry
+  // to the first stage, streams /images/reprocess SSE, and maps backend
+  // events to UI stages.  Keeps the failed image visible in the panel while
+  // it re-processes instead of silently dropping it.
+  async function reprocessImage(nodeId: string): Promise<void> {
+    const entry = imageProcessingStore.statuses[nodeId];
+    if (!entry) return;
+    reprocessingImages = new Set([...reprocessingImages, nodeId]);
+    imageProcessingStore.updateStage(nodeId, 'extracting_exif');
+    try {
+      await kgApiClient.clearFailedJobs(entry.fileName);
+      const { stream } = kgApiClient.reprocessImageSse(entry.fileName);
+      for await (const { data } of stream) {
+        try {
+          const parsed = JSON.parse(data);
+          const eventName: string = parsed.event ?? '';
+          const stage = imageProcessingStore.mapEventToStage(eventName);
+          if (stage) imageProcessingStore.updateStage(nodeId, stage);
+          if (eventName === 'pipeline_complete' || eventName === 'upload_failed') {
+            const err = parsed.data?.error ?? parsed.data?.reason;
+            if (err) imageProcessingStore.updateStage(nodeId, 'error', String(err));
+            break;
+          }
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+    } catch (err) {
+      imageProcessingStore.updateStage(nodeId, 'error', String(err));
+    } finally {
+      reprocessingImages = new Set([...reprocessingImages].filter((id) => id !== nodeId));
+    }
+  }
+
+  async function reprocessAllFailed(): Promise<void> {
+    const failed = errorProcessing.map((s) => s.nodeId);
+    await Promise.allSettled(failed.map((id) => reprocessImage(id)));
+  }
+
+  let clearingAll = $state(false);
+
+  async function clearAllFailed(): Promise<void> {
+    clearingAll = true;
+    try {
+      await kgApiClient.clearAllFailedJobs();
+      for (const s of errorProcessing) {
+        imageProcessingStore.remove(s.nodeId);
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to clear failed jobs';
+    } finally {
+      clearingAll = false;
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col gap-3 overflow-hidden">
@@ -331,6 +398,34 @@
         </span>
         {#if errorProcessing.length > 0}
           <span class="text-xs text-cyber-red">· {errorProcessing.length} error</span>
+          <button
+            onclick={reprocessAllFailed}
+            class="inline-flex items-center gap-1 rounded border border-cyber-red/40 bg-cyber-red/10 px-1.5 py-px text-[10px] font-medium text-cyber-red transition-all duration-200
+              hover:border-cyber-red hover:bg-cyber-red/20"
+            title="Re-run the full pipeline for every failed image"
+          >
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            Reprocess all {errorProcessing.length} failed
+          </button>
+          <button
+            onclick={clearAllFailed}
+            disabled={clearingAll}
+            class="inline-flex items-center gap-1 rounded border border-cyber-border bg-cyber-surface-2/50 px-1.5 py-px text-[10px] font-medium text-cyber-text-dim transition-all duration-200
+              hover:border-cyber-text-dim hover:text-cyber-text
+              disabled:cursor-not-allowed disabled:opacity-50"
+            title="Dismiss all stale failed jobs from the list"
+          >
+            {#if clearingAll}
+              <span class="inline-block h-2 w-2 animate-spin rounded-full border border-cyber-text-dim border-t-transparent"></span>
+            {:else}
+              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            {/if}
+            Clear
+          </button>
         {/if}
       </div>
 
@@ -379,7 +474,26 @@
                 {/if}
 
                 {#if s.stage === 'error' && s.error}
-                  <p class="mt-1 truncate text-[10px] text-cyber-red" title={s.error}>{s.error}</p>
+                  <div class="mt-1 flex items-center gap-2">
+                    <p class="truncate text-[10px] text-cyber-red" title={s.error}>{s.error}</p>
+                    <button
+                      onclick={() => reprocessImage(s.nodeId)}
+                      disabled={reprocessingImages.has(s.nodeId)}
+                      class="inline-flex shrink-0 items-center gap-1 rounded border border-cyber-red/40 bg-cyber-red/10 px-1.5 py-px text-[10px] font-medium text-cyber-red transition-all duration-200
+                        hover:border-cyber-red hover:bg-cyber-red/20
+                        disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Retry processing this image"
+                    >
+                      {#if reprocessingImages.has(s.nodeId)}
+                        <span class="inline-block h-2 w-2 animate-spin rounded-full border border-cyber-red border-t-transparent"></span>
+                      {:else}
+                        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                      {/if}
+                      Retry
+                    </button>
+                  </div>
                 {/if}
               </div>
             </li>
