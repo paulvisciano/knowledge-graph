@@ -21,6 +21,15 @@ _LIGHTRAG_API_KEY = os.getenv("LIGHTRAG_API_KEY", "")
 _MCP_PORT = int(os.getenv("MEMORY_SEARCH_MCP_PORT", "9653"))
 _IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "0"))
 
+# Response-size guard. LightRAG with only_need_context=True returns raw
+# entities + relationships + document chunks (no synthesis). Broad queries
+# like "what have I worked on this month" match a huge swath of the graph and
+# the unbounded response has blown the caller's context window. These caps
+# truncate the Document Chunks section (the bulk) to fit a character budget
+# while preserving the compact, high-signal Entity/Relationship JSON.
+_MAX_RESPONSE_CHARS = int(os.getenv("KG_MAX_RESPONSE_CHARS", "12000"))
+_MAX_CHUNK_CHARS = int(os.getenv("KG_MAX_CHUNK_CHARS", "400"))
+
 logger = logging.getLogger("knowledge_graph_mcp")
 
 
@@ -559,6 +568,89 @@ def _extract_trailing_sections(response: str, query_date_iso: str, valid_dates: 
     return "\n".join(filtered)
 
 
+def _truncate_response(response: str) -> str:
+    """Cap a LightRAG context response to _MAX_RESPONSE_CHARS.
+
+    Splits the response into [head, chunks_section, tail] where head holds the
+    compact Entity/Relationship JSON (kept in full) and chunks_section holds the
+    bulky Document Chunks (truncated to fit the remaining budget, whole chunks
+    dropped first). A one-line truncation notice is appended when content is cut.
+    """
+    if len(response) <= _MAX_RESPONSE_CHARS:
+        return response
+
+    marker = "Document Chunks"
+    idx = response.find(marker)
+    if idx == -1:
+        kept = response[:_MAX_RESPONSE_CHARS].rstrip()
+        return f"{kept}\n\n[...response truncated to fit context window]"
+
+    head = response[:idx]
+    chunks_and_tail = response[idx:]
+
+    if len(head) >= _MAX_RESPONSE_CHARS:
+        kept = head[:_MAX_RESPONSE_CHARS].rstrip()
+        return f"{kept}\n\n[...response truncated to fit context window]"
+
+    budget = _MAX_RESPONSE_CHARS - len(head)
+
+    lines = chunks_and_tail.split("\n")
+    kept_lines: list[str] = []
+    used = 0
+    dropped_chunks = 0
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if stripped.startswith("Reference Document List"):
+            if used + len(line) + 1 <= budget:
+                kept_lines.append(line)
+                used += len(line) + 1
+            i += 1
+            continue
+
+        if stripped.startswith("{"):
+            chunk_buf = [line]
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith("}") and not lines[j].strip().startswith("Reference Document List"):
+                chunk_buf.append(lines[j])
+                j += 1
+            if j < len(lines) and lines[j].strip().startswith("}"):
+                chunk_buf.append(lines[j])
+                j += 1
+
+            chunk_text = "\n".join(chunk_buf)
+            if _MAX_CHUNK_CHARS and len(chunk_text) > _MAX_CHUNK_CHARS:
+                try:
+                    obj = json.loads(chunk_text)
+                    if "content" in obj and isinstance(obj["content"], str) and len(obj["content"]) > _MAX_CHUNK_CHARS:
+                        obj["content"] = obj["content"][:_MAX_CHUNK_CHARS].rstrip() + " [...truncated]"
+                        chunk_text = json.dumps(obj)
+                except json.JSONDecodeError:
+                    pass
+
+            chunk_size = len(chunk_text) + 1
+            if used + chunk_size <= budget:
+                kept_lines.append(chunk_text)
+                used += chunk_size
+            else:
+                dropped_chunks += 1
+            i = j
+            continue
+
+        if used + len(line) + 1 <= budget:
+            kept_lines.append(line)
+            used += len(line) + 1
+        i += 1
+
+    result = head + "\n".join(kept_lines)
+    if dropped_chunks:
+        result = result.rstrip() + f"\n\n[...{dropped_chunks} document chunk(s) truncated to fit context window]"
+    return result
+
+
 @mcp.tool()
 async def query_knowledge_graph(
     query: str, mode: str = "mix", only_need_context: bool = True, top_k: int = 15
@@ -607,6 +699,7 @@ async def query_knowledge_graph(
 
         if image_refs:
             response = (response or "No results found.") + "\n\n---IMAGE_REFS---\n" + "\n".join(image_refs)
+        response = _truncate_response(response)
         return response if response else "No results found."
     except Exception as e:
         return f"Error querying knowledge graph: {e}"
