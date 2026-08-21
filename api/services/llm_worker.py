@@ -545,6 +545,12 @@ async def process_llm_job(job: dict[str, Any]) -> None:
     # Load conversation messages from DB
     db_messages = await _load_conversation_messages(conv_id)
 
+    # First pass: collect all tool_call_ids that have a corresponding tool result
+    answered_tool_calls: set[str] = set()
+    for msg in db_messages:
+        if msg.get("role") == "tool" and msg.get("tool_call_id"):
+            answered_tool_calls.add(msg["tool_call_id"])
+
     # Build the messages array for the API
     api_messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -558,7 +564,15 @@ async def process_llm_job(job: dict[str, Any]) -> None:
             if msg.get("tool_calls"):
                 try:
                     raw = json.loads(msg["tool_calls"]) if isinstance(msg["tool_calls"], str) else msg["tool_calls"]
-                    entry["tool_calls"] = _normalize_tool_calls(raw)
+                    normalized = _normalize_tool_calls(raw)
+                    # Skip assistant messages with orphaned tool calls (no
+                    # corresponding tool result) — they malformed the
+                    # conversation and cause the model to refuse tool use.
+                    if normalized and all(
+                        tc.get("id") not in answered_tool_calls for tc in normalized
+                    ):
+                        continue
+                    entry["tool_calls"] = normalized
                 except (json.JSONDecodeError, TypeError):
                     pass
             api_messages.append(entry)

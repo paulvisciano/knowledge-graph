@@ -324,9 +324,25 @@ async def regenerate_conversation(conv_id: str, payload: RegenerateRequest | Non
 
     Used by the "Regenerate" button to re-run the assistant on the existing
     conversation history. Unlike ``submit_message``, this does NOT insert a new
-    user message — it only enqueues a new LLM job.
+    user message — it only enqueues a new LLM job. Old assistant messages
+    (including error responses with orphaned tool calls) after the last user
+    message are deleted so the model gets a clean conversation to work with.
     """
     payload = payload or RegenerateRequest()
+
+    pool = await db_module.get_pool()
+    async with pool.acquire() as conn:
+        # Find the last user message and delete all messages after it
+        # (assistant responses, tool results, orphaned tool calls).
+        last_user = await conn.fetchrow(
+            "SELECT id, timestamp FROM messages WHERE conv_id = $1 AND role = 'user' ORDER BY timestamp DESC LIMIT 1",
+            conv_id,
+        )
+        if last_user:
+            await conn.execute(
+                "DELETE FROM messages WHERE conv_id = $1 AND timestamp > $2",
+                conv_id, last_user["timestamp"],
+            )
 
     job = await create_llm_job(
         conv_id=conv_id,

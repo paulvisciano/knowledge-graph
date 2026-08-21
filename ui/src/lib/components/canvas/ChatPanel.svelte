@@ -1068,9 +1068,42 @@
   async function resendMessage(msgId: string) {
     const msg = messages.find((m) => m.id === msgId);
     if (!msg || msg.role !== 'user') return;
-    messages = messages.filter((m) => m.id !== msgId);
-    chatInput = msg.content;
-    handleSend(undefined, undefined, undefined, false);
+    const convId = activeConversationId;
+    if (!convId) return;
+
+    // Keep the user message but remove all messages after it (old assistant
+    // responses, orphaned tool calls). The regenerate API endpoint deletes
+    // the same range from the DB and enqueues a fresh LLM job.
+    const msgIdx = messages.findIndex((m) => m.id === msgId);
+    messages = messages.slice(0, msgIdx + 1);
+    saveMessagesToConversation();
+
+    isProcessing = true;
+    isPending = true;
+    processingLabel = 'Regenerating...';
+
+    try {
+      const res = await fetch(API.chat.regenerate(convId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(selectedModel ? { model: selectedModel } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('Regenerate failed:', res.status, errText);
+        isProcessing = false;
+        isPending = false;
+        processingLabel = '';
+      }
+    } catch (err) {
+      console.error('Regenerate error:', err);
+      isProcessing = false;
+      isPending = false;
+      processingLabel = '';
+    }
   }
 
   function cancelStreaming() {
@@ -1211,9 +1244,9 @@
           attachments: sentAttachments.map((a) => ({
             name: a.name,
             mimeType: a.mimeType,
-            data: a.dataUrl?.split(',')[1] ?? '',
+            dataUrl: a.dataUrl ?? '',
           })),
-          ...(audioData ? { audio: { data: audioData, format: audioFormat ?? 'wav' } } : {}),
+          ...(audioData ? { audioData, audioFormat: audioFormat ?? 'wav' } : {}),
           ...(selectedModel ? { model: selectedModel } : {}),
         }),
       });
