@@ -27,7 +27,7 @@ _IMG_DESC_MAX_CHARS = int(os.getenv("IMG_DESC_MAX_CHARS", "0"))
 # the unbounded response has blown the caller's context window. These caps
 # truncate the Document Chunks section (the bulk) to fit a character budget
 # while preserving the compact, high-signal Entity/Relationship JSON.
-_MAX_RESPONSE_CHARS = int(os.getenv("KG_MAX_RESPONSE_CHARS", "12000"))
+_MAX_RESPONSE_CHARS = int(os.getenv("KG_MAX_RESPONSE_CHARS", "24000"))
 _MAX_CHUNK_CHARS = int(os.getenv("KG_MAX_CHUNK_CHARS", "400"))
 
 logger = logging.getLogger("knowledge_graph_mcp")
@@ -126,11 +126,30 @@ _MONTHS = frozenset({
     "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
 })
 
+_MONTH_NAMES = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+
+_MONTH_NUM_TO_NAME = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+def _get_local_tz() -> zoneinfo.ZoneInfo:
+    try:
+        return zoneinfo.ZoneInfo(os.environ.get("TZ", "America/New_York"))
+    except Exception:
+        return zoneinfo.ZoneInfo("America/New_York")
+
 # Regex patterns compiled once
 _RE_ISO_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _RE_YEAR = re.compile(r"\b(20\d{2})\b")
-_RE_MONTH_YEAR = re.compile(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b", re.IGNORECASE)
-_RE_MONTH_ORDINAL = re.compile(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b", re.IGNORECASE)
+_MONTH_ALT = "|".join(_MONTH_NAMES.keys())
+_RE_MONTH_YEAR = re.compile(rf"\b({_MONTH_ALT})\s+(\d{{4}})\b", re.IGNORECASE)
+_RE_MONTH_ORDINAL = re.compile(rf"\b({_MONTH_ALT})\s+(\d{{1,2}})(?:st|nd|rd|th)?\b", re.IGNORECASE)
 _RE_ORDINAL_DATE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\b")
 _RE_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b")
 _RE_TOKEN = re.compile(r"[A-Za-z]+|\d{4}-\d{2}-\d{2}|\d{4}|\d{1,2}(?:st|nd|rd|th)?")
@@ -196,12 +215,24 @@ def _extract_keywords(query: str) -> tuple[list[str], list[str]]:
                 detected_month = month_name.lower()
             _add_hl(str(r_start.year))
             detected_year = str(r_start.year)
+            _add_hl("notes")
+            _add_hl("photos")
+            _add_hl("preference")
+            _add_hl("diary")
         elif re.search(r"\bthis week\b", low) or re.search(r"\blast week\b", low):
             _add_hl(str(r_start.year))
             detected_year = str(r_start.year)
+            _add_hl("notes")
+            _add_hl("photos")
+            _add_hl("preference")
+            _add_hl("diary")
         elif re.search(r"\bthis year\b", low) or re.search(r"\blast year\b", low):
             _add_hl(str(r_start.year))
             detected_year = str(r_start.year)
+            _add_hl("notes")
+            _add_hl("photos")
+            _add_hl("preference")
+            _add_hl("diary")
         elif re.search(r"\btoday\b", low) or re.search(r"\byesterday\b", low):
             iso = r_start.strftime("%Y-%m-%d")
             _add_ll(iso)
@@ -325,7 +356,15 @@ _RE_GENERIC_PERSON = re.compile(r"^Person \d+$")
 # "2026-06-27", etc. Used to detect event-type entities that carry a date.
 _RE_DATE_IN_NAME = re.compile(
     r"(?:\b\d{4}-\d{2}-\d{2}\b)"
-    r"|(?:\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b)",
+    r"|(?:\d{4}\d{2}\d{2})"
+    r"|(?:\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{2,4})?\b)",
+    re.IGNORECASE,
+)
+
+
+_RE_DATE_IN_NAME_COMPACT = re.compile(r"(\d{4})(\d{2})(\d{2})")
+_RE_DATE_IN_NAME_MD = re.compile(
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{2,4}))?",
     re.IGNORECASE,
 )
 
@@ -337,17 +376,28 @@ def _extract_date_from_name(name: str) -> str | None:
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
 
-    # "June 27, 2026" or "June 27th, 2026"
-    month_map = _MONTH_NAMES
-    m = re.search(
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})",
-        name,
-        re.IGNORECASE,
-    )
+    # Compact date in filenames: chat-note-20260727-... → 2026-07-27
+    m = _RE_DATE_IN_NAME_COMPACT.search(name)
     if m:
-        mon = month_map.get(m.group(1).lower())
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+    # "June 27, 2026" or "June 27th, 2026" or "June 27" (no year → current year)
+    m = _RE_DATE_IN_NAME_MD.search(name)
+    if m:
+        mon = _MONTH_NAMES.get(m.group(1).lower())
         if mon:
-            return f"{m.group(3)}-{mon:02d}-{int(m.group(2)):02d}"
+            day = int(m.group(2))
+            yr_str = m.group(3)
+            if yr_str:
+                yr = int(yr_str)
+                if yr < 100:
+                    yr += 2000
+            else:
+                yr = datetime.now(tz=_get_local_tz()).year
+            try:
+                return f"{yr}-{mon:02d}-{day:02d}"
+            except ValueError:
+                pass
     return None
 
 
@@ -931,6 +981,9 @@ async def query_knowledge_graph(
 ) -> str:
     """Search the knowledge graph for information relevant to a query. Use mode='mix' (default) for most queries — combines knowledge graph and vector retrieval, returns both photos and notes. Use mode='local' for focused entity lookups when you need specific entities. Use mode='global' only for broad overviews."""
     hl_keywords, ll_keywords = _extract_keywords(query)
+    query_range = _scan_text_for_date_range(query)
+    if query_range is not None:
+        top_k = max(top_k, 30)
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
@@ -950,10 +1003,6 @@ async def query_knowledge_graph(
             result = r.json()
         response = result.get("response", "")
 
-        # Range queries ("this month", "this week", "today", …) are filtered
-        # with _filter_response_by_date_range; single-date queries fall back to
-        # _scan_text_for_date + _filter_response_by_date.
-        query_range = _scan_text_for_date_range(query)
         query_date: datetime | None = None
         if query_range is not None and response:
             r_start, r_end = query_range
@@ -1288,36 +1337,13 @@ def _parse_file_source_date(file_source: str):
     return None
 
 
-# Month name → number lookup for _scan_text_for_date.
-_MONTH_NAMES = {
-    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
-    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
-    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
-}
-
-# Reverse lookup: month number → full month name. Used by relative-date
-# handling to inject the current/previous month name as a high-level keyword.
-_MONTH_NUM_TO_NAME = {
-    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
-    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
-}
-
-
-def _get_local_tz() -> zoneinfo.ZoneInfo:
-    """Resolve the local timezone from the TZ env var (same pattern as
-    _scan_text_for_date). Falls back to America/New_York on any error."""
-    try:
-        return zoneinfo.ZoneInfo(os.environ.get("TZ", "America/New_York"))
-    except Exception:
-        return zoneinfo.ZoneInfo("America/New_York")
-
-
 def _scan_text_for_date_range(text: str) -> tuple[datetime, datetime] | None:
-    """Scan query text for a relative date expression and return a (start, end)
-    datetime range, both tz-aware at midnight.
+    """Scan query text for a date expression that implies a *range* and return
+    a ``(start, end)`` datetime tuple, both tz-aware at midnight.
 
     Recognised expressions (case-insensitive, word-boundary matched):
+
+    **Relative:**
       - "this month"  → (first day of current month, today)
       - "last month"  → (first day of last month, last day of last month)
       - "this week"   → (Monday of current week, today)
@@ -1327,8 +1353,17 @@ def _scan_text_for_date_range(text: str) -> tuple[datetime, datetime] | None:
       - "today"       → (today, today)
       - "yesterday"   → (yesterday, yesterday)
 
+    **Month + Year** (e.g. "August 2026", "Aug 2026"):
+      Full calendar month → (Month 1, last day of Month).
+
+    **Bare month name** (e.g. "August", "Aug"):
+      Current year, full month. If it's the current month, the end is capped
+      at today. Only matches when the month is NOT followed by a day number
+      or year (so "August 22" and "August 2026" are handled by the more
+      specific patterns above, not here).
+
     "This …" ranges use the current date as the end (never a future date).
-    Returns ``None`` if no relative expression is found.
+    Returns ``None`` if no range expression is found.
     """
     tz = _get_local_tz()
     now = datetime.now(tz=tz)
@@ -1377,6 +1412,35 @@ def _scan_text_for_date_range(text: str) -> tuple[datetime, datetime] | None:
     if _has("yesterday"):
         y = today - timedelta(days=1)
         return (y, y)
+
+    # --- Month + Year (e.g. "August 2026", "Aug 2026") ---
+    m = _RE_MONTH_YEAR.search(text)
+    if m:
+        month_num = _MONTH_NAMES[m.group(1).lower()]
+        year = int(m.group(2))
+        start = datetime(year, month_num, 1, tzinfo=tz)
+        if month_num == 12:
+            end = datetime(year + 1, 1, 1, tzinfo=tz) - timedelta(days=1)
+        else:
+            end = datetime(year, month_num + 1, 1, tzinfo=tz) - timedelta(days=1)
+        return (start, end)
+
+    # Bare month name not followed by a number (negative lookahead avoids
+    # matching "August 22" or "August 2026", which are handled elsewhere).
+    month_alt = "|".join(_MONTH_NAMES.keys())
+    m = re.search(rf"\b({month_alt})\b(?!\s+\d)", text, re.IGNORECASE)
+    if m:
+        month_num = _MONTH_NAMES[m.group(1).lower()]
+        year = today.year
+        start = datetime(year, month_num, 1, tzinfo=tz)
+        if month_num == 12:
+            end = datetime(year + 1, 1, 1, tzinfo=tz) - timedelta(days=1)
+        else:
+            end = datetime(year, month_num + 1, 1, tzinfo=tz) - timedelta(days=1)
+        # Cap at today if this is the current month
+        if month_num == today.month and year == today.year:
+            end = today
+        return (start, end)
 
     return None
 
