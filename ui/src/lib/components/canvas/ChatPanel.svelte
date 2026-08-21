@@ -1961,7 +1961,7 @@
       </div>
     {/if}
 
-    <div class="chat-inline-input-row flex h-12 w-full items-stretch gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-0 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
+    <div class="chat-inline-input-row flex w-full items-center gap-1.5 rounded-full border-0 bg-cyber-surface-2/80 px-2 py-1 pr-0.5 transition-colors focus-within:ring-1 focus-within:ring-cyber-cyan/40">
       <textarea
         bind:this={panelTextareaEl}
         bind:value={panelChatInput}
@@ -1970,7 +1970,7 @@
         placeholder={chatExpanded ? 'Continue...' : 'Ask me anything...'}
         rows="1"
         data-testid="chat-input"
-        class="max-h-[140px] min-h-12 flex-1 resize-none bg-transparent px-4 py-0 text-base leading-[3rem] text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
+        class="chat-inline-input max-h-[140px] min-h-12 flex-1 resize-none overflow-hidden bg-transparent px-4 py-3 text-base leading-normal text-cyber-text outline-none placeholder:text-cyber-text-dim/70 border-0 transition-colors"
         disabled={isActiveConversationStreaming}
       ></textarea>
       <AttachmentMenu
@@ -1979,7 +1979,7 @@
         onPickDocument={openDocumentPicker}
       />
       <button
-        onclick={toggleRecording}
+        onclick={() => { if (isActiveConversationStreaming) { cancelStreaming(); } else if (panelChatInput.trim() || attachments.length > 0) { handlePanelSend(); } }}
         onpointerdown={handleMicPointerDown}
         onpointerup={handleMicPointerUp}
         onpointerleave={handleMicPointerLeave}
@@ -1990,10 +1990,11 @@
         oncontextmenu={(e) => e.preventDefault()}
         onmouseenter={() => { micTooltipVisible = true; }}
         onmouseleave={() => { micTooltipVisible = false; }}
-        disabled={(isTranscribing || !recordingSupported) && !isActiveConversationStreaming}
-        data-testid="mic-button"
-        title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : isActiveConversationStreaming ? 'Stop generating' : 'Hold to record'}
-        class="relative flex h-full aspect-square shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isActiveConversationStreaming ? 'bg-cyber-red/20 text-cyber-red hover:bg-cyber-red/30 ring-2 ring-cyber-red/40' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/15 text-cyber-cyan hover:bg-cyber-cyan/25 ring-1 ring-cyber-cyan/40'}"
+        disabled={(isTranscribing || !recordingSupported) && !isActiveConversationStreaming && (!panelChatInput.trim() && attachments.length === 0)}
+        data-testid="send-button"
+        title={isTranscribing ? 'Transcribing…' : isRecording ? 'Release to send' : isActiveConversationStreaming ? 'Stop generating' : panelChatInput.trim() || attachments.length > 0 ? 'Send message' : 'Hold to record'}
+        aria-label={isActiveConversationStreaming ? 'Stop generating' : panelChatInput.trim() || attachments.length > 0 ? 'Send message' : 'Hold to record'}
+        class="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-all duration-200 {isRecording ? 'bg-red-500/20 text-red-400 animate-pulse hover:bg-red-500/30 ring-2 ring-red-500/40' : isTranscribing ? 'bg-cyber-cyan/10 text-cyber-cyan animate-pulse ring-2 ring-cyber-cyan/30' : isActiveConversationStreaming ? 'bg-cyber-red/20 text-cyber-red hover:bg-cyber-red/30 ring-2 ring-cyber-red/40' : holdActive ? 'bg-cyber-cyan/25 text-cyber-cyan ring-2 ring-cyber-cyan/60' : 'bg-cyber-cyan/20 text-cyber-cyan hover:bg-cyber-cyan/30'}"
       >
         {#if isRecording}
           <Icon name="square" size={14} />
@@ -2003,22 +2004,14 @@
           <Icon name="square" size={14} />
         {:else if holdActive}
           <span class="text-sm font-semibold tabular-nums" data-testid="hold-countdown">{holdCountdown}</span>
+        {:else if panelChatInput.trim() || attachments.length > 0}
+          <Icon name="send" size={18} />
         {:else}
           <Icon name="mic" size={22} />
         {/if}
-        {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile}
+        {#if micTooltipVisible && !holdActive && !isRecording && !$isMobile && !panelChatInput.trim() && attachments.length === 0}
           <span class="mic-tooltip mic-tooltip-left" role="tooltip" data-testid="mic-tooltip">{micTooltipMessage}</span>
         {/if}
-      </button>
-      <button
-        onclick={handlePanelSend}
-        disabled={isActiveConversationStreaming || (!panelChatInput.trim() && attachments.length === 0)}
-        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyber-cyan/20 text-cyber-cyan transition-all duration-200 hover:bg-cyber-cyan/30 disabled:opacity-40 disabled:cursor-not-allowed"
-        title="Send message"
-        aria-label="Send message"
-        data-testid="send-button"
-      >
-        <Icon name="send" size={18} />
       </button>
     </div>
   {/if}
@@ -2953,18 +2946,13 @@
       height: auto;
     }
 
-    .chat-inline-input-row > textarea {
-      min-height: 40px;
-      line-height: 1.5;
-      padding: 10px 14px;
-      font-size: 16px;
+    .chat-inline-input {
       -webkit-appearance: none;
       border-radius: 20px;
+      overflow: hidden;
     }
 
     .chat-inline-input-row > button {
-      width: 44px;
-      height: 44px;
       border-radius: 50%;
       touch-action: none;
       -webkit-user-select: none;
@@ -2972,7 +2960,7 @@
       -webkit-touch-callout: none;
     }
 
-    .chat-inline-input-row > textarea {
+    .chat-inline-input {
       touch-action: auto;
     }
 

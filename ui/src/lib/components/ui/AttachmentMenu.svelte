@@ -13,7 +13,7 @@
 
   let open = $state(false);
 
-  const sizeClass = $derived(fluid ? 'h-full w-11' : size === 'sm' ? 'h-10 w-10' : 'h-11 w-11');
+  const sizeClass = $derived(fluid ? 'h-12 w-12' : size === 'sm' ? 'h-10 w-10' : 'h-11 w-11');
   const iconSize = $derived(size === 'sm' ? 'h-4 w-4' : 'h-5 w-5');
 
   function toggle() {
