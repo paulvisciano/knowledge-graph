@@ -96,6 +96,7 @@
     reprocessingIds = new Set([...reprocessingIds, nodeId]);
     imageProcessingStore.updateStage(nodeId, 'extracting_exif');
     try {
+      await kgApiClient.clearFailedJobs(fileSource);
       const { stream } = kgApiClient.reprocessImageSse(fileSource);
       for await (const { data } of stream) {
         try {
