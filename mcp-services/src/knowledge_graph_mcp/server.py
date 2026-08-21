@@ -580,6 +580,38 @@ def _filter_response_by_date(response: str, query_date: datetime) -> str:
     return "\n".join(result_lines)
 
 
+def _fetch_photos_for_dates(start_iso: str, end_iso: str) -> list[str]:
+    """Fetch all Photo entity names connected to Date entities in [start, end].
+
+    Uses LightRAG's graph traversal API (/graphs?label=...) to get the complete
+    set of photos for each date, bypassing the top_k limit of the vector query.
+    """
+    import httpx
+    photos: list[str] = []
+    seen: set[str] = set()
+    cur = datetime.strptime(start_iso, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_iso, "%Y-%m-%d")
+    while cur <= end_dt:
+        date_label = f"{cur.strftime('%Y-%m-%d')} (Date)"
+        try:
+            r = httpx.get(
+                f"{_LIGHTRAG_API_URL}/graphs",
+                params={"label": date_label, "max_depth": 1, "max_nodes": 100},
+                headers=_headers(),
+                timeout=10.0,
+            )
+            if r.status_code == 200:
+                for node in r.json().get("nodes", []):
+                    for label in node.get("labels", []):
+                        if "(Photo)" in label and label not in seen:
+                            seen.add(label)
+                            photos.append(label)
+        except Exception:
+            pass
+        cur = cur + timedelta(days=1)
+    return photos
+
+
 def _filter_response_by_date_range(
     response: str, start_date: datetime, end_date: datetime,
 ) -> str:
@@ -765,6 +797,17 @@ def _filter_response_by_date_range(
     existing_entity_names = {e.get("entity", "") for e in kept_entity_objs}
     for photo_name, photo_date in photo_dates.items():
         if _in_range(photo_date) and photo_name not in existing_entity_names:
+            kept_entity_objs.append({"entity": photo_name, "type": "Photo", "description": f"Photo: {photo_name}"})
+            existing_entity_names.add(photo_name)
+            has_matching_photos = True
+
+    # LightRAG's vector query (top_k) only returns a subset of taken_on
+    # relationships. Use the graph traversal API to fetch ALL photos
+    # connected to in-range Date entities, ensuring the LLM sees the
+    # complete set of photos for the queried period.
+    graph_photos = _fetch_photos_for_dates(start_iso, end_iso)
+    for photo_name in graph_photos:
+        if photo_name not in existing_entity_names:
             kept_entity_objs.append({"entity": photo_name, "type": "Photo", "description": f"Photo: {photo_name}"})
             existing_entity_names.add(photo_name)
             has_matching_photos = True
