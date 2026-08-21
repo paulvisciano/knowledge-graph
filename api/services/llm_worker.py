@@ -252,7 +252,7 @@ async def _mcp_initialize(client: httpx.AsyncClient) -> dict[str, Any] | None:
                 "params": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "nexus-llm-worker", "version": "0.1.0"},
+                    "clientInfo": {"name": "knowledge-graph-llm-worker", "version": "0.1.0"},
                 },
             },
             headers={"Content-Type": "application/json", "Accept": "application/json"},

@@ -65,6 +65,9 @@ mcp = MCPServer(
         "- mode='mix' (default): combined graph + vector retrieval. Use for most queries. Pass top_k=5.\n"
         "- mode='local': focused entity lookups.\n"
         "- mode='global': broad overviews of how entities relate across the graph.\n"
+        "- Supports relative date expressions in the query: 'this month', 'last month', "
+        "'this week', 'last week', 'this year', 'last year', 'today', 'yesterday'. "
+        "These resolve to a date range and return all entities/relationships/chunks within it.\n"
         "\n"
         "Conversational behavior, phrasing, and persona are owned by the host client's system prompt, "
         "not by these instructions."
@@ -176,6 +179,38 @@ def _extract_keywords(query: str) -> tuple[list[str], list[str]]:
     detected_month: str | None = None
     detected_day: str | None = None
     detected_year: str | None = None
+
+    # 0. Relative date expressions ("this month", "last month", "this week",
+    #    "this year", "today", "yesterday") — inject the current/previous
+    #    month name and/or year as high-level keywords so LightRAG's entity VDB
+    #    hits the right Date nodes and month-scoped entities. Resolve to local
+    #    tz to match _scan_text_for_date.
+    relative_range = _scan_text_for_date_range(query)
+    if relative_range is not None:
+        r_start, r_end = relative_range
+        low = query.lower()
+        if re.search(r"\bthis month\b", low) or re.search(r"\blast month\b", low):
+            month_name = _MONTH_NUM_TO_NAME.get(r_start.month)
+            if month_name:
+                _add_hl(month_name)
+                detected_month = month_name.lower()
+            _add_hl(str(r_start.year))
+            detected_year = str(r_start.year)
+        elif re.search(r"\bthis week\b", low) or re.search(r"\blast week\b", low):
+            _add_hl(str(r_start.year))
+            detected_year = str(r_start.year)
+        elif re.search(r"\bthis year\b", low) or re.search(r"\blast year\b", low):
+            _add_hl(str(r_start.year))
+            detected_year = str(r_start.year)
+        elif re.search(r"\btoday\b", low) or re.search(r"\byesterday\b", low):
+            iso = r_start.strftime("%Y-%m-%d")
+            _add_ll(iso)
+            specific_date_found = True
+            month_name = _MONTH_NUM_TO_NAME.get(r_start.month)
+            if month_name:
+                _add_hl(month_name)
+                detected_month = month_name.lower()
+            detected_year = str(r_start.year)
 
     # 1. ISO dates (e.g. "2026-07-22") → low-level
     for m in _RE_ISO_DATE.findall(query):
@@ -495,6 +530,245 @@ def _filter_response_by_date(response: str, query_date: datetime) -> str:
     return "\n".join(result_lines)
 
 
+def _filter_response_by_date_range(
+    response: str, start_date: datetime, end_date: datetime,
+) -> str:
+    """Filter LightRAG's context response to keep only entities/relationships/
+    chunks whose dates fall within [start_date, end_date] inclusive.
+
+    Mirrors _filter_response_by_date but uses a range instead of a single day
+    with ±1-day tolerance. Used for relative-date queries like "this month",
+    "this week", "this year".
+
+    - Date entities: kept if their YYYY-MM-DD falls within the range
+    - Event entities (date in name): kept if the extracted date is in the range
+    - Relationships: kept if neither endpoint is a dropped entity, and any
+      ``taken_on`` date in the description falls within the range
+    - Document chunks: kept if referenced dates fall within the range
+    - Generic "Person N" entities are always dropped
+
+    Returns ``"No knowledge graph data found for {start} to {end}."`` if nothing
+    matches.
+    """
+    lines = response.split("\n")
+
+    start_iso = start_date.strftime("%Y-%m-%d")
+    end_iso = end_date.strftime("%Y-%m-%d")
+    start_year = start_date.year
+    end_year = end_date.year
+
+    def _in_range(date_iso: str) -> bool:
+        if len(date_iso) != 10:
+            return False
+        return start_iso <= date_iso <= end_iso
+
+    # Collect every valid date string in the range for chunk matching.
+    valid_dates_range: set[str] = set()
+    cur = start_date
+    while cur <= end_date:
+        valid_dates_range.add(cur.strftime("%Y-%m-%d"))
+        cur = cur + timedelta(days=1)
+
+    current_section: str | None = None
+    parsed_entities: list[dict] = []
+    parsed_relations: list[dict] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "Knowledge Graph Data (Entity):":
+            current_section = "entity"
+            continue
+        if stripped == "Knowledge Graph Data (Relationship):":
+            current_section = "relation"
+            continue
+        if stripped.startswith("Document Chunks") or stripped.startswith("Reference Document List"):
+            current_section = None
+            continue
+        if not stripped.startswith("{"):
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if current_section == "entity" and "entity" in obj:
+            parsed_entities.append(obj)
+        elif current_section == "relation" and "entity1" in obj and "entity2" in obj:
+            parsed_relations.append(obj)
+
+    dropped_entities: set[str] = set()
+    kept_date_entities: set[str] = set()
+    has_matching_photos = False
+
+    for obj in parsed_entities:
+        entity_name = obj.get("entity", "")
+        entity_type = obj.get("type", "")
+
+        if _RE_GENERIC_PERSON.match(entity_name):
+            dropped_entities.add(entity_name)
+            continue
+
+        if entity_type == "Date":
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", entity_name)
+            if m:
+                if _in_range(m.group(1)):
+                    kept_date_entities.add(entity_name)
+                else:
+                    dropped_entities.add(entity_name)
+            # else: Date entity without parseable date — keep it
+        elif _RE_DATE_IN_NAME.search(entity_name):
+            extracted = _extract_date_from_name(entity_name)
+            if extracted and not _in_range(extracted):
+                dropped_entities.add(entity_name)
+            elif extracted and _in_range(extracted):
+                kept_date_entities.add(entity_name)
+        # else: non-date entity — keep (filtered later via relationships)
+
+    kept_relations: list[dict] = []
+    for obj in parsed_relations:
+        e1 = obj.get("entity1", "")
+        e2 = obj.get("entity2", "")
+        desc = obj.get("description", "")
+
+        if _RE_GENERIC_PERSON.match(e1) or _RE_GENERIC_PERSON.match(e2):
+            continue
+        if e1 in dropped_entities or e2 in dropped_entities:
+            continue
+
+        # Drop relationships whose taken_on date is outside the range.
+        if "taken_on" in desc.lower():
+            date_matches = re.findall(r"(\d{4}-\d{2}-\d{2})", desc)
+            if date_matches:
+                if not any(_in_range(d) for d in date_matches):
+                    continue
+
+        # Drop if either endpoint is a Date entity outside the range.
+        if "(Date)" in e1:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", e1)
+            if m and not _in_range(m.group(1)):
+                continue
+        if "(Date)" in e2:
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", e2)
+            if m and not _in_range(m.group(1)):
+                continue
+
+        if "(Photo)" in e1 or "(Photo)" in e2:
+            has_matching_photos = True
+
+        kept_relations.append(obj)
+
+    if not kept_date_entities and not has_matching_photos:
+        any_match = False
+        for rel in kept_relations:
+            for field in (rel.get("description", ""), rel.get("entity1", ""), rel.get("entity2", "")):
+                for m in re.finditer(r"(\d{4}-\d{2}-\d{2})", field):
+                    if _in_range(m.group(1)):
+                        any_match = True
+                        break
+                if any_match:
+                    break
+            if any_match:
+                break
+        if not any_match:
+            return f"\nNo knowledge graph data found for {start_iso} to {end_iso}.\n"
+
+    kept_entity_objs = [e for e in parsed_entities if e.get("entity", "") not in dropped_entities]
+
+    result_lines: list[str] = []
+    result_lines.append("")
+    result_lines.append("Knowledge Graph Data (Entity):")
+    result_lines.append("")
+    result_lines.append("```json")
+    for obj in kept_entity_objs:
+        result_lines.append(json.dumps(obj))
+    result_lines.append("```")
+    result_lines.append("")
+    result_lines.append("Knowledge Graph Data (Relationship):")
+    result_lines.append("")
+    result_lines.append("```json")
+    for obj in kept_relations:
+        result_lines.append(json.dumps(obj))
+    result_lines.append("```")
+    result_lines.append("")
+
+    remaining = _extract_trailing_sections_range(response, valid_dates_range, start_year, end_year)
+    if remaining:
+        result_lines.append(remaining)
+
+    return "\n".join(result_lines)
+
+
+def _extract_trailing_sections_range(
+    response: str, valid_dates: set[str], start_year: int, end_year: int,
+) -> str:
+    """Extract Document Chunks / Reference Document List, keeping only chunks
+    whose referenced dates fall within the range (inclusive). Chunks with no
+    explicit date are kept."""
+    marker = "Document Chunks"
+    idx = response.find(marker)
+    if idx == -1:
+        return ""
+
+    trailing = response[idx:]
+    lines = trailing.split("\n")
+    filtered: list[str] = []
+    in_chunk_block = False
+    in_ref_block = False
+    kept_ref_ids: set[str] = set()
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Document Chunks"):
+            in_chunk_block = True
+            in_ref_block = False
+            filtered.append(line)
+            continue
+        if stripped.startswith("Reference Document List"):
+            in_chunk_block = False
+            in_ref_block = True
+            filtered.append(line)
+            continue
+        if stripped.startswith("```"):
+            filtered.append(line)
+            continue
+
+        if in_chunk_block and stripped.startswith("{"):
+            try:
+                obj = json.loads(stripped)
+                content = obj.get("content", "")
+                ref_id = obj.get("reference_id", "")
+                dates_in_content = set(re.findall(r"\d{4}-\d{2}-\d{2}", content))
+                for m in re.finditer(
+                    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?",
+                    content, re.IGNORECASE,
+                ):
+                    mon = _MONTH_NAMES.get(m.group(1).lower())
+                    day = int(m.group(2))
+                    yr = m.group(3)
+                    if yr and mon:
+                        dates_in_content.add(f"{yr}-{mon:02d}-{day:02d}")
+                    elif mon:
+                        # No explicit year — try each year in the range.
+                        for yr2 in range(start_year, end_year + 1):
+                            dates_in_content.add(f"{yr2}-{mon:02d}-{day:02d}")
+                if dates_in_content and not dates_in_content.intersection(valid_dates):
+                    continue
+                kept_ref_ids.add(ref_id)
+                filtered.append(line)
+            except json.JSONDecodeError:
+                filtered.append(line)
+        elif in_ref_block:
+            ref_match = re.match(r"\[(\d+)\]", stripped)
+            if ref_match:
+                if ref_match.group(1) in kept_ref_ids:
+                    filtered.append(line)
+            else:
+                filtered.append(line)
+        else:
+            filtered.append(line)
+
+    return "\n".join(filtered)
+
+
 def _extract_trailing_sections(response: str, query_date_iso: str, valid_dates: set[str]) -> str:
     """Extract Document Chunks and Reference Document List sections, filtered by date.
 
@@ -676,15 +950,25 @@ async def query_knowledge_graph(
             result = r.json()
         response = result.get("response", "")
 
-        query_date = _scan_text_for_date(query)
-        if query_date and response:
-            response = _filter_response_by_date(response, query_date)
+        # Range queries ("this month", "this week", "today", …) are filtered
+        # with _filter_response_by_date_range; single-date queries fall back to
+        # _scan_text_for_date + _filter_response_by_date.
+        query_range = _scan_text_for_date_range(query)
+        query_date: datetime | None = None
+        if query_range is not None and response:
+            r_start, r_end = query_range
+            response = _filter_response_by_date_range(response, r_start, r_end)
+        else:
+            query_date = _scan_text_for_date(query)
+            if query_date and response:
+                response = _filter_response_by_date(response, query_date)
 
         # LightRAG already extracts entities/relationships from the full VLM
         # description at ingestion time. Re-sending raw descriptions at query
         # time is redundant — the structured graph data already captures people,
         # places, and activities. Set IMG_DESC_MAX_CHARS > 0 to re-enable.
-        if _IMG_DESC_MAX_CHARS > 0 and query_date and response and "No knowledge graph data found" not in response:
+        has_active_date = (query_range is not None) or (query_date is not None)
+        if _IMG_DESC_MAX_CHARS > 0 and has_active_date and response and "No knowledge graph data found" not in response:
             photo_names = _extract_photo_names(response)
             if photo_names:
                 image_descs = await _fetch_image_descriptions(photo_names)
@@ -1011,6 +1295,90 @@ _MONTH_NAMES = {
     "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
     "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
 }
+
+# Reverse lookup: month number → full month name. Used by relative-date
+# handling to inject the current/previous month name as a high-level keyword.
+_MONTH_NUM_TO_NAME = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+
+def _get_local_tz() -> zoneinfo.ZoneInfo:
+    """Resolve the local timezone from the TZ env var (same pattern as
+    _scan_text_for_date). Falls back to America/New_York on any error."""
+    try:
+        return zoneinfo.ZoneInfo(os.environ.get("TZ", "America/New_York"))
+    except Exception:
+        return zoneinfo.ZoneInfo("America/New_York")
+
+
+def _scan_text_for_date_range(text: str) -> tuple[datetime, datetime] | None:
+    """Scan query text for a relative date expression and return a (start, end)
+    datetime range, both tz-aware at midnight.
+
+    Recognised expressions (case-insensitive, word-boundary matched):
+      - "this month"  → (first day of current month, today)
+      - "last month"  → (first day of last month, last day of last month)
+      - "this week"   → (Monday of current week, today)
+      - "last week"   → (Monday of last week, Sunday of last week)
+      - "this year"   → (Jan 1 of current year, today)
+      - "last year"   → (Jan 1 of last year, Dec 31 of last year)
+      - "today"       → (today, today)
+      - "yesterday"   → (yesterday, yesterday)
+
+    "This …" ranges use the current date as the end (never a future date).
+    Returns ``None`` if no relative expression is found.
+    """
+    tz = _get_local_tz()
+    now = datetime.now(tz=tz)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    low = text.lower()
+
+    def _has(phrase: str) -> bool:
+        return re.search(rf"\b{re.escape(phrase)}\b", low) is not None
+
+    if _has("this month"):
+        start = today.replace(day=1)
+        return (start, today)
+
+    if _has("last month"):
+        if today.month == 1:
+            lm_year, lm_month = today.year - 1, 12
+        else:
+            lm_year, lm_month = today.year, today.month - 1
+        start = datetime(lm_year, lm_month, 1, tzinfo=tz)
+        # Last day of last month = day before first day of this month
+        end = today.replace(day=1) - timedelta(days=1)
+        return (start, end)
+
+    if _has("this week"):
+        start = today - timedelta(days=today.weekday())  # Monday
+        return (start, today)
+
+    if _has("last week"):
+        this_monday = today - timedelta(days=today.weekday())
+        start = this_monday - timedelta(days=7)
+        end = this_monday - timedelta(days=1)  # Sunday
+        return (start, end)
+
+    if _has("this year"):
+        start = datetime(today.year, 1, 1, tzinfo=tz)
+        return (start, today)
+
+    if _has("last year"):
+        start = datetime(today.year - 1, 1, 1, tzinfo=tz)
+        end = datetime(today.year - 1, 12, 31, tzinfo=tz)
+        return (start, end)
+
+    if _has("today"):
+        return (today, today)
+
+    if _has("yesterday"):
+        y = today - timedelta(days=1)
+        return (y, y)
+
+    return None
 
 
 def _scan_text_for_date(text: str) -> datetime | None:

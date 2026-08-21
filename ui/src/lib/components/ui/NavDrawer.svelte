@@ -59,7 +59,7 @@
             <Icon name="sidebar" size={16} color="var(--color-cyber-cyan)" />
           </div>
           <div>
-            <h2 class="text-sm font-bold uppercase tracking-[0.15em] text-cyber-text text-glow-cyan">Nexus</h2>
+            <h2 class="text-sm font-bold uppercase tracking-[0.15em] text-cyber-text text-glow-cyan">Knowledge Graph</h2>
           </div>
         </div>
         <button

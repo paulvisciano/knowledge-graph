@@ -204,19 +204,19 @@ services:
     - api.worker
     networks:
     - internal
-  nexus:
+  knowledge-graph:
     build:
       context: .
       dockerfile: ui/Dockerfile
-    container_name: knowledge-graph-nexus
+    container_name: knowledge-graph-ui
     restart: unless-stopped
     mem_limit: 256m
     environment:
       LLAMA_HOST: ${LLAMA_HOST:-host.docker.internal}
       WHISPER_HOST: ${WHISPER_HOST:-host.docker.internal}
     ports:
-    - ${NEXUS_PORT:-3000}:3000
-    - ${NEXUS_HTTPS_PORT:-3443}:3443
+    - ${KG_PORT:-3000}:3000
+    - ${KG_HTTPS_PORT:-3443}:3443
     depends_on:
       api:
         condition: service_healthy

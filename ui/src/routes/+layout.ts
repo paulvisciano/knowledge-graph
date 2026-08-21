@@ -2,6 +2,6 @@ export const ssr = false;
 
 export function load() {
   return {
-    title: 'Nexus',
+    title: 'Knowledge Graph',
   };
 }

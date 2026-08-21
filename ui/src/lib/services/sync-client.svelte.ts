@@ -242,16 +242,16 @@ class SyncClient {
       if (updated.length === 0) return;
 
       for (const exported of updated) {
-        const nexusConv = this.fromSyncConv(exported.conv);
-        const nexusMessages = exported.messages.map((m) => this.fromSyncMsg(m));
-        const idx = this.conversations.findIndex((c) => c.id === nexusConv.id);
+        const kgConv = this.fromSyncConv(exported.conv);
+        const kgMessages = exported.messages.map((m) => this.fromSyncMsg(m));
+        const idx = this.conversations.findIndex((c) => c.id === kgConv.id);
 
         if (idx >= 0) {
-          this.conversations[idx] = nexusConv;
+          this.conversations[idx] = kgConv;
         } else {
-          this.conversations.unshift(nexusConv);
+          this.conversations.unshift(kgConv);
         }
-        this.loadedConversations.set(nexusConv.id, nexusMessages);
+        this.loadedConversations.set(kgConv.id, kgMessages);
       }
 
       this.conversations.sort((a, b) => b.createdAt - a.createdAt);

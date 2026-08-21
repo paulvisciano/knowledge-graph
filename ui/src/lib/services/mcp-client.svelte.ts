@@ -43,7 +43,7 @@ class McpClient {
           params: {
             protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: 'nexus-ui', version: '0.1.0' },
+            clientInfo: { name: 'knowledge-graph-ui', version: '0.1.0' },
           },
         }),
       });

@@ -38,7 +38,7 @@
 </script>
 
 {#if $isMobile || $isTablet}
-  <div class="nexus-mobile-shell">
+  <div class="kg-mobile-shell">
       <button
         onclick={() => navDrawerOpen.update((v) => !v)}
         class="menu-trigger"
@@ -55,7 +55,7 @@
       <SettingsDrawer />
     </div>
   {:else}
-    <div class="nexus-shell flex h-screen w-screen overflow-hidden bg-cyber-bg text-cyber-text">
+    <div class="kg-shell flex h-screen w-screen overflow-hidden bg-cyber-bg text-cyber-text">
       <button
         onclick={() => navDrawerOpen.update((v) => !v)}
         class="menu-trigger"
@@ -76,7 +76,7 @@
   {/if}
 
 <style>
-  .nexus-mobile-shell {
+  .kg-mobile-shell {
     display: flex;
     flex-direction: column;
     height: 100vh;

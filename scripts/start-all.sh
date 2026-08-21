@@ -4,8 +4,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Brings up the entire system in the correct order:
 #   1. Ensure Docker Desktop VM memory matches .env (scripts/setup-docker.sh)
-#   2. Start Docker containers (lightrag, postgres, api, nexus, mcp)
-#   3. Smoke-test nexus UI (scripts/health-check.sh) — aborts if :3000 is broken
+#   2. Start Docker containers (lightrag, postgres, api, knowledge-graph, mcp)
+#   3. Smoke-test Knowledge Graph UI (scripts/health-check.sh) — aborts if :3000 is broken
 #   4. Start host llama-servers (LLM, embeddings, reranker, whisper)
 #
 # The llama-servers run in the foreground so Ctrl+C stops them cleanly.
@@ -30,13 +30,13 @@ echo "── Starting Docker containers ──"
 docker compose -f "$COMPOSE_FILE" up -d --build
 echo ""
 
-# 3. Wait for nexus to serve the UI, then hand off to llama-servers.
+# 3. Wait for Knowledge Graph to serve the UI, then hand off to llama-servers.
 echo "── Smoke test (scripts/health-check.sh) ──"
 if bash "$SCRIPT_DIR/health-check.sh"; then
     echo ""
 else
     rc=$?
-    echo "ERROR: nexus UI not responding — stack is up but :3000 is broken." >&2
+    echo "ERROR: Knowledge Graph UI not responding — stack is up but :3000 is broken." >&2
     echo "       Run ./scripts/health-check.sh for details, or ./scripts/stop-all.sh to tear down." >&2
     exit $rc
 fi

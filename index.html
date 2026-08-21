@@ -197,7 +197,7 @@
     <tr>
       <td><a href="https://docs.docker.com/desktop/setup/install/mac-install/" target="_blank" rel="noopener">Docker Desktop</a></td>
       <td><code>brew install --cask docker</code></td>
-      <td>Runs LightRAG, PostgreSQL, API, Nexus UI in containers</td>
+      <td>Runs LightRAG, PostgreSQL, API, Knowledge Graph UI in containers</td>
     </tr>
     <tr>
       <td><a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener">llama.cpp</a></td>
@@ -292,7 +292,7 @@ brew upgrade llama.cpp</pre>
 <pre><span class="muted"># Start everything: Docker containers + host llama-servers</span>
 ./scripts/start-all.sh
 
-<span class="muted"># Containers: LightRAG, PostgreSQL, API, Nexus UI, MCP</span>
+<span class="muted"># Containers: LightRAG, PostgreSQL, API, Knowledge Graph UI, MCP</span>
 <span class="muted"># Host: LLM (:8080), embeddings (:8081), reranker (:8082), whisper (:8090)</span>
 
 <span class="muted"># Press Ctrl+C to stop the llama-servers</span>
@@ -311,7 +311,7 @@ curl -sf http://localhost:8000/health | python3 -m json.tool
 <span class="muted"># LLM (should return model info)</span>
 curl -sf http://localhost:8080/health | python3 -m json.tool
 
-<span class="muted"># Open Nexus UI (port 3000 in Docker, 5180 in dev mode)</span>
+<span class="muted"># Open Knowledge Graph UI (port 3000 in Docker, 5180 in dev mode)</span>
 open http://localhost:3000
 
 <span class="muted"># Or open LightRAG's built-in WebUI</span>
@@ -324,7 +324,7 @@ open http://localhost:9621</pre>
 curl -N -X POST http://localhost:8000/images/process \
   -F "file=@photo.jpg"
 
-<span class="muted"># Or via the Nexus UI — drag &amp; drop onto the chat input</span></pre>
+<span class="muted"># Or via the Knowledge Graph UI — drag &amp; drop onto the chat input</span></pre>
 </div>
 
 <h3>Stopping Everything</h3>
@@ -341,8 +341,8 @@ curl -N -X POST http://localhost:8000/images/process \
     <tr><td><code>Model file not found</code></td><td>Check <code>MODEL_DIR</code> in <code>.env</code> matches your model path</td></tr>
     <tr><td>LightRAG container unhealthy</td><td><code>docker compose logs lightrag</code> — usually a PostgreSQL connection issue. Ensure postgres is healthy first.</td></tr>
     <tr><td>API container unhealthy</td><td><code>docker compose logs api</code> — check that <code>host.docker.internal:8080</code> is reachable (llama-servers must be running on host)</td></tr>
-    <tr><td>Nexus UI shows blank/errors</td><td><code>docker compose logs nexus</code> — nginx proxy needs both lightrag and api services healthy</td></tr>
-    <tr><td>Port already in use</td><td>Change the port in <code>.env</code> (<code>LIGHTRAG_PORT</code>, <code>API_PORT</code>, <code>NEXUS_PORT</code>, <code>LLM_PORT</code>, etc.)</td></tr>
+    <tr><td>Knowledge Graph UI shows blank/errors</td><td><code>docker compose logs knowledge-graph</code> — nginx proxy needs both lightrag and api services healthy</td></tr>
+    <tr><td>Port already in use</td><td>Change the port in <code>.env</code> (<code>LIGHTRAG_PORT</code>, <code>API_PORT</code>, <code>KG_PORT</code>, <code>LLM_PORT</code>, etc.)</td></tr>
     <tr><td>PostgreSQL connection refused</td><td><code>docker compose restart postgres</code> — check <code>POSTGRES_*</code> vars in <code>.env</code></td></tr>
     <tr><td>DeepFace weights download fails</td><td>First face recognition run downloads ~200 MB of model weights. Ensure internet access on first run. Weights are cached in a Docker volume.</td></tr>
   </table>
@@ -375,9 +375,9 @@ curl -N -X POST http://localhost:8000/images/process \
 <div class="card success" style="margin-bottom:1rem">
   <div style="display:flex;align-items:center;gap:0.75rem">
     <span class="badge green">Phase 3 — Complete</span>
-    <strong>Nexus UI + Docker Integration</strong>
+    <strong>Knowledge Graph UI + Docker Integration</strong>
   </div>
-  <p style="margin-top:0.5rem">Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization with photo textures, image ingestion with real-time SSE pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+  <p style="margin-top:0.5rem">Knowledge Graph SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization with photo textures, image ingestion with real-time SSE pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
 </div>
 
 <div class="card accent" style="margin-bottom:1rem">
@@ -516,9 +516,9 @@ curl -N -X POST http://localhost:8000/images/process \
 <div class="card success" style="margin-bottom:0.5rem">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">
     <span class="badge green">Phase 3 ✓</span>
-    <strong style="font-size:1.1rem">Nexus UI + Docker Integration</strong>
+    <strong style="font-size:1.1rem">Knowledge Graph UI + Docker Integration</strong>
   </div>
-  <p>Nexus SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization (3d-force-graph + Three.js) with real-time SSE image processing pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
+  <p>Knowledge Graph SvelteKit frontend running in Docker behind nginx reverse proxy. Chat with knowledge graph, interactive 3D graph visualization (3d-force-graph + Three.js) with real-time SSE image processing pipeline, persistent job queue, MCP tool integration, and settings — all proxied through nginx to LightRAG, API backend, and llama-server.</p>
   <p class="muted" style="margin-top:0.5rem"><strong>Deliverable:</strong> Custom web UI at <code>localhost:3000</code> — chat + graph exploration + image ingestion + job tracking + MCP tool calls.</p>
 </div>
 
@@ -553,7 +553,7 @@ curl -N -X POST http://localhost:8000/images/process \
 <div class="card accent">
 <pre>
 <span class="muted">Browser</span>
-  <span class="arrow">→</span> <span class="badge blue">Nexus :3000</span> <span class="muted">SvelteKit behind nginx</span>
+  <span class="arrow">→</span> <span class="badge blue">KG :3000</span> <span class="muted">SvelteKit behind nginx</span>
   <span class="muted">  ├─ /api/kg/    → API Backend</span>
   <span class="muted">  ├─ /api/lightrag/ → LightRAG</span>
   <span class="muted">  ├─ /v1/, /health, /slots → llama-server</span>
@@ -604,7 +604,7 @@ curl -N -X POST http://localhost:8000/images/process \
     <td>~400 MB image</td>
   </tr>
   <tr>
-    <td><span class="badge blue">Nexus UI</span></td>
+    <td><span class="badge blue">Knowledge Graph UI</span></td>
     <td>Docker</td>
     <td><code>3000</code></td>
     <td>SvelteKit + nginx</td>
@@ -743,7 +743,7 @@ knowledge-graph/
 ├── known_faces/             <span class="muted"># face database (PersonName/*.jpg)</span>
 ├── face_crops/              <span class="muted"># extracted face crops for person nodes (gitignored)</span>
 ├── inputs/                  <span class="muted"># images to process</span>
-├── ui/                     <span class="muted"># Nexus SvelteKit frontend</span>
+├── ui/                     <span class="muted"># Knowledge Graph SvelteKit frontend</span>
 │   ├── Dockerfile           <span class="muted"># multi-stage build (bun → vite → nginx)</span>
 │   ├── vite.config.ts       <span class="muted"># dev proxy routes</span>
 │   ├── src/
@@ -824,7 +824,7 @@ knowledge-graph/
 
 <table>
   <tr><th>Service</th><th>URL</th><th>Notes</th></tr>
-  <tr><td>Nexus UI</td><td><a href="http://localhost:3000">http://localhost:3000</a></td><td>SvelteKit frontend in Docker (chat, 3D graph with photo textures &amp; face crops, drag-drop ingestion, job tracking &amp; resumption, MCP). Dev mode runs on <code>:5180</code></td></tr>
+  <tr><td>Knowledge Graph UI</td><td><a href="http://localhost:3000">http://localhost:3000</a></td><td>SvelteKit frontend in Docker (chat, 3D graph with photo textures &amp; face crops, drag-drop ingestion, job tracking &amp; resumption, MCP). Dev mode runs on <code>:5180</code></td></tr>
   <tr><td>LightRAG WebUI</td><td><a href="http://localhost:9621">http://localhost:9621</a></td><td>Built-in React UI</td></tr>
   <tr><td>LightRAG API Docs</td><td><a href="http://localhost:9621/docs">http://localhost:9621/docs</a></td><td>Swagger UI</td></tr>
   <tr><td>LightRAG Health</td><td><a href="http://localhost:9621/health">http://localhost:9621/health</a></td><td>JSON status</td></tr>
@@ -858,7 +858,7 @@ knowledge-graph/
     <tr><td>2025-07-07</td><td>Committed image processing pipeline + API backend (<code>83e379b</code>). Face recognition tested but blocked on macOS Python 3.9 (TensorFlow mutex) — works in principle, needs Python 3.11+ or Docker</td></tr>
     <tr><td>2025-07-07</td><td>Fixed face recognition blocker: created Python 3.11 venv (<code>.venv/</code>), added <code>deepface</code>, <code>tf-keras</code>, <code>opencv-python</code> to requirements. Face recognition now fully working — 3 faces detected with age, gender, emotion, race attributes. Updated <code>start-api.sh</code> to use venv Python.</td></tr>
     <tr><td>2025-07-07</td><td>Initial two-step ingestion pipeline: send images to VLM for description generation + insert metadata as text via <code>/documents/text</code>. SSE events stream both VLM description and metadata insertion progress.</td></tr>
-    <tr><td>2025-07-07</td><td>Integrated Nexus UI: SvelteKit frontend with chat, 3D graph visualization (3d-force-graph + Three.js), image ingestion, MCP tool calls, and settings. Dockerized behind nginx reverse proxy at <code>:3000</code>. Added API and Nexus services to docker-compose. Fixed missing <code>MCP_API</code> and <code>SYNC_URL</code> exports in constants.ts. Added nginx routes for MCP and WebSocket sync.</td></tr>
+    <tr><td>2025-07-07</td><td>Integrated Knowledge Graph UI: SvelteKit frontend with chat, 3D graph visualization (3d-force-graph + Three.js), image ingestion, MCP tool calls, and settings. Dockerized behind nginx reverse proxy at <code>:3000</code>. Added API and Knowledge Graph services to docker-compose. Fixed missing <code>MCP_API</code> and <code>SYNC_URL</code> exports in constants.ts. Added nginx routes for MCP and WebSocket sync.</td></tr>
     <tr><td>2025-07-07</td><td>Fixed image ingestion pipeline: LightRAG's <code>/documents/upload</code> rejects image files (only text-based formats). Rewrote <code>upload_image_to_lightrag()</code> to send images directly to the VLM (Gemma 4 with mmproj) for description generation, then insert the description as text into LightRAG via <code>/documents/text</code>. Added VLM env vars (<code>VLM_LLM_BINDING_HOST</code>, <code>VLM_LLM_MODEL</code>, <code>VLM_LLM_BINDING_API_KEY</code>) to API container. Fixed API Dockerfile <code>COPY requirements.txt</code> path.</td></tr>
     <tr><td>2025-07-07</td><td>Fixed critical LightRAG bug: OpenAI SDK v2.36.0 returns a <code>list</code> instead of <code>CreateEmbeddingResponse</code> when <code>base_url</code> doesn't end with <code>/v1</code>. This caused every embedding call during document processing to crash with <code>'list' object has no attribute 'data'</code>, and a secondary <code>ndim</code> error where embeddings had shape <code>(1,1,768)</code> instead of <code>(1,768)</code>. Patched <code>lightrag/llm/openai.py</code> to normalize both response shapes and flatten the extra nesting in the list case. Full pipeline now works end-to-end: document insertion ✓, image processing ✓, VLM description ✓, knowledge graph queries ✓</td></tr>
     <tr><td>2025-07-08</td><td>Connected knowledge graph: merged VLM description and EXIF metadata into a single LightRAG document. Previously two separate docs created disconnected subgraphs ("Saint Petersburg" from metadata had no edge to "Backyard" from VLM). Single document with context-aware VLM prompt (EXIF metadata prepended) ensures coherent entity extraction.</td></tr>
@@ -921,7 +921,7 @@ knowledge-graph/
     <tr><td>2026-07-23</td><td>Redesigned NodeOverlay: overlay panel with filmstrip nav, badges, and related tab. Precomputed EXIF dates/dims at ingestion and returned in <code>/graphs</code>. Zoomed graph further out on initial load.</td></tr>
     <tr><td>2026-07-24</td><td><strong>Reduced Docker memory footprint</strong>: container <code>mem_limit</code> caps lowered (4.5→1.75 GiB), Docker VM memory 3→1.5 GiB. Added <code>DOCKER_VM_MEMORY_MIB</code> to <code>.env</code>, <code>scripts/setup-docker.sh</code> to sync it, and <code>scripts/start-all.sh</code> / <code>stop-all.sh</code> as single entry points. Updated README and Getting Started.</td></tr>
     <tr><td>2026-07-24</td><td><strong>Two-phase pipeline</strong>: split image processing into EXIF/face extraction (phase 1) and VLM/LightRAG insert (phase 2) with <code>enqueue_and_maybe_batch</code>. Added VLM image resizing (<code>VLM_IMAGE_MAX_DIM=768</code>) to cut payload ~50×. Added <code>metadata_text</code> column, <code>build-llama-cpp.sh</code>, IngestionPanel, and ProcessingOverlay UI.</td></tr>
-    <tr><td>2026-07-24</td><td>Recorded system vitals (pre-batch, mid-batch, idle) and image processing-time stats in <code>docs/</code>. Added System Vitals section with SVG charts to <code>index.html</code>. Made all sections collapsible. Fixed port references (Nexus 5180→3000), added Whisper/MCP to Endpoints and Architecture, removed BGE-M3 and Quick Start sections.</td></tr>
+    <tr><td>2026-07-24</td><td>Recorded system vitals (pre-batch, mid-batch, idle) and image processing-time stats in <code>docs/</code>. Added System Vitals section with SVG charts to <code>index.html</code>. Made all sections collapsible. Fixed port references (KG 5180→3000), added Whisper/MCP to Endpoints and Architecture, removed BGE-M3 and Quick Start sections.</td></tr>
   </table>
 </div>
 </div>

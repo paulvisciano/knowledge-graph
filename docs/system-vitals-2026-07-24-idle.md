@@ -62,7 +62,7 @@
 | llama-server (embed, port 8081) | stopped |
 | llama-server (reranker, port 8082) | stopped |
 | whisper-server (port 8090) | stopped |
-| Docker containers (api, lightrag, postgres, nexus, mcp) | stopped (none running) |
+| Docker containers (api, lightrag, postgres, knowledge-graph, mcp) | stopped (none running) |
 | Docker Desktop (GUI app) | running (no containers) |
 | Vite dev server (port 5180) | stopped (killed) |
 | Listening ports (all stack ports) | none |

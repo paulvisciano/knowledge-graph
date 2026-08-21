@@ -1291,7 +1291,7 @@
 
     const sessionLine = JSON.stringify({
       type: 'session',
-      harness: 'nexus',
+      harness: 'knowledge-graph',
       id: conv.id,
       name: conv.title || 'New conversation',
       lastModified: conv.updatedAt,

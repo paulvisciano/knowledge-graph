@@ -12,8 +12,8 @@ FROM nginx:alpine
 
 COPY --from=builder /app/build /usr/share/nginx/html
 COPY docker/nginx/nginx.conf /etc/nginx/templates/default.conf.template
-COPY docker/nginx/certs/nexus.crt /etc/nginx/certs/nexus.crt
-COPY docker/nginx/certs/nexus.key /etc/nginx/certs/nexus.key
+COPY docker/nginx/certs/kg.crt /etc/nginx/certs/kg.crt
+COPY docker/nginx/certs/kg.key /etc/nginx/certs/kg.key
 
 EXPOSE 3000
 

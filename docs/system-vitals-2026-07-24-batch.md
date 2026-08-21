@@ -46,7 +46,7 @@
 | Container | CPU % | Mem Usage / Limit | Net I/O | Block I/O |
 |---|---|---|---|---|
 | knowledge-graph-api | 1.10% | 314 MiB / 1 GiB | 723 MB / 252 MB | 917 MB / 1.24 GB |
-| knowledge-graph-nexus | 0.00% | 10.71 MiB / 256 MiB | 4.3 kB / 126 B | 13.8 MB / 2.95 MB |
+| knowledge-graph-ui | 0.00% | 10.71 MiB / 256 MiB | 4.3 kB / 126 B | 13.8 MB / 2.95 MB |
 | knowledge-graph-lightrag | 3.86% | 236 MiB / 2 GiB | 216 MB / 2.81 GB | 486 MB / 769 MB |
 | knowledge-graph-mcp | 1.35% | 12.96 MiB / 256 MiB | 45.5 kB / 81.2 kB | 81.9 MB / 59 MB |
 | knowledge-graph-postgres | 0.00% | 245 MiB / 1 GiB | 197 MB / 284 MB | 414 MB / 1.18 GB |
@@ -56,7 +56,7 @@
 | Container | Status | Ports |
 |---|---|---|
 | knowledge-graph-api | Up 23 min (healthy) | 8000 |
-| knowledge-graph-nexus | Up 2 hr (healthy) | 3000 |
+| knowledge-graph-ui | Up 2 hr (healthy) | 3000 |
 | knowledge-graph-lightrag | Up 6 hr (healthy) | 9621 |
 | knowledge-graph-mcp | Up 7 hr (healthy) | 9653 |
 | knowledge-graph-postgres | Up 7 hr (healthy) | 5432 |

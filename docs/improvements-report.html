@@ -210,8 +210,8 @@
           <tr><td><code>api</code> container</td><td class="num">396 MB / 1 GB</td><td>base64 image buffers + httpx clients</td></tr>
           <tr><td><code>lightrag</code></td><td class="num">319 MB / 2 GB</td><td>embeddings + graph</td></tr>
           <tr><td><code>postgres</code> (pgvector)</td><td class="num">91 MB / 1 GB</td><td></td></tr>
-          <tr><td><code>nexus</code> + <code>mcp</code></td><td class="num">~80 MB</td><td></td></tr>
-          <tr><td>macOS + browser (Nexus UI, 5×~8MB base64)</td><td class="num">~2 GB</td><td>base64 in <code>graphStore</code> + DOM is the avoidable part</td></tr>
+          <tr><td><code>knowledge-graph</code> + <code>mcp</code></td><td class="num">~80 MB</td><td></td></tr>
+          <tr><td>macOS + browser (Knowledge Graph UI, 5×~8MB base64)</td><td class="num">~2 GB</td><td>base64 in <code>graphStore</code> + DOM is the avoidable part</td></tr>
         </tbody>
         <tfoot><tr><td>Total resident</td><td class="num">~11.5–12 GB</td><td>~3–4 GB headroom, ~3 GB actually free after OS cache</td></tr></tfoot>
       </table>
@@ -383,9 +383,9 @@ const SEED = [
 // --- Infra / Config ---
 {group:"Infra / Config",file:"api/main.py",line:"30-33",issue:"Wildcard CORS: `allow_origins=[\"*\"]` + `allow_credentials=True`.",impact:"Insecure AND invalid per spec (browsers reject credentials with wildcard). Should enumerate allowed origins.",sev:"high",status:"done"},
 {group:"Infra / Config",file:"docker-compose.yml",line:"173",issue:"`DATABASE_URL` hardcoded `postgresql://lightrag:lightrag@...` bypasses env vars.",impact:"Duplicate of POSTGRES_PASSWORD; drift risk. Weak default credential in version control.",sev:"med",status:"open"},
-{group:"Infra / Config",file:"docker-compose.yml",line:"193-213",issue:"`nexus` service has NO healthcheck (other 4 services do).",impact:"Inconsistent, no readiness gate for the main UI service.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"193-213",issue:"`knowledge-graph` service has NO healthcheck (other 4 services do).",impact:"Inconsistent, no readiness gate for the main UI service.",sev:"med",status:"open"},
 {group:"Infra / Config",file:"docker-compose.yml",line:"145",issue:"`postgres_data` mounted at `/var/lib/postgresql` (correct path is `/var/lib/postgresql/data`).",impact:"Data may not persist across image upgrades.",sev:"high",status:"open"},
-{group:"Infra / Config",file:"docker-compose.yml",line:"34,121,179,203",issue:"All service ports published to host (0.0.0.0) — Postgres 5432, MCP 9653, lightrag 9621 exposed externally.",impact:"Should bind 127.0.0.1 or only expose nexus:3000 + api:8000.",sev:"med",status:"open"},
+{group:"Infra / Config",file:"docker-compose.yml",line:"34,121,179,203",issue:"All service ports published to host (0.0.0.0) — Postgres 5432, MCP 9653, lightrag 9621 exposed externally.",impact:"Should bind 127.0.0.1 or only expose knowledge-graph:3000 + api:8000.",sev:"med",status:"open"},
 {group:"Infra / Config",file:"docker-compose.yml",line:"71",issue:"`MIN_RERANK_SCORE: \"${MIN_RERANK_SCORE:--1}\"` — malformed default (`:--1` parses as `:-` + `-1`).",impact:"Silently wrong default value.",sev:"high",status:"open"},
 {group:"Infra / Config",file:".env.example",line:"85",issue:"`POSTGRES_PASSWORD=lightrag` — weak default DB password in example.",impact:"Propagates weak credentials.",sev:"med",status:"open"},
 {group:"Infra / Config",file:"(repo root)",line:"—",issue:"NO `.github/workflows/`, no CI — zero CI.",impact:"Vitest tests (2) and Playwright e2e exist but never run in CI. Backend has no tests at all.",sev:"high",status:"open"},

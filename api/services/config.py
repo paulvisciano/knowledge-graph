@@ -169,7 +169,7 @@ def cors_allowed_origins() -> list[str]:
     The previous config was ``allow_origins=["*"]`` with
     ``allow_credentials=True`` — both insecure AND invalid per the Fetch spec
     (browsers reject credentialed requests when the origin is the wildcard).
-    Default to the Nexus UI origin so dev works out of the box; override via
+    Default to the Knowledge Graph UI origin so dev works out of the box; override via
     ``CORS_ALLOWED_ORIGINS`` (comma-separated).
     """
     raw = _env("CORS_ALLOWED_ORIGINS", "http://localhost:3000")

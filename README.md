@@ -39,7 +39,7 @@ The goal is a private “memory palace” you can explore visually rather than a
 
 | Layer | What runs |
 |-------|-----------|
-| **UI** | Nexus (SvelteKit + Three.js infinite canvas) |
+| **UI** | Knowledge Graph (SvelteKit + Three.js infinite canvas) |
 | **API** | FastAPI orchestration, job pipeline, SSE progress |
 | **Graph** | LightRAG (patched) + PostgreSQL / pgvector |
 | **Models (host, Metal)** | Bonsai-27B + mmproj (LLM + vision), BGE-M3, bge-reranker, Whisper |
@@ -85,14 +85,14 @@ cp .env.example .env
 ./scripts/start-all.sh
 # Starts everything in order:
 #   • Ensures Docker Desktop VM memory matches .env (DOCKER_VM_MEMORY_MIB)
-#   • Docker containers: lightrag, postgres, api, nexus, mcp
+#   • Docker containers: lightrag, postgres, api, knowledge-graph, mcp
 #   • Host llama-servers (LLM + mmproj vision)        :8080
 #   • Host llama-servers (BGE-M3 embeddings)          :8081
 #   • Host llama-servers (bge-reranker-v2-m3)         :8082
 #   • Host whisper-server (ggml-large-v3-turbo)       :8090
 # Ctrl+C stops llama-servers; ./scripts/stop-all.sh tears down everything.
 
-# 5. Open Nexus UI
+# 5. Open Knowledge Graph UI
 open http://localhost:3000
 ```
 
@@ -147,7 +147,7 @@ Docker services:
 ```sh
 curl -sf http://localhost:9621/health   # LightRAG
 curl -sf http://localhost:8000/health   # Knowledge Graph API
-open http://localhost:3000              # Nexus UI
+open http://localhost:3000              # Knowledge Graph UI
 ```
 
 ---
