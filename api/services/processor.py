@@ -2069,3 +2069,128 @@ async def delete_photo_entities(
     logger.info("[Delete Entities] Cleanup for '%s': deleted %d entities, %d errors",
                 file_source, len(results["entities_deleted"]), len(results["errors"]))
     return results
+
+
+async def delete_lightrag_document_by_file_source(
+    lightrag_url: str,
+    file_source: str,
+) -> dict[str, Any]:
+    """Delete the LightRAG *document* for a given file_source so it can be
+    re-ingested from scratch.
+
+    ``insert_metadata_into_lightrag`` POSTs to ``/documents/text`` with
+    ``file_source`` as the document id; LightRAG returns 409 when the doc
+    already exists, which the insert path treats as success.  That leaves
+    the old document (and its status: ``failed`` / ``analyzing`` / stuck
+    ``processing``) in place, so re-running the image pipeline never
+    actually re-ingests.  Calling this *before* re-processing clears the
+    stale doc so LightRAG creates a fresh one.
+
+    Mirrors the frontend ``handleDelete`` flow
+    (``lightragClient.deleteDocument`` + ``kgApiClient.deletePhotoEntities``)
+    but server-side.  Photo/EXIF *graph entities* are cleaned up separately
+    by ``delete_photo_entities``.
+
+    Best-effort: a missing document (404 / not in the list) is treated as
+    success so callers can invoke unconditionally before re-processing.
+    """
+    base_url = lightrag_url.rstrip("/")
+    results: dict[str, Any] = {"doc_id": None, "status": "not_found"}
+
+    def _fetch_documents() -> list[dict]:
+        req = Request(
+            f"{base_url}/documents",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=config.http_timeouts().short) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    try:
+        docs = await asyncio.to_thread(_fetch_documents)
+    except Exception as exc:
+        logger.warning("[Delete Doc] Failed to fetch documents for '%s': %s", file_source, exc)
+        results["status"] = "error"
+        results["error"] = str(exc)
+        return results
+
+    # LightRAG returns either a bare list or {"statuses": {group: [docs]}}.
+    if isinstance(docs, list):
+        doc_list = docs
+    elif isinstance(docs, dict) and isinstance(docs.get("statuses"), dict):
+        doc_list = [d for v in docs["statuses"].values() for d in v]
+    else:
+        doc_list = docs.get("documents", docs.get("data", [])) if isinstance(docs, dict) else []
+
+    doc_id: str | None = None
+    for doc in doc_list:
+        if not isinstance(doc, dict):
+            continue
+        doc_name = doc.get("file_path") or doc.get("filename") or doc.get("name") or ""
+        if doc_name == file_source or doc_name.endswith(file_source):
+            doc_id = doc.get("id")
+            break
+
+    if not doc_id:
+        logger.info("[Delete Doc] No LightRAG document found for '%s' — nothing to delete", file_source)
+        return results
+
+    def _delete() -> dict[str, Any]:
+        payload = json.dumps({"doc_ids": [doc_id]}).encode("utf-8")
+        req = Request(
+            f"{base_url}/documents/delete_document",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="DELETE",
+        )
+        with urlopen(req, timeout=config.http_timeouts().long) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    try:
+        delete_result = await asyncio.to_thread(_delete)
+        results["doc_id"] = doc_id
+        results["status"] = "deleted"
+        results["result"] = delete_result
+        logger.info("[Delete Doc] Initiated deletion for '%s' (id=%s)", file_source, doc_id)
+    except URLError as exc:
+        if "404" in str(exc) or "not found" in str(exc).lower():
+            results["status"] = "not_found"
+            logger.info("[Delete Doc] Document '%s' (id=%s) already gone", file_source, doc_id)
+            return results
+        results["status"] = "error"
+        results["error"] = str(exc)
+        logger.warning("[Delete Doc] Failed to delete document '%s' (id=%s): %s", file_source, doc_id, exc)
+        return results
+    except Exception as exc:
+        results["status"] = "error"
+        results["error"] = str(exc)
+        logger.warning("[Delete Doc] Unexpected error deleting document '%s' (id=%s): %s", file_source, doc_id, exc)
+        return results
+
+    # LightRAG's delete is async — it returns "deletion_started" and removes
+    # the doc in the background.  Re-inserting before the delete completes
+    # hits a 409 and is silently treated as success, leaving the stale doc
+    # (with its failed fallback text) in place.  Poll until the doc is gone
+    # (up to 30s) so the re-insert creates a fresh document.
+    for attempt in range(15):
+        await asyncio.sleep(2)
+        try:
+            docs = await asyncio.to_thread(_fetch_documents)
+        except Exception:
+            continue
+        if isinstance(docs, list):
+            check_list = docs
+        elif isinstance(docs, dict) and isinstance(docs.get("statuses"), dict):
+            check_list = [d for v in docs["statuses"].values() for d in v]
+        else:
+            check_list = docs.get("documents", docs.get("data", [])) if isinstance(docs, dict) else []
+
+        still_present = any(
+            isinstance(d, dict) and d.get("id") == doc_id
+            for d in check_list
+        )
+        if not still_present:
+            logger.info("[Delete Doc] Confirmed deletion of '%s' (id=%s) after %d polls", file_source, doc_id, attempt + 1)
+            return results
+
+    logger.warning("[Delete Doc] Document '%s' (id=%s) still present after 30s — proceeding anyway", file_source, doc_id)
+    return results

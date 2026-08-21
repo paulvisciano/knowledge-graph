@@ -37,13 +37,14 @@ from api.services.processor import (
     ProcessingEvent, process_image, upload_image_to_lightrag,
     describe_image_with_vlm, describe_face_crop, create_exif_relations,
     link_exif_to_visual_entities, link_note_to_date, wait_for_lightrag_processing,
-    delete_photo_entities, insert_metadata_into_lightrag,
+    delete_photo_entities, delete_lightrag_document_by_file_source,
+    insert_metadata_into_lightrag,
     prepare_vlm_image, cleanup_vlm_image,
 )
 from api.services import db as db_module
 from api.services import config
 from api.services.job_manager import (
-    create_job, get_job, list_jobs, delete_job,
+    create_job, get_job, list_jobs, delete_job, delete_jobs_by_file_source,
     persist_uploaded_file, get_events, update_job_status,
 )
 # Phase runners and constants live in the shared phases module so both the
@@ -912,6 +913,13 @@ async def reprocess_image(
 
     Finds the file by its original filename and re-runs the full processing
     pipeline (EXIF, faces, VLM, LightRAG insert). Returns an SSE stream.
+
+    A previous run may have left a LightRAG document stuck in ``failed`` /
+    ``analyzing`` / ``processing``.  ``insert_metadata_into_lightrag``
+    treats the resulting 409 as success, so without cleanup the stale doc
+    (and its status) would persist and the re-run would be a no-op.  We
+    delete the old document and its Photo/EXIF graph entities before
+    re-running so LightRAG creates a fresh document.
     """
     skip_exif_bool = _parse_bool(skip_exif)
     skip_faces_bool = await _resolve_skip_faces(_parse_bool(skip_faces))
@@ -920,14 +928,32 @@ async def reprocess_image(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {file_source}")
 
-    event_generator = _process_and_stream(
-        str(file_path),
-        file_source,
-        skip_exif=skip_exif_bool,
-        skip_faces=skip_faces_bool,
-        insert=True,
-    )
-    return EventSourceResponse(event_generator)
+    async def _reprocess_with_cleanup():
+        # Clean up any stale LightRAG document + Photo/EXIF entities before
+        # re-running the pipeline so the re-insert isn't a 409 no-op.
+        yield ServerSentEvent(
+            event="message",
+            data=json.dumps({"event": "cleanup_started", "data": {"file_source": file_source}, "timestamp": time.time()}),
+        )
+        try:
+            await delete_lightrag_document_by_file_source(config.lightrag_url(), file_source)
+            await delete_photo_entities(config.lightrag_url(), file_source)
+        except Exception as exc:
+            logger.warning("Reprocess cleanup for %s failed: %s", file_source, exc)
+        yield ServerSentEvent(
+            event="message",
+            data=json.dumps({"event": "cleanup_complete", "data": {"file_source": file_source}, "timestamp": time.time()}),
+        )
+        async for ev in _process_and_stream(
+            str(file_path),
+            file_source,
+            skip_exif=skip_exif_bool,
+            skip_faces=skip_faces_bool,
+            insert=True,
+        ):
+            yield ev
+
+    return EventSourceResponse(_reprocess_with_cleanup())
 
 
 @router.post("/jobs")
@@ -1013,6 +1039,28 @@ async def process_ai_queue():
             json.dumps({"action": "run_overnight_vlm_batch"}),
         )
     return {"status": "ok", "processed": None}
+
+
+@router.post("/jobs/clear-failed")
+async def clear_failed_jobs(file_source: str = Form(...)):
+    """Delete failed jobs for a file_source so the UI poller stops
+    re-hydrating stale error entries.  Called before re-processing."""
+    deleted = await delete_jobs_by_file_source(file_source, status="failed")
+    return {"status": "ok", "deleted": deleted}
+
+
+@router.post("/jobs/clear-all-failed")
+async def clear_all_failed_jobs():
+    """Delete every failed job.  Cleans up stale watchdog-killed jobs that
+    accumulate in the jobs table and surface as permanent errors in the UI."""
+    pool = await db_module.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM jobs WHERE status = $1", "failed")
+    try:
+        deleted = int(result.split()[-1])
+    except (IndexError, ValueError):
+        deleted = 0
+    return {"status": "ok", "deleted": deleted}
 
 
 @router.get("/jobs/{job_id}")

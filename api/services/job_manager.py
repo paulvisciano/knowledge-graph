@@ -169,6 +169,33 @@ async def delete_job(job_id: str) -> bool:
     return result == "DELETE 1"
 
 
+async def delete_jobs_by_file_source(file_source: str, status: str | None = None) -> int:
+    """Delete jobs matching a file_source.
+
+    By default clears all jobs for the file; pass ``status='failed'`` to
+    clear only failed jobs (used before re-processing so the poller stops
+    re-hydrating stale error entries into the UI store).  Returns the
+    number of rows deleted.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if status:
+            result = await conn.execute(
+                "DELETE FROM jobs WHERE file_source = $1 AND status = $2",
+                file_source, status,
+            )
+        else:
+            result = await conn.execute(
+                "DELETE FROM jobs WHERE file_source = $1",
+                file_source,
+            )
+    # asyncpg returns "DELETE N" for row counts
+    try:
+        return int(result.split()[-1])
+    except (IndexError, ValueError):
+        return 0
+
+
 async def persist_uploaded_file(upload_file_path: str, original_filename: str) -> str:
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
     dest = INPUT_DIR / original_filename
