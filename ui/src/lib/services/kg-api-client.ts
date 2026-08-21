@@ -91,6 +91,16 @@ export class KgApiClient {
     return this.request(API.kg.processAIQueue, { method: 'POST' });
   }
 
+  async clearFailedJobs(fileSource: string): Promise<{ status: string; deleted: number }> {
+    const formData = new FormData();
+    formData.append('file_source', fileSource);
+    return this.request(API.kg.clearFailedJobs, { method: 'POST', body: formData });
+  }
+
+  async clearAllFailedJobs(): Promise<{ status: string; deleted: number }> {
+    return this.request(API.kg.clearAllFailedJobs, { method: 'POST' });
+  }
+
   streamJobEvents(
     jobId: string,
     after: number = 0

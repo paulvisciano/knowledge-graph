@@ -26,6 +26,8 @@ export const API = {
     jobStatus: (jobId: string) => `/images/jobs/${jobId}`,
     jobEvents: (jobId: string, after?: number) => `/images/jobs/${jobId}/events${after ? `?after=${after}` : ''}`,
     processAIQueue: '/images/jobs/process-ai-queue',
+    clearFailedJobs: '/images/jobs/clear-failed',
+    clearAllFailedJobs: '/images/jobs/clear-all-failed',
   },
   lightrag: {
     health: '/health',
