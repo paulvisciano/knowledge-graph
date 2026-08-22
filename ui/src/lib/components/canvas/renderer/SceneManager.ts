@@ -41,7 +41,6 @@ import {
 
 
 import { ChunkManager } from './ChunkManager';
-import type { NodePlane } from './NodePlane';
 import type { CanvasNode } from './types';
 
 /** Camera field of view in degrees. */
@@ -111,8 +110,6 @@ export class SceneManager {
   private _lastHoverTime = 0;
   private _hoveredNodeId: string | null = null;
   private _cursorMode: 'idle' | 'grabbing' | 'pointer' = 'idle';
-  private _activeNodeId: string | null = null;
-  private _activePlane: NodePlane | null = null;
 
   // Dynamic camera Z bounds derived from the layout's depth (time) range.
   // Newest photos sit at maxCellZ*CHUNK_SIZE; the camera starts just above
@@ -243,28 +240,6 @@ export class SceneManager {
       y: this._basePos.y,
       z: this._basePos.z,
     };
-  }
-
-  setActiveNode(nodeId: string | null): void {
-    const sameId = this._activeNodeId === nodeId;
-    const planeStillMounted = this._activePlane && this._activePlane._active;
-
-    if (sameId && planeStillMounted) return;
-
-    if (this._activePlane && (!sameId || !planeStillMounted)) {
-      this._activePlane.setActive(false);
-      this._activePlane = null;
-    }
-
-    this._activeNodeId = nodeId;
-
-    if (!nodeId) return;
-
-    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
-    if (!plane) return;
-
-    plane.setActive(true);
-    this._activePlane = plane;
   }
 
   /**
@@ -549,17 +524,6 @@ export class SceneManager {
 
     const velMag = this._velocity.length();
     this._chunkManager.update(this._basePos, velMag);
-
-    if (this._activeNodeId && (!this._activePlane || !this._activePlane._active)) {
-      const plane = this._chunkManager.findPlaneByNodeId(this._activeNodeId);
-      if (plane) {
-        if (this._activePlane && this._activePlane !== plane) {
-          this._activePlane.setActive(false);
-        }
-        plane.setActive(true);
-        this._activePlane = plane;
-      }
-    }
 
     const cx = Math.floor(this._basePos.x / CHUNK_SIZE);
     const cy = Math.floor(this._basePos.y / CHUNK_SIZE);
