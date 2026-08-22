@@ -68,6 +68,9 @@ export class SceneManager {
   private _scrollAccum = 0;
   private _scrollMomentum = 1;
   private _lastScrollTime = 0;
+  private _lastLoggedChunk = '';
+  private _lastLoggedVisIds = '';
+  private _lastRenderLogMs = 0;
   private readonly _basePos = new THREE.Vector3();
   private readonly _drift = new THREE.Vector2();
   private readonly _mouse = new THREE.Vector2();
@@ -216,6 +219,30 @@ export class SceneManager {
   }
 
   /**
+   * Returns the IDs of all nodes in currently-mounted chunks (visible on
+   * canvas). Intended for debugging / browser-harness polling.
+   */
+  getVisibleNodeIds(): string[] {
+    const cm = this._chunkManager as unknown as {
+      _mounted: Map<string, { planes: { node: { id: string } }[] }>;
+    };
+    const ids: string[] = [];
+    for (const chunk of cm._mounted.values()) {
+      for (const p of chunk.planes) ids.push(p.node.id);
+    }
+    return ids;
+  }
+
+  /** Current camera world position (for debugging). */
+  get cameraPosition(): { x: number; y: number; z: number } {
+    return {
+      x: this._basePos.x,
+      y: this._basePos.y,
+      z: this._basePos.z,
+    };
+  }
+
+  /**
    * Looks up the `CanvasNode` for `nodeId` among mounted chunks. Returns
    * `undefined` when the node's chunk is outside the render distance.
    */
@@ -280,6 +307,8 @@ export class SceneManager {
       this.centerOnLayout(nodes);
     }
     this._chunkManager.setLayout(nodes);
+    // eslint-disable-next-line no-console
+    console.log('[SceneManager] setNodes', { nodeCount: nodes.length, userMoved: this._userMoved, cameraZ: this._basePos.z });
   }
 
   setPinchSensitivity(s: number): void {
@@ -463,6 +492,8 @@ export class SceneManager {
     this._renderer.setSize(width, height);
     this._camera.aspect = width / height;
     this._camera.updateProjectionMatrix();
+    // eslint-disable-next-line no-console
+    console.log('[SceneManager] resize', { width, height });
   }
 
   /** RAF callback — applies input, updates chunks, renders. */
@@ -505,6 +536,21 @@ export class SceneManager {
     }
 
     this._renderer.render(this._scene, this._camera);
+
+    // DEBUG: log re-renders when visible node set changes or every ~2s
+    const frameChunkKey = `${cx},${cy},${cz}`;
+    const frameVisIds = this.getVisibleNodeIds().join(',');
+    if (
+      frameChunkKey !== this._lastLoggedChunk ||
+      frameVisIds !== this._lastLoggedVisIds ||
+      now - (this._lastRenderLogMs ?? 0) > 2000
+    ) {
+      this._lastLoggedChunk = frameChunkKey;
+      this._lastLoggedVisIds = frameVisIds;
+      this._lastRenderLogMs = now;
+      // eslint-disable-next-line no-console
+      console.log('[SceneManager] render', { chunk: frameChunkKey, visibleNodes: frameVisIds.split(',').filter(Boolean), mountedChunks: this._chunkManager.mountedChunkCount, cam: { x: this._basePos.x, y: this._basePos.y, z: this._basePos.z }, velMag });
+    }
 
     // DEBUG: expose scene graph for black-canvas diagnosis
     (this as unknown as { __debugLastFrame?: number }).__debugLastFrame = performance.now();

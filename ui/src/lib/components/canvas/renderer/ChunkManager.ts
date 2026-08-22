@@ -164,6 +164,8 @@ export class ChunkManager {
    */
   private remount(cx: number, cy: number, cz: number): void {
     const wanted = new Set<ChunkKey>();
+    const mountedIds: string[] = [];
+    const unmountedIds: string[] = [];
 
     for (const off of CHUNK_OFFSETS) {
       const tx = cx + off.dx;
@@ -175,20 +177,26 @@ export class ChunkManager {
 
       let chunk = this._mounted.get(key);
       if (!chunk) {
+        const bucket = this._layout.get(key) ?? [];
         chunk = new Chunk(tx, ty, tz, this._sharedGeometry);
-        chunk.setNodes(this._layout.get(key) ?? []);
+        chunk.setNodes(bucket);
         this._scene.add(chunk.group);
         this._mounted.set(key, chunk);
+        for (const n of bucket) mountedIds.push(n.id);
       }
     }
 
     for (const [key, chunk] of this._mounted) {
       if (!wanted.has(key)) {
+        for (const p of chunk.planes) unmountedIds.push(p.node.id);
         this._scene.remove(chunk.group);
         chunk.dispose();
         this._mounted.delete(key);
       }
     }
+
+    // eslint-disable-next-line no-console
+    console.log('[ChunkManager] remount', { cameraChunk: { cx, cy, cz }, mounted: mountedIds, unmounted: unmountedIds, totalMounted: this._mounted.size });
   }
 
   /** Disposes all mounted chunks (the shared geometry is owned by the caller). */
