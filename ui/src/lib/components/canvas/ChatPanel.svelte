@@ -1149,7 +1149,6 @@
     const conv = conversations.find((c) => c.id === id);
     if (conv) {
       if (conv.messages.length === 0) {
-        messages = [];
         const loaded = syncClient.loadConversation(id);
         // syncClient.loadConversation is now async in Svelte 5 — handle promise
         Promise.resolve(loaded).then((msgs: ChatMessage[]) => {
