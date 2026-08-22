@@ -103,6 +103,9 @@
     };
     sm.onChunkChange = (_cx, _cy, cz) => {
       updateDateLabel(cz);
+      if (graphStore.activeConversationId) {
+        sm.setActiveNode(graphStore.activeConversationId);
+      }
     };
     sm.onDoubleTap = (x, y) => {
       handleDoubleTap(x, y);
@@ -684,7 +687,9 @@
   let firstActiveSeen = false;
   $effect(() => {
     const activeId = graphStore.activeConversationId;
-    if (!mounted || !sceneManager || !activeId) return;
+    if (!mounted || !sceneManager) return;
+    sceneManager.setActiveNode(activeId || null);
+    if (!activeId) return;
     if (!firstActiveSeen) {
       firstActiveSeen = true;
       return;
@@ -699,6 +704,7 @@
       activeFlyTimer = null;
       if (sm.getCanvasNode(activeId)) {
         sm.flyToNode(activeId);
+        sm.setActiveNode(activeId);
         return;
       }
       if (attempts++ < 20) {

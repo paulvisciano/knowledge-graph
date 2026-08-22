@@ -41,6 +41,7 @@ import {
 
 
 import { ChunkManager } from './ChunkManager';
+import type { NodePlane } from './NodePlane';
 import type { CanvasNode } from './types';
 
 /** Camera field of view in degrees. */
@@ -110,6 +111,8 @@ export class SceneManager {
   private _lastHoverTime = 0;
   private _hoveredNodeId: string | null = null;
   private _cursorMode: 'idle' | 'grabbing' | 'pointer' = 'idle';
+  private _activeNodeId: string | null = null;
+  private _activePlane: NodePlane | null = null;
 
   // Dynamic camera Z bounds derived from the layout's depth (time) range.
   // Newest photos sit at maxCellZ*CHUNK_SIZE; the camera starts just above
@@ -240,6 +243,25 @@ export class SceneManager {
       y: this._basePos.y,
       z: this._basePos.z,
     };
+  }
+
+  setActiveNode(nodeId: string | null): void {
+    if (this._activeNodeId === nodeId) return;
+
+    if (this._activePlane) {
+      this._activePlane.setActive(false);
+      this._activePlane = null;
+    }
+
+    this._activeNodeId = nodeId;
+
+    if (!nodeId) return;
+
+    const plane = this._chunkManager.findPlaneByNodeId(nodeId);
+    if (!plane) return;
+
+    plane.setActive(true);
+    this._activePlane = plane;
   }
 
   /**

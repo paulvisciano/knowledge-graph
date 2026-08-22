@@ -41,6 +41,7 @@ export class NodePlane {
   private readonly _material: THREE.MeshBasicMaterial;
   private _currentOpacity = 1;
   private _disposed = false;
+  private _active = false;
   private _currentLod: 'thumb' | 'full' = 'thumb';
   private _fullUrl?: string;
   private _thumbUrl?: string;
@@ -119,6 +120,18 @@ export class NodePlane {
     }
   }
 
+  setActive(active: boolean): void {
+    this._active = active;
+    if (active) {
+      this._mesh.renderOrder = 999;
+      this._material.depthTest = false;
+      this._material.depthWrite = false;
+    } else {
+      this._mesh.renderOrder = 0;
+      this._material.depthTest = true;
+    }
+  }
+
   /**
    * Per-frame fade update. Computes the Chebyshev distance from the camera
    * chunk to this node's chunk, derives a target opacity (1 inside
@@ -170,10 +183,10 @@ export class NodePlane {
 
     if (this._currentOpacity < INVIS_THRESHOLD) {
       this._mesh.visible = false;
-      this._material.depthWrite = false;
+      if (!this._active) this._material.depthWrite = false;
     } else {
       this._mesh.visible = true;
-      this._material.depthWrite = absDepth <= DEPTH_FADE_START;
+      if (!this._active) this._material.depthWrite = absDepth <= DEPTH_FADE_START;
     }
     this._material.opacity = this._currentOpacity;
     this._material.needsUpdate = true;
