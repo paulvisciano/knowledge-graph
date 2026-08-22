@@ -1572,9 +1572,7 @@
           }
         }
         conversations = [...updated];
-        for (const conv of updated) {
-          graphStore.upsertNode(conv.id, ['Conversation'], { entity_type: 'Conversation', name: conv.title || conv.id });
-        }
+        graphStore.loadConversations();
       });
     });
   });
