@@ -246,9 +246,12 @@ export class SceneManager {
   }
 
   setActiveNode(nodeId: string | null): void {
-    if (this._activeNodeId === nodeId) return;
+    const sameId = this._activeNodeId === nodeId;
+    const planeStillMounted = this._activePlane && this._activePlane._active;
 
-    if (this._activePlane) {
+    if (sameId && planeStillMounted) return;
+
+    if (this._activePlane && (!sameId || !planeStillMounted)) {
       this._activePlane.setActive(false);
       this._activePlane = null;
     }
@@ -546,6 +549,17 @@ export class SceneManager {
 
     const velMag = this._velocity.length();
     this._chunkManager.update(this._basePos, velMag);
+
+    if (this._activeNodeId && (!this._activePlane || !this._activePlane._active)) {
+      const plane = this._chunkManager.findPlaneByNodeId(this._activeNodeId);
+      if (plane) {
+        if (this._activePlane && this._activePlane !== plane) {
+          this._activePlane.setActive(false);
+        }
+        plane.setActive(true);
+        this._activePlane = plane;
+      }
+    }
 
     const cx = Math.floor(this._basePos.x / CHUNK_SIZE);
     const cy = Math.floor(this._basePos.y / CHUNK_SIZE);
