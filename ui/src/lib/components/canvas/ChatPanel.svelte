@@ -26,6 +26,7 @@
   import { imageProcessingStore, backendStageToUi } from '$lib/stores/image-processing.svelte';
   import { isMobile } from '$lib/composables/use-breakpoint';
   import { createSheetDrag } from '$lib/composables/use-sheet-drag';
+  import { parseKGResult } from '$lib/utils/parse-kg-result';
 
   interface Conversation {
     id: string;
@@ -388,7 +389,17 @@
         const tcIdx = existing.findIndex((tc) => tc.id === data?.tool_call_id);
         if (tcIdx === -1) return m;
         const updated = [...existing];
-        updated[tcIdx] = { ...updated[tcIdx], result: data?.result, isError: data?.is_error };
+        const tc = updated[tcIdx];
+        const resultText = data?.result ?? '';
+        const parsed = (tc.toolName === 'query_knowledge_graph' || tc.toolName === 'save_to_knowledge_graph') && resultText
+          ? parseKGResult(resultText)
+          : undefined;
+        updated[tcIdx] = {
+          ...tc,
+          result: resultText,
+          isError: data?.is_error,
+          parsedKG: parsed ? { entities: parsed.entities, relationships: parsed.relationships, imagePaths: parsed.imagePaths } : tc.parsedKG,
+        };
         return { ...m, mcpToolCalls: updated };
       };
 
@@ -1839,19 +1850,44 @@
                         {#if toolCall.result}
                           {@const resultText = typeof toolCall.result === 'string' ? toolCall.result : JSON.stringify(toolCall.result, null, 2)}
                           <div class="rounded-lg border border-cyber-green/20 bg-cyber-green/5 p-2 text-cyber-green/80 whitespace-pre-wrap font-mono max-h-60 overflow-y-auto">
-                            {#if isSave && parsed}
-                              {#each parsed.entities as entity}
-                                <div class="mb-0.5">
-                                  <span class="text-cyber-cyan/70">{entity.entity_type ?? 'Entity'}</span>:
-                                  <span class="text-cyber-text">{entity.name ?? entity.id ?? 'unknown'}</span>
-                                </div>
-                              {/each}
-                              {#each parsed.relationships as rel}
-                                <div class="mb-0.5">
-                                  <span class="text-cyber-purple/70">{rel.relation_type ?? 'rel'}</span>:
-                                  <span class="text-cyber-text">{rel.source} → {rel.target}</span>
-                                </div>
-                              {/each}
+                            {#if parsed && (entityCount || relCount)}
+                              {#if isSave}
+                                {#each parsed.entities as entity}
+                                  <div class="mb-0.5">
+                                    <span class="text-cyber-cyan/70">{entity.entity_type ?? 'Entity'}</span>:
+                                    <span class="text-cyber-text">{entity.name ?? entity.id ?? 'unknown'}</span>
+                                  </div>
+                                {/each}
+                                {#each parsed.relationships as rel}
+                                  <div class="mb-0.5">
+                                    <span class="text-cyber-purple/70">{rel.relation_type ?? 'rel'}</span>:
+                                    <span class="text-cyber-text">{rel.source} → {rel.target}</span>
+                                  </div>
+                                {/each}
+                              {:else}
+                                {#each parsed.entities as entity}
+                                  <div class="mb-0.5">
+                                    <span class="text-cyber-cyan/70">{entity.type ?? 'Entity'}</span>:
+                                    <span class="text-cyber-text">{entity.entity}</span>
+                                    {#if entity.description}
+                                      <span class="text-cyber-text-dim/60"> — {entity.description.length > 120 ? entity.description.slice(0, 120) + '…' : entity.description}</span>
+                                    {/if}
+                                  </div>
+                                {/each}
+                                {#if relCount > 0}
+                                  <div class="mt-1 pt-1 border-t border-cyber-green/10">
+                                    {#each parsed.relationships as rel}
+                                      <div class="mb-0.5">
+                                        <span class="text-cyber-text">{rel.entity1}</span>
+                                        <span class="text-cyber-purple/70"> → {rel.entity2}</span>
+                                        {#if rel.description}
+                                          <span class="text-cyber-text-dim/60"> ({rel.description.length > 80 ? rel.description.slice(0, 80) + '…' : rel.description})</span>
+                                        {/if}
+                                      </div>
+                                    {/each}
+                                  </div>
+                                {/if}
+                              {/if}
                             {:else}
                               {resultText}
 {/if}

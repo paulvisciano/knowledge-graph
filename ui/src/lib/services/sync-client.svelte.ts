@@ -1,5 +1,6 @@
 import { SYNC_URL, API } from '$lib/constants';
 import type { ChatMessage, MCPToolCall, MessageTimings } from '$lib/constants';
+import { parseKGResult } from '$lib/utils/parse-kg-result';
 
 const SYNC_PREFIX = '/api/sync';
 
@@ -325,8 +326,9 @@ class SyncClient {
         const raw = JSON.parse(data.toolCalls);
         const arr = Array.isArray(raw) ? raw : [raw];
         mcpToolCalls = arr.map((tc: any) => {
+          let toolCall: MCPToolCall;
           if (tc.function && typeof tc.function === 'object') {
-            return {
+            toolCall = {
               id: tc.id,
               toolName: tc.function.name,
               arguments: typeof tc.function.arguments === 'string'
@@ -335,9 +337,16 @@ class SyncClient {
               timestamp: tc.timestamp ?? Date.now(),
               result: tc.result,
               isError: tc.isError,
-            } as MCPToolCall;
+            };
+          } else {
+            toolCall = tc as MCPToolCall;
           }
-          return tc as MCPToolCall;
+          const resultText = typeof toolCall.result === 'string' ? toolCall.result : '';
+          if ((toolCall.toolName === 'query_knowledge_graph' || toolCall.toolName === 'save_to_knowledge_graph') && resultText) {
+            const parsed = parseKGResult(resultText);
+            toolCall.parsedKG = { entities: parsed.entities, relationships: parsed.relationships, imagePaths: parsed.imagePaths };
+          }
+          return toolCall;
         });
       } catch {
         mcpToolCalls = undefined;
