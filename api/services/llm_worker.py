@@ -173,6 +173,14 @@ DEFAULT_SYSTEM_PROMPT = os.environ.get(
     "  - Bad: query=\"what have I been doing recently activities recent memories\" — stripped the date phrase, tool can't filter\n"
     "  - Good: query=\"what did I do last week\" — preserves \"last week\"\n"
     "  - Bad: query=\"recent activities\" — no date range detected\n"
+    "- Keep query_knowledge_graph queries SHORT and natural. Do NOT stuff "
+    "them with keywords. The query should read like a normal question.\n"
+    "  - Good: query=\"what did I do in April?\"\n"
+    "  - Bad: query=\"what have I been up to in April 2026 this month activities "
+    "photos memories last four weeks recent events personal timeline April "
+    "experiences memories moments saved notes history graph data\"\n"
+    "  The bloated query causes the date scanner to match the wrong phrase "
+    "and return irrelevant data, and the huge result makes you slow.\n"
     "- NEVER call save_to_knowledge_graph during a retrieval query. If the user "
     "asked \"Tell me about June 27th\", they want to hear about it — not save "
     "it again. save_to_knowledge_graph is ONLY for Logging mode, when the user "
@@ -501,14 +509,18 @@ _DATE_RANGE_PATTERNS = [
 
 
 def _inject_date_range_into_query(tool_args: dict[str, Any], user_msg: str) -> None:
-    """If the user's message contains a date-range phrase but the LLM's
-    query argument doesn't, append the phrase to the query.
+    """If the user's message contains a date-range phrase, ensure the LLM's
+    query argument contains it.
 
     The LLM frequently rewrites "what have I been up to this month?" as
     "what have I been doing recently activities recent memories" — stripping
     the date phrase that the MCP server's _scan_text_for_date_range needs.
-    This is a deterministic safety net that doesn't rely on the LLM
-    following system-prompt instructions.
+
+    If the query already has a date-range phrase, leave it alone. If not,
+    and the user's message has one, replace the query with the user's
+    original message rather than appending — the LLM's keyword-stuffed
+    queries cause the MCP date scanner to match the wrong phrase (e.g.
+    "this month" inside the query overrides "April" from the user).
     """
     if not user_msg or "query" not in tool_args:
         return
@@ -518,15 +530,11 @@ def _inject_date_range_into_query(tool_args: dict[str, Any], user_msg: str) -> N
     user_has_range = any(p.search(user_msg) for p in _DATE_RANGE_PATTERNS)
     query_has_range = any(p.search(query) for p in _DATE_RANGE_PATTERNS)
     if user_has_range and not query_has_range:
-        for p in _DATE_RANGE_PATTERNS:
-            m = p.search(user_msg)
-            if m:
-                tool_args["query"] = f"{query} {m.group(0)}"
-                logger.info(
-                    "Injected date range '%s' into query: %s",
-                    m.group(0), tool_args["query"],
-                )
-                return
+        tool_args["query"] = user_msg.strip()
+        logger.info(
+            "Replaced query with user message to preserve date range: %s",
+            tool_args["query"],
+        )
 
 
 def _parse_sse_lines(buffer: str) -> tuple[list[dict[str, Any]], str]:
@@ -1009,7 +1017,7 @@ async def process_llm_job(job: dict[str, Any]) -> None:
                 # Cap for the event payload — llm_queue._cap_for_notify also
                 # truncates, but keeping this small avoids bloating the DB row
                 # and the NOTIFY payload for the UI's tool-result display.
-                display_result = tool_result[:2000] if len(tool_result) > 2000 else tool_result
+                display_result = tool_result[:24000] if len(tool_result) > 24000 else tool_result
                 await append_llm_job_event(
                     job_id, "tool_call_result",
                     {
