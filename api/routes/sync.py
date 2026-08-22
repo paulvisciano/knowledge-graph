@@ -165,7 +165,6 @@ async def save_conversation(payload: ExportedConversation):
                 conv.forkedFromConversationId, conv.pinned,
             )
 
-            await conn.execute("DELETE FROM messages WHERE conv_id = $1", conv.id)
             for msg in payload.messages:
                 # Debug: log if a user message has no audio in extra (potential data loss)
                 if msg.role == "user" and msg.extra is None and len(msg.content) > 0:
