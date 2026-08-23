@@ -530,6 +530,7 @@
 
   let activeConversationId = $state('');
   let messages = $state<ChatMessage[]>([]);
+  let isLoadingMessages = $state(false);
   let isStreaming = $state(false);
   let isPending = $state(false);
   let chatInput = $state('');
@@ -1146,11 +1147,17 @@
   function switchConversation(id: string) {
     saveMessagesToConversation();
     activeConversationId = id;
+    isLoadingMessages = true;
+    const startedAt = Date.now();
+    const finishLoading = () => {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, 1000 - elapsed);
+      setTimeout(() => { isLoadingMessages = false; }, remaining);
+    };
     const conv = conversations.find((c) => c.id === id);
     if (conv) {
       if (conv.messages.length === 0) {
         const loaded = syncClient.loadConversation(id);
-        // syncClient.loadConversation is now async in Svelte 5 — handle promise
         Promise.resolve(loaded).then((msgs: ChatMessage[]) => {
           if (msgs.length > 0) {
             conv.messages = msgs;
@@ -1158,19 +1165,23 @@
           } else {
             messages = [...conv.messages];
           }
+          finishLoading();
+        }).catch(() => {
+          finishLoading();
         });
       } else {
         messages = [...conv.messages];
         if (!syncClient.getCachedMessages(id)) {
           syncClient.loadConversation(id);
         }
+        finishLoading();
       }
       if (!syncClient.getCachedMessages(id) && conv.messages.length > 0) {
         syncClient.seedCachedMessages(id, conv.messages);
       }
-      graphStore.loadConversations();
     } else {
       messages = [];
+      finishLoading();
     }
 
     if (unreadConversations.has(id)) {
@@ -1635,6 +1646,16 @@
   />
 
   {#if chatExpanded && activeConversationId}
+    {#if isLoadingMessages}
+      <div class="chat-panel-loading-overlay" data-testid="chat-loading-state">
+        <div class="chat-panel-loading-content">
+          <div class="chat-loading-spinner"></div>
+          <div class="chat-panel-loading-text">
+            Loading conversation{#if activeConversationId}<span class="chat-panel-loading-title">{conversations.find((c) => c.id === activeConversationId)?.title ?? ''}</span>{/if}
+          </div>
+        </div>
+      </div>
+    {:else}
     <div class="chat-sheet-handle" data-testid="chat-sheet-handle"><div class="chat-sheet-handle-bar"></div></div>
     <div class="chat-inline-header" data-testid="chat-inline-header">
       <button
@@ -2048,6 +2069,7 @@
         {/if}
       </button>
     </div>
+    {/if}
   {/if}
 
   </div>
@@ -2729,6 +2751,64 @@
   .chat-empty-state-hint {
     font-size: 12px;
     color: var(--faint);
+  }
+
+  .chat-loading-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  .chat-panel-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 10, 20, 0.85);
+    backdrop-filter: blur(4px);
+  }
+
+  .chat-panel-loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .chat-panel-loading-text {
+    font-size: 13px;
+    color: rgba(0, 212, 255, 0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .chat-panel-loading-title {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    max-width: 300px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(0, 212, 255, 0.2);
+    border-top-color: rgba(0, 212, 255, 0.7);
+    border-radius: 50%;
+    animation: chat-spin 0.6s linear infinite;
+  }
+
+  @keyframes chat-spin {
+    to { transform: rotate(360deg); }
   }
 
   .chat-conversation-divider {

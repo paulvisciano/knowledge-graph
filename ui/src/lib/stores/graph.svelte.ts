@@ -111,11 +111,24 @@ class GraphStore {
     this.selectedNode = node;
   }
 
-  /** Set the active conversation and re-merge nodes so `isActive` flips. */
+  /** Set the active conversation, replacing only the old and new node objects. */
   setActiveConversation(id: string) {
     if (this.activeConversationId === id) return;
+    const prevId = this.activeConversationId;
     this.activeConversationId = id;
-    this.loadConversations();
+    this.nodes = this.nodes.map((n) => {
+      if (n.properties?.entity_type !== 'Conversation') return n;
+      if (n.id === prevId || n.id === id) {
+        return {
+          ...n,
+          properties: {
+            ...n.properties,
+            isActive: n.id === id,
+          },
+        };
+      }
+      return n;
+    });
   }
 
   setStreamingConversations(ids: Set<string>) {

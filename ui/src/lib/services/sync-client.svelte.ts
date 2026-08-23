@@ -92,11 +92,17 @@ class SyncClient {
         .map((s) => this.fromSyncConv(s))
         .sort((a, b) => b.createdAt - a.createdAt);
       this.lastSyncTimestamp = Date.now();
+      this.preloadMessages();
     } catch (e: any) {
       this.error = e.message ?? 'Failed to init sync';
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  private async preloadMessages(): Promise<void> {
+    const uncached = this.conversations.filter((c) => !this.loadedConversations.has(c.id));
+    await Promise.all(uncached.map((c) => this.loadConversation(c.id)));
   }
 
   async loadConversation(id: string): Promise<ChatMessage[]> {
@@ -146,8 +152,14 @@ class SyncClient {
         updatedAt: conv.updatedAt,
       };
       if (idx >= 0) {
-        summary.messages = this.conversations[idx].messages;
-        this.conversations[idx] = summary;
+        const existing = this.conversations[idx];
+        summary.messages = existing.messages;
+        const metaChanged = existing.title !== summary.title || existing.createdAt !== summary.createdAt;
+        if (metaChanged) {
+          this.conversations[idx] = summary;
+        } else {
+          existing.updatedAt = summary.updatedAt;
+        }
       } else {
         this.conversations.unshift(summary);
         this.conversations.sort((a, b) => b.createdAt - a.createdAt);
