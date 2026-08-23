@@ -425,6 +425,7 @@ export class SceneManager {
     this._flyTo = new THREE.Vector3(worldX, worldY, targetZ);
     this._flyElapsed = 0;
     this._flyDuration = 1600;
+    this._userMoved = true;
     this._velocity.set(0, 0, 0);
     this._targetVel.set(0, 0, 0);
     this._scrollAccum = 0;

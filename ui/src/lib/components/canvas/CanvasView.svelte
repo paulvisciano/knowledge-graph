@@ -80,6 +80,8 @@
 
   const THROTTLE_MS = 200;
 
+  let lastUserNavAt = 0;
+
   function wireSceneManager(sm: SceneManager): void {
     sm.setPinchSensitivity(configStore.pinchZoomSensitivity);
     sm.onSelectNode = (nodeId) => {
@@ -89,6 +91,7 @@
         const isConversation = cn?.kind === 'conversation'
           || kg?.properties?.entity_type === 'Conversation';
         if (isConversation) {
+          lastUserNavAt = Date.now();
           onselectconversation(nodeId);
           return;
         }
@@ -556,6 +559,7 @@
 
   function applyNavigate(target: string, startDate: string | null, endDate: string | null): void {
     if (!target || !sceneManager || !timeIndex) return;
+    if (Date.now() - lastUserNavAt < 5000) return;
     const idx = findBucketForDateRange(startDate, endDate, target);
     if (idx >= 0) flyToBucket(idx, false);
   }
